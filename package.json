@@ -65,8 +65,8 @@
         },
         "opencodeAutocomplete.model": {
           "type": "string",
-          "default": "opencode/minimax-m3",
-          "description": "Model id. Run 'OpenCode: List / Choose Model' to discover valid ids served by the endpoint."
+          "default": "minimax-m3",
+          "description": "Model id (bare, as served by /models — the endpoint rejects a provider-prefixed id). Run 'OpenCode: List / Choose Model' to discover valid ids."
         },
         "opencodeAutocomplete.debounceMs": {
           "type": "number",
@@ -75,8 +75,8 @@
         },
         "opencodeAutocomplete.maxTokens": {
           "type": "number",
-          "default": 64,
-          "description": "Max tokens per suggestion. Lower = faster, shorter completions."
+          "default": 0,
+          "description": "Max tokens per suggestion. 0 = no limit (lets multi-line and reasoning-model completions finish). A positive cap bounds latency but can truncate the answer mid-output."
         },
         "opencodeAutocomplete.temperature": {
           "type": "number",

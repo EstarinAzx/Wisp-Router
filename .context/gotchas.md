@@ -34,6 +34,15 @@ The extension references the webview bundle by fixed path (`main.js` / `main.css
 ### Key is write-only across the webview boundary
 Never post the API key value back to the webview — only a `keyIsSet` boolean. Invalidate the cached OpenAI client whenever the key is set or cleared.
 
+### Model ids are BARE on `zen/go/v1` — the `opencode/` prefix is rejected
+The chat endpoint returns `401 Model opencode/minimax-m3 is not supported` for a provider-prefixed id. Use the **bare** id exactly as `GET /models` serves it (`minimax-m3`, `glm-5`, `kimi-k2.6`, …). `DEFAULT_MODEL`, the setting default, and `fetchModelIds` must all stay bare. The `opencode/<id>` form (from the reference `llm-provider` and the public docs) does **not** work against this gateway — it had inline completions silently erroring the whole time. See [[decisions]].
+
+### Served models are reasoning models — strip `<think>` and DON'T cap tokens
+Most `zen/go` ids (minimax-m3, mimo, qwen3*, glm5*) emit chain-of-thought **inline** in the completion as `<think>…</think>`, then the real answer. Two consequences: (1) `stripThink` in `src/extension.ts` must drop the block (and treat an unterminated `<think>` as "no answer yet" → insert nothing) or the ghost text is the model's thinking; (2) a low `max_tokens` cap starves the answer — the model spends the budget thinking and never reaches code. `maxTokens` default is therefore `0` (uncapped); `max_tokens` is omitted from the request unless set `>0`. For snappy completions use a non-reasoning id (`deepseek-v4-flash`, `kimi-k2.6`). See [[decisions]].
+
+### Output-channel logs persist on disk — read them to debug a user's error
+`OutputChannel` content is written to `%APPDATA%\Code\logs\<session>\window<n>\exthost\output_logging_<ts>\<n>-OpenCode Autocomplete.log`. When the user can't surface the Output panel, glob the newest matching file and grep `[error]` instead of walking them through the UI. This is how the `401 … not supported` cause was found.
+
 ### Packaging ships node_modules — bundling is optional (size only)
 **Empirically verified:** `vsce package` includes production `dependencies`, so `node_modules/openai` is inside the `.vsix` and the extension runs installed without esbuild/webpack. (The earlier claim that it "won't ship without bundling" was wrong.) Bundling remains worth doing later to shrink the package — the unbundled `.vsix` is ~1402 files / 2.33 MB and vsce warns about it — but it is not a correctness blocker.
 

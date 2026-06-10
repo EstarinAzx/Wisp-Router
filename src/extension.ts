@@ -31,7 +31,9 @@ import { NO_KEY_MESSAGE, OpenCodePanelProvider, PanelState } from './sidePanelPr
 const CONFIG_NS = 'opencodeAutocomplete';
 const SECRET_KEY = 'opencodeAutocomplete.apiKey'; // keychain entry name, not a literal key
 const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1';
-const DEFAULT_MODEL = 'opencode/minimax-m3';
+// Bare id, not "opencode/minimax-m3": the /go chat endpoint rejects the provider-prefixed
+// form ("401 Model … is not supported") and wants the id exactly as /models serves it.
+const DEFAULT_MODEL = 'minimax-m3';
 
 // Zen/go has no fill-in-middle route, so we hand a chat model the code on both sides of the caret
 // and ask for only the insertion — this instruction is what makes a chat model behave like a completer.
@@ -98,6 +100,14 @@ const buildContext = (doc: vscode.TextDocument, pos: vscode.Position): { prefix:
 
 const buildUserPrompt = (languageId: string, prefix: string, suffix: string): string =>
   `Language: ${languageId}\n\n${prefix}<CURSOR>${suffix}`;
+
+// Reasoning models (e.g. minimax-m3) emit their chain-of-thought inline as a <think>…</think>
+// block before the real completion — strip it so the ghost text is the answer, not the thinking.
+// An unterminated <think> means the token budget ran out mid-thought (no answer yet) → insert nothing.
+const stripThink = (text: string): string => {
+  if (/<think>/i.test(text) && !/<\/think>/i.test(text)) return '';
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+};
 
 // Strip a wrapping ``` fence if the model added one despite instructions.
 const stripFences = (text: string): string => {
@@ -177,6 +187,10 @@ const provider: vscode.InlineCompletionItemProvider = {
     enterInFlight();
     const started = Date.now();
     try {
+      // 0 = uncapped. A hard token cap is the main source of unreliable output: it truncates
+      // multi-line completions mid-line and starves reasoning models, which spend the whole
+      // budget inside <think> and never reach the answer. Send max_tokens only when set >0.
+      const maxTokens = cfg().get<number>('maxTokens') ?? 0;
       const res = await client.chat.completions.create(
         {
           model,
@@ -184,13 +198,13 @@ const provider: vscode.InlineCompletionItemProvider = {
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: buildUserPrompt(document.languageId, prefix, suffix) },
           ],
-          max_tokens: cfg().get<number>('maxTokens') ?? 64,
+          ...(maxTokens > 0 ? { max_tokens: maxTokens } : {}),
           temperature: cfg().get<number>('temperature') ?? 0.1,
         },
         { signal: controller.signal },
       );
 
-      const text = stripPrefixOverlap(prefix, stripFences(res.choices[0]?.message?.content ?? ''));
+      const text = stripPrefixOverlap(prefix, stripFences(stripThink(res.choices[0]?.message?.content ?? '')));
       lastError = false;
       output.appendLine(`${model} ${Date.now() - started}ms ${text.length}c`); // latency log for model tuning
 
@@ -230,7 +244,9 @@ const clearApiKey = async (): Promise<void> => {
   cachedClient = undefined;
 };
 
-// Probe GET <baseUrl>/models for the ids the endpoint actually serves.
+// Probe GET <baseUrl>/models for the ids the endpoint actually serves. Return them exactly
+// as served (bare, e.g. "minimax-m3") — the /go chat endpoint rejects a provider-prefixed id,
+// so the selectable ids must match the served form to be usable.
 const fetchModelIds = async (): Promise<string[]> => {
   const client = await getClient();
   if (!client) throw new Error(NO_KEY_MESSAGE);

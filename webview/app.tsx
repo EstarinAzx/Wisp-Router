@@ -53,8 +53,17 @@ export const App = () => {
         if (prev && (prev.baseUrl !== msg.state.baseUrl || (prev.keyIsSet && !msg.state.keyIsSet))) {
           setModels([]);
         }
+        // First state, a newly-set key, or a changed endpoint → pull the live list once so the
+        // dropdown fills on its own. Without this the user only ever sees the configured model
+        // until they discover the manual ↻. Gated on origin change so it can't loop on an
+        // empty result or re-fire on unrelated config pushes (model/enabled changes).
+        const newOrigin = !prev || prev.baseUrl !== msg.state.baseUrl || prev.keyIsSet !== msg.state.keyIsSet;
         modelsOrigin.current = { baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet };
         setState(msg.state);
+        if (newOrigin && msg.state.keyIsSet) {
+          setModelsError('');
+          vscode.postMessage({ type: 'refreshModels' });
+        }
       }
       if (msg.type === 'models') { setModels(msg.ids); setModelsError(''); }
       if (msg.type === 'modelsError') setModelsError(msg.message);

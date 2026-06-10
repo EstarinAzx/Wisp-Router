@@ -21,12 +21,12 @@ The project's surface is a VS Code extension: an inline-completion provider, com
 | `opencodeAutocomplete.toggle` | OpenCode: Toggle Autocomplete | Flip `enabled`; also the status-bar click action. |
 
 ## Settings (`opencodeAutocomplete.*`)
-`enabled` (bool), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — not workspace-overridable, blocks key-redirect), `model` (str, default `opencode/minimax-m3`), `debounceMs` (300), `maxTokens` (64), `temperature` (0.1), `maxPrefixChars` (2000), `maxSuffixChars` (1000). No `apiKey` setting — key is SecretStorage/env only. Panel and commands write `model`/`enabled` to the scope that already defines the value (`targetFor()`), not blindly Global.
+`enabled` (bool), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — not workspace-overridable, blocks key-redirect), `model` (str, default **bare** `minimax-m3` — the prefixed form is rejected, see [[gotchas]]), `debounceMs` (300), `maxTokens` (64), `temperature` (0.1), `maxPrefixChars` (2000), `maxSuffixChars` (1000). No `apiKey` setting — key is SecretStorage/env only. Panel and commands write `model`/`enabled` to the scope that already defines the value (`targetFor()`), not blindly Global.
 
 ## External API consumed — OpenCode Zen (`go`)
 - Base URL: `https://opencode.ai/zen/go/v1`. OpenAI-compatible.
-- `POST /chat/completions` — standard OpenAI body; `model` is the bare/​prefixed id. No fill-in-middle route exists.
-- `GET /models` — `{ data: [{ id }] }` for discovery.
+- `POST /chat/completions` — standard OpenAI body; `model` must be the **bare** id (`minimax-m3`) — the `opencode/`-prefixed form returns `401 … not supported`. No fill-in-middle route exists.
+- `GET /models` — `{ data: [{ id }] }` for discovery; **public** (no auth) and returns bare ids. The panel auto-fetches it once a key is set. As of 2026-06-10 it serves 18 ids (minimax/kimi/glm/deepseek/qwen/mimo families + `hy3-preview`).
 - Auth: `Authorization: Bearer <key>` (handled by the OpenAI SDK). Nothing else required — no `anthropic-version`, no `x-api-key`, no routing headers.
 - Reference implementations studied: the user's `llm-provider` (OpenAI SDK → this exact base URL) and the `codebuff` repo's server handlers (raw fetch, same wire contract).
 
