@@ -1,0 +1,93 @@
+{
+  "name": "opencode-autocomplete",
+  "displayName": "OpenCode Zen Autocomplete",
+  "description": "AI inline completions routed through the OpenCode Zen (go) OpenAI-compatible endpoint.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "opencodeAutocomplete.setApiKey",
+        "title": "OpenCode: Set API Key"
+      },
+      {
+        "command": "opencodeAutocomplete.listModels",
+        "title": "OpenCode: List / Choose Model"
+      },
+      {
+        "command": "opencodeAutocomplete.toggle",
+        "title": "OpenCode: Toggle Autocomplete"
+      }
+    ],
+    "configuration": {
+      "title": "OpenCode Zen Autocomplete",
+      "properties": {
+        "opencodeAutocomplete.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master on/off switch for inline suggestions."
+        },
+        "opencodeAutocomplete.baseUrl": {
+          "type": "string",
+          "default": "https://opencode.ai/zen/go/v1",
+          "description": "OpenAI-compatible base URL for the OpenCode Zen provider."
+        },
+        "opencodeAutocomplete.model": {
+          "type": "string",
+          "default": "opencode/minimax-m3",
+          "description": "Model id. Run 'OpenCode: List / Choose Model' to discover valid ids served by the endpoint."
+        },
+        "opencodeAutocomplete.debounceMs": {
+          "type": "number",
+          "default": 300,
+          "description": "Quiet window (ms) after the last keystroke before calling the API."
+        },
+        "opencodeAutocomplete.maxTokens": {
+          "type": "number",
+          "default": 64,
+          "description": "Max tokens per suggestion. Lower = faster, shorter completions."
+        },
+        "opencodeAutocomplete.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "description": "Sampling temperature. Low keeps completions deterministic."
+        },
+        "opencodeAutocomplete.maxPrefixChars": {
+          "type": "number",
+          "default": 2000,
+          "description": "Characters of code before the caret sent as context."
+        },
+        "opencodeAutocomplete.maxSuffixChars": {
+          "type": "number",
+          "default": 1000,
+          "description": "Characters of code after the caret sent as context."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "openai": "^4.80.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
