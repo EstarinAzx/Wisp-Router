@@ -10,10 +10,10 @@
  *   - PanelState: { keyIsSet, model, enabled, baseUrl } — everything the panel may know.
  *     The API key value itself never crosses the webview boundary, only the keyIsSet boolean.
  *   - PanelHost: the shared action helpers injected from extension.ts (store/clear key, fetch
- *     model ids, set model/enabled, read state) — injection avoids a circular import.
+ *     model ids, set model/enabled, read state + Activity) — injection avoids a circular import.
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
  *     | setEnabled{value} | refreshModels.
- *   - Ext → webview messages: state{state} | models{ids} | modelsError{message}.
+ *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
  */
 
 import * as vscode from 'vscode';
@@ -34,6 +34,7 @@ export const NO_KEY_MESSAGE = 'No API key set.';
 
 export type PanelHost = {
   getState: () => Promise<PanelState>;
+  getActivity: () => boolean; // true = a completion request is in flight (Thinking)
   storeApiKey: (value: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   fetchModelIds: () => Promise<string[]>;
@@ -86,13 +87,21 @@ export class OpenCodePanelProvider implements vscode.WebviewViewProvider {
     void this.view.webview.postMessage({ type: 'state', state: await this.host.getState() });
   };
 
+  // Push the live Thinking/Idle Activity to the UI. Kept separate from postState so this
+  // high-frequency per-request ping never triggers the async getState / model-refetch path.
+  postActivity = (thinking: boolean): void => {
+    void this.view?.webview.postMessage({ type: 'activity', thinking });
+  };
+
   // ----------------------------- Message routing ----------------------------- //
 
   private onMessage = async (msg: { type?: string; value?: unknown }): Promise<void> => {
     try {
       switch (msg?.type) {
         case 'ready':
+          // Sync both surfaces on (re)open: the webview restarts from scratch each time.
           await this.postState();
+          this.postActivity(this.host.getActivity());
           return;
         case 'setApiKey':
           if (typeof msg.value === 'string' && msg.value.trim()) await this.host.storeApiKey(msg.value);

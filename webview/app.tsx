@@ -8,7 +8,8 @@
  * Data shapes:
  *   - State: { keyIsSet, model, enabled, baseUrl } — pushed by the extension; the key value
  *     itself never arrives here, only the keyIsSet boolean.
- *   - InMsg: state{state} | models{ids} | modelsError{message} — everything the extension sends.
+ *   - InMsg: state{state} | models{ids} | modelsError{message} | activity{thinking} — everything
+ *     the extension sends. activity carries the live Thinking/Idle state, separate from state.
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | setEnabled{value}
  *     | refreshModels.
  */
@@ -28,7 +29,8 @@ type State = {
 type InMsg =
   | { type: 'state'; state: State }
   | { type: 'models'; ids: string[] }
-  | { type: 'modelsError'; message: string };
+  | { type: 'modelsError'; message: string }
+  | { type: 'activity'; thinking: boolean };
 
 const vscode = acquireVsCodeApi();
 
@@ -36,6 +38,8 @@ const vscode = acquireVsCodeApi();
 
 export const App = () => {
   const [state, setState] = useState<State | undefined>(undefined);
+  // Activity arrives on its own lightweight 'activity' message, kept apart from `state`.
+  const [thinking, setThinking] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [modelsError, setModelsError] = useState('');
   const [keyDraft, setKeyDraft] = useState('');
@@ -67,6 +71,7 @@ export const App = () => {
       }
       if (msg.type === 'models') { setModels(msg.ids); setModelsError(''); }
       if (msg.type === 'modelsError') setModelsError(msg.message);
+      if (msg.type === 'activity') setThinking(msg.thinking);
     };
     window.addEventListener('message', onMessage);
     // 'ready' makes the extension push the first state — the webview restarts from scratch
@@ -104,6 +109,19 @@ export const App = () => {
 
   return (
     <main class="flex flex-col gap-4 p-3">
+
+      {/* ------------------------------ Activity ------------------------------ */}
+      {/* Muted (not hidden) when disabled — Idle dressed for "off", not a third state. */}
+      <section class={`flex items-center gap-2 ${state.enabled ? '' : 'opacity-50'}`}>
+        <span
+          class={`inline-block h-2 w-2 rounded-full ${
+            thinking
+              ? 'animate-pulse bg-[var(--vscode-progressBar-background)]'
+              : 'bg-[var(--vscode-charts-green,var(--vscode-descriptionForeground))]'
+          }`}
+        />
+        <span class="text-[var(--vscode-descriptionForeground)]">{thinking ? 'Thinking…' : 'Idle'}</span>
+      </section>
 
       {/* ------------------------------ API key ------------------------------ */}
       <section class="flex flex-col gap-1.5">

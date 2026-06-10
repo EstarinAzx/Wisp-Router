@@ -2,7 +2,7 @@
   "name": "opencode-autocomplete",
   "displayName": "OpenCode Zen Autocomplete",
   "description": "AI inline completions routed through the OpenCode Zen (go) OpenAI-compatible endpoint.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "local",
   "private": true,
   "engines": {

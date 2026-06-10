@@ -8,56 +8,55 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-06-10 by Opus 4.8 (background)_
-_At commit: 6f030be + this session's commit (comment-line guard + vsix 0.0.2)_
+_At commit: uncommitted (repo is non-git) — packaged `opencode-autocomplete-0.0.3.vsix`_
 
 ## Current focus
-Completions worked but output was **clunky**: (1) the model would *continue the comment line*
-(`// loop through the array` → ` and log each person's name…` then the loop), and (2) cram a
-multi-line construct onto one line. Two-layer fix shipped this session:
-
-1. **Prompt** (`SYSTEM_PROMPT`, `src/extension.ts`) — added format rules: write real newlines +
-   match the file's indentation, never collapse multi-line onto one line; if the text before
-   `<CURSOR>` is a complete line, start on a new line and never extend a comment. Best-effort
-   (a reasoning model obeys format rules only loosely).
-2. **Deterministic guard** (`relocateAfterComment` + `lineCommentToken`/`looksLikeCode`/`reindent`,
-   `src/extension.ts`) — the load-bearing fix. When the caret is at the **physical end of a
-   whole-line comment** in a **known code language**, it forces real code onto its own fresh,
-   correctly-indented line and drops a leading run of comment-continuation prose. Fails **safe**
-   (returns the suggestion untouched in every ambiguous case; never deletes code).
-
-Designed + adversarially stress-tested via a Workflow (3 approaches × 5 lenses = 15 checks; all 3
-naïve approaches broke). The two tight gates (whole-line-comment + physical-EOL) are what survived:
-they reject URL `//`, regex `/\/\//`, shell `${var#…}`, YAML `url#frag`, Python docstring `#`,
-JSDoc/block-comment bodies, markdown/plaintext, and mid-comment authoring. See [[decisions]] / [[gotchas]].
+Shipped the **side-panel activity indicator** (Issue 1 in [[#issues]]): the panel now shows the
+extension's live **Activity** (Thinking / Idle) as a top status row with a pulsing dot, muted when
+disabled. The status bar (4-state ready/thinking/disabled/error) was deliberately left untouched —
+the panel was the blind spot. Terminology fixed in `CONTEXT.md`: **Activity = Thinking | Idle**;
+the status bar's "ready" is just Idle-dressed-for-the-editor.
 
 ## State
-- **In flight:** committed this session on `feat/side-panel` (package.json version + src/extension.ts).
+- **In flight:** nothing — Issue 1 landed and the user eyeballed 0.0.3 live and approved.
 - **Done this session:**
-  - `src/extension.ts` — `SYSTEM_PROMPT` format/newline/no-comment-extension rules.
-  - `src/extension.ts` — `relocateAfterComment` guard + `LINE_COMMENT` map, `lineCommentToken`,
-    `looksLikeCode`, `reindent` helpers; wired as the final post-clean step before caching.
-  - `package.json` — version `0.0.1` → `0.0.2`.
-  - Verified: `tsc -p ./ --noEmit` clean; standalone 11-case harness (real bug + every adversarial
-    break the workflow found) — 11/11 pass.
-  - Recompiled (`npm run compile`, clean) + repackaged `opencode-autocomplete-0.0.2.vsix`.
+  - `src/extension.ts` — `enter/exitInFlight` also call `panel?.postActivity(inFlight > 0)`;
+    `getActivity: () => inFlight > 0` added to the injected `PanelHost`.
+  - `src/sidePanelProvider.ts` — new sync `postActivity(thinking)` (separate from async `postState`);
+    `ready` handler now pushes current activity via `host.getActivity()`; `PanelHost` + file-top doc updated.
+  - `webview/app.tsx` — `activity{thinking}` added to `InMsg`; `thinking` held separate from `state`;
+    top "Activity" status row (pulse dot + "Thinking…"/"Idle", `opacity-50` when `!enabled`).
+  - `package.json` — `0.0.2` → `0.0.3`.
+  - Docs: `PRD.md` (4 additive edits), `CONTEXT.md` (new glossary), `issues.md` (new tracker).
+  - Verified: `tsc -p ./` + `tsc -p webview` + `vite build` all clean; new utilities
+    (`animate-pulse`/`@keyframes pulse`, `--vscode-progressBar-background`, charts-green fallback,
+    `opacity:.5`) present in `dist/webview/main.css`. Repackaged `opencode-autocomplete-0.0.3.vsix`.
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **Install + eyeball 0.0.2 live** — `--force`-install the new `.vsix` + reload window (running
-   build is stale otherwise, see [[gotchas]]). Retype `// loop through the array`, confirm code
-   drops to its own line and the comment is never extended. Spot-check Python (`#`).
-2. **Faster default model** — `minimax-m3` is a reasoning model, 4–7.6s/suggestion. Try
-   `deepseek-v4-flash` / `kimi-k2.6` in the panel; if a non-reasoning id is reliably sub-second,
-   change `DEFAULT_MODEL` (`src/extension.ts`) + the `model` default (`package.json`).
-3. **TDD M1 + M2** — the pure fns in `src/extension.ts` (`stripFences`/`stripPrefixOverlap`/
-   `stripThink`, now also `looksLikeCode`/`reindent`/`relocateAfterComment`, and `buildContext`)
-   are still untested and unexported. Spec in `PRD.md`. Test-export or extract first. Use `/tdd`.
-4. **(optional) `/preset ship`** — push `feat/side-panel`, open a PR.
+No active feature work — the indicator is done. Open next-step options (carried forward + new):
+1. **(optional) `/preset ship`** — but repo is non-git; would need `git init` first. Otherwise
+   distribute the `.vsix` directly.
+2. **Faster default model** — `minimax-m3` is a reasoning model (4–7.6s). Try `deepseek-v4-flash` /
+   `kimi-k2.6` in the panel; if a non-reasoning id is reliably sub-second, change `DEFAULT_MODEL`
+   (`src/extension.ts`) + the `model` default (`package.json`).
+3. **TDD M1 + M2** — pure fns in `src/extension.ts` (`stripFences`/`stripPrefixOverlap`/`stripThink`/
+   `looksLikeCode`/`reindent`/`relocateAfterComment`/`buildContext`) still untested + unexported.
+   Spec in `PRD.md`. Test-export or extract first. Use `/tdd`.
+
+## Skills for next session
+- /tdd — option 3 (the pure-function tests) is a red-green-refactor loop.
 
 ## Open questions
-- Block/JSDoc comments (`/* */`, `* …`) are intentionally **unguarded** — only single-line comments
-  trigger the model's finish-the-comment behaviour. If block-comment extension shows up in practice,
-  detecting an open `/* */` from the prefix is the next increment (the workflow surfaced this gap).
+- None.
+
+## Recent context
+- The feature was *already half-built*: the status bar had thinking/idle; the panel didn't. The work
+  was bridging that signal to the webview, not inventing it.
+- Chose a dedicated `activity{thinking}` message over folding `thinking` into `state` — `getState` is
+  async and `state` triggers the model-refetch path; firing it per keystroke would be wrong. See [[decisions]].
+- `activity` is pushed on every in-flight transition **and** on `ready`, so reopening the panel
+  mid-request still shows "Thinking…".
 
 ## Related
 - [[overview]]

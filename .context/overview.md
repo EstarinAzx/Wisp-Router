@@ -18,6 +18,8 @@ tags: [context, overview]
 - `out/` — `tsc` output for the extension (`out/extension.js`). Git-ignored.
 - `dist/webview/` — Vite output for the webview (single unhashed `main.js` + `main.css`). Git-ignored.
 - `PRD.md` — product requirements for the whole thing incl. the side panel.
+- `CONTEXT.md` — domain glossary (ubiquitous language); owns term definitions like **Activity = Thinking | Idle**.
+- `issues.md` — local issue tracker (repo is non-git), tracer-bullet slices.
 - Side-panel implementation plan (now executed) lives outside the repo at the agent plan path noted in [[active-work]].
 
 ## How to run

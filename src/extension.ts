@@ -234,8 +234,10 @@ const renderStatus = (): void => {
   }
 };
 
-const enterInFlight = () => { inFlight++; renderStatus(); };
-const exitInFlight = () => { inFlight = Math.max(0, inFlight - 1); renderStatus(); };
+// Status bar and side panel are two surfaces of the same Activity — push to both on every
+// transition. postActivity no-ops when the panel view is closed.
+const enterInFlight = () => { inFlight++; renderStatus(); panel?.postActivity(inFlight > 0); };
+const exitInFlight = () => { inFlight = Math.max(0, inFlight - 1); renderStatus(); panel?.postActivity(inFlight > 0); };
 
 // ----------------------------- Provider ----------------------------- //
 
@@ -429,6 +431,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
 
   panel = new OpenCodePanelProvider(context.extensionUri, {
     getState,
+    getActivity: () => inFlight > 0, // current Activity for the panel's initial sync on 'ready'
     storeApiKey,
     clearApiKey,
     fetchModelIds,

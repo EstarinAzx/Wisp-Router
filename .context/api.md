@@ -37,9 +37,10 @@ The project's surface is a VS Code extension: an inline-completion provider, com
 
 ### Message protocol
 - **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `setEnabled{value}` · `refreshModels`.
-- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', model, enabled, baseUrl}` · `models{ids}` · `modelsError{message}`.
+- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', model, enabled, baseUrl}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`.
 - **Key is write-only across the boundary** — the value is never sent back (only presence + source), and error text is `sanitizeError`'d so a server 401 body can't leak key fragments. See [[gotchas]].
 - State is pushed on `ready`, on `onDidChangeConfiguration` (any `opencodeAutocomplete.*`), and on `secrets.onDidChange` (covers this window's key writes and changes from other windows).
+- **Activity** (`activity{thinking}`) is the live Thinking/Idle signal, pushed separately from `state` on every in-flight transition (`enter/exitInFlight`) **and** on `ready` (via `PanelHost.getActivity`), so it never drags the async `getState`/model-refetch path. The panel renders it as a top status row (pulse dot, muted when disabled); the status bar shows the same Activity as `ready`/`thinking`. See [[decisions]].
 
 ## Related
 - [[overview]]

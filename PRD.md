@@ -23,8 +23,10 @@ Two parts, as experienced by the user:
 2. **A side panel** — a dedicated icon in the VS Code activity bar opens an OpenCode panel where I
    can, in one place: set or clear my API key (shown only as "set / not set", never echoed back),
    choose my model from a live list fetched from the provider (or type a custom id), and flip
-   autocomplete on/off. The panel and the existing commands stay in sync, and the UI matches my
-   editor theme.
+   autocomplete on/off. A status row at the top of the panel shows the live activity — "Thinking…"
+   while a completion request is in flight, "Idle" otherwise (muted when autocomplete is disabled) —
+   so the panel itself signals what the extension is doing. The panel and the existing commands stay
+   in sync, and the UI matches my editor theme.
 
 ## User Stories
 
@@ -86,6 +88,8 @@ Two parts, as experienced by the user:
     I can run it in a headless/dev setup without the UI.
 31. As a developer, I want the existing commands (Set API Key, List/Choose Model, Toggle) to keep
     working, so that nothing I already use breaks when the panel is added.
+32. As a developer, I want the side panel to show whether the extension is thinking or idle, so that
+    I can tell at a glance what it is doing without looking at the status bar.
 
 ## Implementation Decisions
 
@@ -118,9 +122,10 @@ Modules to build or modify (interfaces, not file paths):
   strict Content-Security-Policy and a per-load script nonce, loads the bundled UI assets via
   `asWebviewUri`, routes messages, and can push fresh state to the webview when configuration changes
   outside the panel.
-- **M6 — Webview UI (Preact + Tailwind v4) and message protocol.** A small Preact app (key row, model
-  picker with live list + manual override + refresh, enabled switch), themed via `--vscode-*` CSS
-  variables, built by Vite into a single deterministic JS + CSS asset.
+- **M6 — Webview UI (Preact + Tailwind v4) and message protocol.** A small Preact app (top activity
+  status row with a pulsing dot — "Thinking…" / "Idle", muted when disabled; key row; model picker
+  with live list + manual override + refresh; enabled switch), themed via `--vscode-*` CSS variables,
+  built by Vite into a single deterministic JS + CSS asset.
 
 Architectural decisions:
 
@@ -132,7 +137,9 @@ Architectural decisions:
   view.
 - **Message contract.** Webview → extension: `ready`, `setApiKey`, `clearApiKey`, `selectModel`,
   `setEnabled`, `refreshModels`. Extension → webview: `state` (including `keyIsSet`, never the key),
-  and `models` / `modelsError`.
+  `models` / `modelsError`, and `activity` (`{ thinking }`) — a lightweight in-flight signal pushed
+  on every request transition (and on `ready`), kept separate from `state` so the high-frequency
+  activity ping does not drag the heavyweight async `getState`/model-refetch path.
 - **Write-only key in the UI.** The API key is only ever sent from the webview to the extension; the
   extension returns a boolean "is set", never the value. The cached client is invalidated whenever the
   key changes.

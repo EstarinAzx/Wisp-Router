@@ -8,3 +8,5 @@ tsconfig.json
 .context/**
 CLAUDE.md
 PRD.md
+CONTEXT.md
+issues.md
