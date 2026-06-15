@@ -134,7 +134,7 @@ export const App = () => {
         <input
           class="input"
           type="password"
-          placeholder="Paste OpenCode API key"
+          placeholder="Paste API key"
           value={keyDraft}
           onInput={(e) => setKeyDraft(e.currentTarget.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }}

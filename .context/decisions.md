@@ -1,6 +1,6 @@
 ---
 type: decisions
-project: opencode-autocomplete
+project: wisp
 updated: 2026-06-15
 tags: [context, decisions]
 ---
@@ -41,7 +41,7 @@ Settled questions. Append-only. Each entry is dated.
 **Why:** a Global write under a workspace override is silently ineffective — the controlled panel select/checkbox would snap back. Surfaced by the multi-agent review.
 **Reversibility:** easy.
 
-**Decision:** `opencodeAutocomplete.baseUrl` is `"scope": "machine"`.
+**Decision:** `wisp.baseUrl` is `"scope": "machine"`.
 **Why:** otherwise a malicious workspace could redirect requests — and the bearer API key — to an attacker endpoint. Side effect: baseUrl can no longer be set per-workspace (acceptable; it's near-constant).
 **Reversibility:** easy (drop the scope line) but security-relevant — don't revert without reason.
 
@@ -55,7 +55,7 @@ Settled questions. Append-only. Each entry is dated.
 
 ## 2026-06-10 — Bare model ids required (corrects decision #5)
 
-**Decision:** Model ids for `zen/go/v1` are **bare** (`minimax-m3`), never provider-prefixed (`opencode/minimax-m3`). `DEFAULT_MODEL`, the `opencodeAutocomplete.model` default, and `fetchModelIds` all use/return the bare form exactly as `GET /models` serves it.
+**Decision:** Model ids for `zen/go/v1` are **bare** (`minimax-m3`), never provider-prefixed (`opencode/minimax-m3`). `DEFAULT_MODEL`, the `wisp.model` default, and `fetchModelIds` all use/return the bare form exactly as `GET /models` serves it.
 **Why:** the chat endpoint returns `401 Model opencode/minimax-m3 is not supported` for the prefixed form. This **falsifies decision #5's** claim that `opencode/minimax-m3` was "proven working" — that was inherited from the reference `llm-provider`, which targets a different gateway; inline completions had been erroring the entire time. A mid-session experiment that *added* the `opencode/` prefix to the fetched list went the wrong way and was reverted.
 **Reversibility:** easy to revert, but don't — the prefixed form is confirmed-rejected by this endpoint.
 
@@ -140,6 +140,27 @@ unfounded; `inlineSuggest.trigger` queries the provider on demand regardless of 
 gates on VS Code's own `editor.inlineSuggest.enabled`, default on). Don't re-litigate the surface.
 **Reversibility:** easy (remove the command + early-return) — but the append-only / code-only / before-
 gates constraints stay load-bearing; see the 2026-06-14 entry.
+
+## 2026-06-15 — Rebrand to Wisp; product / provider split (Issue 3)
+
+**Decision:** The **product** is now **Wisp** — everything user-visible and every product identifier
+renamed from `opencodeAutocomplete` / "OpenCode (Zen) Autocomplete" to `wisp` / "Wisp": package
+`name`/`displayName`, the `wisp.*` namespace for command **and** setting ids, the SecretStorage key
+(`opencodeAutocomplete.apiKey` → `wisp.apiKey`), the activity-bar container + webview view ids/titles,
+the `WispPanelProvider` class, status-bar text, output-channel name, all `Wisp: …` toast/progress
+strings, the README, and the icon (`media/opencode.svg` → `media/wisp.svg`). Version bumped 0.0.4 →
+0.0.5. The **provider** keeps its own name, **OpenCode Zen**: `DEFAULT_BASE_URL`
+(`https://opencode.ai/zen/go/v1`), the `OPENCODE_API_KEY` env fallback, the "OpenCode Zen provider"
+wording in the `baseUrl` setting, and the `opencode/`-prefix discussion all stay. Pure rename — **no
+behavior change**. See `CONTEXT.md` ("Product and provider") for the vocabulary.
+**Why:** give the product its own identity, separate from any one provider, so additional providers can
+be added later (a future issue) without another rename. **Wisp** = the product; **OpenCode Zen** = the
+(current, first) provider — the product *has* a provider.
+**Breaking:** the setting namespace and the SecretStorage key both moved, so any previously stored key
+is orphaned — the user re-enters it once via **Wisp: Set API Key**. Acceptable for a pre-release (0.0.x).
+**Reversibility:** easy mechanically, but don't — the split is the point. Multi-provider support builds on it.
+**Out of scope (future issues):** multi-provider architecture, provider-switching UI, logo redesign (the
+glyph was reused, only its filename changed).
 
 ## Related
 - [[overview]]

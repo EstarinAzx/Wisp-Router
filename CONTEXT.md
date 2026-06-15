@@ -1,4 +1,4 @@
-# OpenCode Autocomplete
+# Wisp
 
 A VS Code extension that serves AI inline completions from the OpenCode Zen chat
 endpoint, with a side panel for managing key, model, and on/off state. This
@@ -6,6 +6,32 @@ glossary fixes the language for the extension's user-visible state, so the two
 status surfaces (status bar and side panel) describe the same thing the same way.
 
 ## Language
+
+### Product and provider
+
+**Wisp**:
+The product — the VS Code extension itself, and the name on all user-visible
+chrome (activity-bar container, side panel, status bar, commands `wisp.*`,
+settings `wisp.*`, the `wisp.apiKey` secret). Provider-agnostic by design so
+more **Providers** can be added later. "The extension" is used interchangeably;
+reserve **Wisp** for user-facing chrome and the product-vs-**Provider** split.
+
+**Provider**:
+The external backend Wisp routes **Completion** and **Inquire** requests through
+— an OpenAI-compatible chat endpoint plus the credentials to reach it (base URL
++ API key). Wisp is **provider-agnostic**: a Provider is a swappable role, not a
+fixed dependency. Today there is exactly one. Providers are named **vendor +
+product line** (e.g. "OpenCode Zen", a hypothetical "Anthropic Claude"). _Avoid_:
+treating the Provider as part of the product's identity, or assuming there will
+only ever be one. (How a Provider is *reached* — the `/go` gateway, the bare-id
+rule — is an implementation detail, not part of its name; see `gotchas.md`.)
+
+**OpenCode Zen**:
+The current, first, and only **Provider** — the OpenAI-compatible chat endpoint
+at `https://opencode.ai/zen/go/v1`, with the `OPENCODE_API_KEY` environment-
+variable fallback. Canonically **"OpenCode Zen"** (vendor *OpenCode* + product
+*Zen*) — never bare "OpenCode" or "Zen". The product *has* a Provider; the
+Provider keeps its own name. _Avoid_: calling the product "OpenCode".
 
 ### Activity — what the extension is doing right now
 

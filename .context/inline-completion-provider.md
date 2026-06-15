@@ -57,7 +57,7 @@ The order matters:
 - **Single-entry cache** keyed by `model + prefix + suffix`. VS Code re-queries
   on cursor moves and re-renders, not just keystrokes; one entry erases that
   waste cheaply.
-- **Logging** to a dedicated `OutputChannel` (`OpenCode Autocomplete`) in the
+- **Logging** to a dedicated `OutputChannel` (`Wisp`) in the
   format `<model> <ms>ms <chars>c` so you can compare models and tune the
   latency budget.
 
@@ -75,10 +75,10 @@ context.subscriptions.push(
   statusBar,
   // Match every file; narrow with a language selector if you want per-language control.
   vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, provider),
-  vscode.window.registerWebviewViewProvider(OpenCodePanelProvider.viewId, panel),
-  vscode.commands.registerCommand('opencodeAutocomplete.setApiKey', setApiKey),
-  vscode.commands.registerCommand('opencodeAutocomplete.listModels', listModels),
-  vscode.commands.registerCommand('opencodeAutocomplete.toggle', toggle),
+  vscode.window.registerWebviewViewProvider(WispPanelProvider.viewId, panel),
+  vscode.commands.registerCommand('wisp.setApiKey', setApiKey),
+  vscode.commands.registerCommand('wisp.listModels', listModels),
+  vscode.commands.registerCommand('wisp.toggle', toggle),
   // ...the two config/secrets listeners...
 );
 ```
@@ -101,7 +101,7 @@ Notes:
 | Name | Type | File | Purpose |
 |---|---|---|---|
 | `provider` | `vscode.InlineCompletionItemProvider` | `src/extension.ts` | The thing that returns ghost text on each keystroke. |
-| `OpenCodePanelProvider` | `vscode.WebviewViewProvider` | `src/sidePanelProvider.ts` | The side panel: HTML shell, strict CSP, message routing. |
+| `WispPanelProvider` | `vscode.WebviewViewProvider` | `src/sidePanelProvider.ts` | The side panel: HTML shell, strict CSP, message routing. |
 
 They are wired to **the same shared actions** (`storeApiKey`, `clearApiKey`,
 `fetchModelIds`, `setModel`, `setEnabled`, `getState`, `getActivity`) — so the
@@ -118,7 +118,7 @@ and there is no circular import.
    resolution → text utilities → comment-line guard → status bar → **provider
    block** → shared actions → commands → `activate()`.
 2. `src/sidePanelProvider.ts` — short: types → `sanitizeError` →
-   `OpenCodePanelProvider` (`resolveWebviewView` / `postState` / `postActivity`
+   `WispPanelProvider` (`resolveWebviewView` / `postState` / `postActivity`
    / `onMessage` / `renderHtml`).
 3. `webview/app.tsx` — the message reducer in `useEffect`, then the JSX:
    activity row → key → model picker + refresh + free-text override → enabled

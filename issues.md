@@ -1,4 +1,4 @@
-# Issues — opencode-autocomplete
+# Issues — wisp
 
 Local issue tracker. Tracer-bullet vertical slices.
 Vocabulary per `CONTEXT.md`.
@@ -118,3 +118,97 @@ Works even when Completion is disabled. Inquire returns **code only, never prose
   inserted code.
 - [X] `tsc -p ./` clean (`tsc -p webview` unaffected); `vite build` clean; repackaged `.vsix`.
 - [X] Manual verify in the Extension Development Host (F5).
+
+---
+
+## Issue 3 — Rebrand the product to **Wisp** (provider/product split)
+
+**Type:** Chore — mechanical rename, **no behavior change**. Breaking: changes the setting
+namespace and the SecretStorage key, so the existing stored API key is orphaned (re-enter once).
+**Blocked by:** None — can start immediately.
+**User stories:** N/A — project rebrand. Gives the product its own identity, separate from any one
+provider, so additional providers can be added later (future issue). Vocabulary: **Wisp** = the
+product; **OpenCode Zen** = the (current, first) provider.
+
+### What to build
+
+A pure rename. Everything that names the **product** moves from `opencodeAutocomplete` / "OpenCode
+(Zen) Autocomplete" to **Wisp** / `wisp`. Everything that names the **provider** ("OpenCode Zen")
+stays. No feature, no logic, no behavior changes — only identifiers and user-facing strings.
+
+- **Product → Wisp** (rename): package `name`/`displayName`/`description`, the `wisp.*` namespace
+  for all command IDs *and* setting keys, the SecretStorage key (`opencodeAutocomplete.apiKey` →
+  `wisp.apiKey`), activity-bar container + webview view IDs/titles, the `OpenCodePanelProvider`
+  class, status-bar text, output-channel name, all `Wisp: …` toast/progress strings, README, and
+  the icon asset.
+- **Provider → OpenCode Zen** (unchanged): `DEFAULT_BASE_URL` = `https://opencode.ai/zen/go/v1`,
+  the `OPENCODE_API_KEY` environment-variable fallback, and the "OpenCode Zen provider" wording in
+  the `baseUrl` setting description. The product *has* a provider; the provider keeps its name.
+- **Out of scope:** any multi-provider architecture, provider-switching UI, or logo redesign —
+  the `media` glyph is reused, only its filename changes. Those are future issues.
+
+### Files
+
+- `package.json` — `name` `opencode-autocomplete`→`wisp`; `displayName` "OpenCode Zen
+  Autocomplete"→"Wisp"; `description` reworded (Wisp, backed by the OpenCode Zen provider);
+  `version` 0.0.4→0.0.5; viewsContainer `id`/`title`/`icon` (`opencodeAutocomplete`/"OpenCode"/
+  `media/opencode.svg` → `wisp`/"Wisp"/`media/wisp.svg`); views key + `id` + `name`
+  (`opencodeAutocomplete`, `opencodeAutocomplete.panel`, "OpenCode" → `wisp`, `wisp.panel`,
+  "Wisp"); the 4 command `command` ids + `title`s (`opencodeAutocomplete.*`→`wisp.*`, "OpenCode:
+  …"→"Wisp: …"); the `editor/context` menu `command`; configuration `title`; the 8 setting keys
+  `opencodeAutocomplete.*`→`wisp.*` (enabled, baseUrl, model, debounceMs, maxTokens, temperature,
+  maxPrefixChars, maxSuffixChars).
+- `src/extension.ts` — `CONFIG_NS = 'opencodeAutocomplete'`→`'wisp'`; `SECRET_KEY =
+  'opencodeAutocomplete.apiKey'`→`'wisp.apiKey'`; status-bar text + tooltips (4 states, "OpenCode"
+  →"Wisp"); output-channel name "OpenCode Autocomplete"→"Wisp" (both spots); the `Wisp: …` rewrite
+  of the toast/progress strings ("Set API Key", "API key saved", "model set to", "file too big",
+  "inquiring…", "inquire failed", "nothing to insert"); the 4 `registerCommand` ids; the 2
+  `affectsConfiguration('opencodeAutocomplete.…')` literals; the file-header comment. **Leave
+  unchanged:** `DEFAULT_BASE_URL`, the `OPENCODE_API_KEY` env read in `resolveApiKey`.
+- `src/sidePanelProvider.ts` — class `OpenCodePanelProvider`→`WispPanelProvider`; `viewId =
+  'opencodeAutocomplete.panel'`→`'wisp.panel'`; `<title>OpenCode</title>`→`Wisp`; file header.
+  Update the import + `registerWebviewViewProvider(OpenCodePanelProvider.viewId, …)` site in
+  `src/extension.ts` to the new class name.
+- `webview/app.tsx` — input placeholder "Paste OpenCode API key"→"Paste API key". **Leave
+  unchanged:** the "Using OPENCODE_API_KEY from environment" line (provider env var).
+- `README.md` — title; intro reframed (Wisp, currently backed by the OpenCode Zen provider);
+  settings section header `opencodeAutocomplete.*`→`wisp.*`; command names "OpenCode: …"→"Wisp: …";
+  status-bar glyph `✨ OpenCode`→`✨ Wisp`; output-channel name. Drive-by doc fixes while the table
+  is open: `model` default `opencode/minimax-m3`→`minimax-m3`, `maxTokens` default `64`→`0` (both
+  already stale vs `package.json`). Keep the "How it works" OpenCode-Zen/FIM explanation (provider).
+- `media/opencode.svg` → rename to `media/wisp.svg` (same glyph); update the `package.json` icon
+  ref. (Logo redesign is a separate future issue.)
+- `issues.md` — header line 1 `# Issues — opencode-autocomplete`→`# Issues — wisp`.
+- `.context/*`, `CONTEXT.md`, `PRD.md` — product-name references → Wisp; add a short decision note
+  recording the rebrand and the **Wisp (product) / OpenCode Zen (provider)** split.
+
+### Acceptance criteria
+
+- [X] `package.json`: `name` `wisp`, `displayName` "Wisp", `version` 0.0.5; every
+  `opencodeAutocomplete.*` id/key → `wisp.*`; container/view/config titles read "Wisp"; icon
+  `media/wisp.svg`.
+- [X] `src/extension.ts`: `CONFIG_NS = 'wisp'`, `SECRET_KEY = 'wisp.apiKey'`; 4 `registerCommand`
+  ids + both `affectsConfiguration` literals use `wisp.*`.
+- [X] `src/sidePanelProvider.ts`: class `WispPanelProvider`, `viewId = 'wisp.panel'`, `<title>`
+  Wisp; the `extension.ts` import + registration use the new class name.
+- [X] All user-facing chrome reads "Wisp": status bar (disabled/thinking/error/ready), output
+  channel, command-palette titles ("Wisp: …"), activity-bar container, panel title, toasts,
+  progress notification.
+- [X] Provider plumbing untouched: `DEFAULT_BASE_URL` still `https://opencode.ai/zen/go/v1`; the
+  `OPENCODE_API_KEY` env fallback still resolves a key; the `baseUrl` setting description still
+  names the "OpenCode Zen provider"; the webview env line still reads `OPENCODE_API_KEY`.
+- [X] `README.md` retitled; settings table uses `wisp.*`; stale `opencode/minimax-m3`→`minimax-m3`
+  and `maxTokens` default corrected.
+- [X] `media/opencode.svg` renamed to `media/wisp.svg`; `package.json` icon ref updated; no
+  dangling asset reference.
+- [X] Docs synced: `issues.md` header reads `wisp`; `CONTEXT.md`/`PRD.md`/`.context/*` product
+  names updated; a decision note records the Wisp/OpenCode-Zen product/provider split.
+- [X] `tsc -p ./` clean; `tsc -p webview` clean; `vite build` clean.
+- [X] Grep guard: `grep -ri opencodeautocomplete` → nothing (only the issue tracker + the rebrand ADR
+  document the old name); `grep -ri "opencode"` → only
+  provider-scoped hits (base URL, `OPENCODE_API_KEY`, "OpenCode Zen provider", the README provider
+  explanation).
+- [ ] Manual verify (F5 Extension Development Host): extension loads as "Wisp"; activity-bar shows
+  Wisp; all four commands appear as "Wisp: …"; settings appear under `wisp.*`. The previously
+  stored key is orphaned (expected) — run **Wisp: Set API Key**, then confirm autocomplete **and**
+  Inquire still work end-to-end.

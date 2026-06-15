@@ -1,14 +1,14 @@
 ---
 type: overview
-project: opencode-autocomplete
-updated: 2026-06-10
+project: wisp
+updated: 2026-06-15
 tags: [context, overview]
 ---
 
 # Overview
 
-**Project:** opencode-autocomplete
-**One-liner:** A VS Code extension that provides AI inline (ghost-text) completions routed through the OpenCode Zen `go` endpoint (an OpenAI-compatible API), with a Preact + Tailwind v4 side panel for managing the API key, model, and on/off toggle.
+**Project:** wisp
+**One-liner:** **Wisp** — a VS Code extension that provides AI inline (ghost-text) completions routed through the OpenCode Zen `go` endpoint (an OpenAI-compatible API), with a Preact + Tailwind v4 side panel for managing the API key, model, and on/off toggle. **Wisp** is the product; **OpenCode Zen** is the (current, first) provider.
 
 ## Layout
 - `src/` — extension-host (Node) TypeScript. `extension.ts` (provider, commands, shared actions) + `sidePanelProvider.ts` (the WebviewView).
@@ -25,9 +25,9 @@ tags: [context, overview]
 ## How to run
 - Install: `npm install`
 - Build: `npm run compile` (`tsc -p ./ && tsc -p webview && vite build`).
-- Dev: press **F5** in VS Code → Extension Development Host (the OpenCode icon is in *that* window's activity bar).
+- Dev: press **F5** in VS Code → Extension Development Host (the Wisp icon is in *that* window's activity bar).
 - Package: `npx @vscode/vsce package --allow-missing-repository --skip-license` → installable `.vsix`.
-- Set key: the **OpenCode side panel** (activity-bar icon), command **OpenCode: Set API Key**, or env `OPENCODE_API_KEY`.
+- Set key: the **Wisp side panel** (activity-bar icon), command **Wisp: Set API Key**, or env `OPENCODE_API_KEY`.
 
 ## Where to look first
 - Entry point: `src/extension.ts` — provider registration, completion logic, commands, status bar, shared actions.

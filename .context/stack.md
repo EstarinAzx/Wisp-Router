@@ -1,7 +1,7 @@
 ---
 type: stack
-project: opencode-autocomplete
-updated: 2026-06-10
+project: wisp
+updated: 2026-06-15
 tags: [context, stack]
 ---
 

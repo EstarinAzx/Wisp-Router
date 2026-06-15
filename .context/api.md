@@ -1,6 +1,6 @@
 ---
 type: api
-project: opencode-autocomplete
+project: wisp
 updated: 2026-06-15
 tags: [context, api, vscode]
 ---
@@ -17,13 +17,13 @@ The project's surface is a VS Code extension: an inline-completion provider, com
 ## Commands
 | Command id | Title | What it does |
 |---|---|---|
-| `opencodeAutocomplete.setApiKey` | OpenCode: Set API Key | Prompt + store key in SecretStorage; invalidate cached client. |
-| `opencodeAutocomplete.listModels` | OpenCode: List / Choose Model | `GET /models` → quick-pick → write `model` setting. |
-| `opencodeAutocomplete.toggle` | OpenCode: Toggle Autocomplete | Flip `enabled`; also the status-bar click action. |
-| `opencodeAutocomplete.inquire` | OpenCode: Inquire | Selection = prompt, whole file = context → insertable code as ghost text **after** the selection (append, never replace). Cancellable `withProgress`; code-only. In the `editor/context` menu (`when: editorHasSelection`) + palette. |
+| `wisp.setApiKey` | Wisp: Set API Key | Prompt + store key in SecretStorage; invalidate cached client. |
+| `wisp.listModels` | Wisp: List / Choose Model | `GET /models` → quick-pick → write `model` setting. |
+| `wisp.toggle` | Wisp: Toggle Autocomplete | Flip `enabled`; also the status-bar click action. |
+| `wisp.inquire` | Wisp: Inquire | Selection = prompt, whole file = context → insertable code as ghost text **after** the selection (append, never replace). Cancellable `withProgress`; code-only. In the `editor/context` menu (`when: editorHasSelection`) + palette. |
 
-## Settings (`opencodeAutocomplete.*`)
-`enabled` (bool), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — not workspace-overridable, blocks key-redirect), `model` (str, default **bare** `minimax-m3` — the prefixed form is rejected, see [[gotchas]]), `debounceMs` (300), `maxTokens` (64), `temperature` (0.1), `maxPrefixChars` (2000), `maxSuffixChars` (1000). No `apiKey` setting — key is SecretStorage/env only. Panel and commands write `model`/`enabled` to the scope that already defines the value (`targetFor()`), not blindly Global.
+## Settings (`wisp.*`)
+`enabled` (bool), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — not workspace-overridable, blocks key-redirect), `model` (str, default **bare** `minimax-m3` — the prefixed form is rejected, see [[gotchas]]), `debounceMs` (300), `maxTokens` (0 = uncapped), `temperature` (0.1), `maxPrefixChars` (2000), `maxSuffixChars` (1000). No `apiKey` setting — key is SecretStorage/env only. Panel and commands write `model`/`enabled` to the scope that already defines the value (`targetFor()`), not blindly Global.
 
 ## External API consumed — OpenCode Zen (`go`)
 - Base URL: `https://opencode.ai/zen/go/v1`. OpenAI-compatible.
@@ -33,7 +33,7 @@ The project's surface is a VS Code extension: an inline-completion provider, com
 - Reference implementations studied: the user's `llm-provider` (OpenAI SDK → this exact base URL) and the `codebuff` repo's server handlers (raw fetch, same wire contract).
 
 ## Side-panel webview
-- Activity-bar view container `opencodeAutocomplete` (icon `media/opencode.svg`) + a single `type: webview` view `opencodeAutocomplete.panel`. Registered with `registerWebviewViewProvider` in `src/extension.ts`; provider is `OpenCodePanelProvider` in `src/sidePanelProvider.ts`.
+- Activity-bar view container `wisp` (icon `media/wisp.svg`) + a single `type: webview` view `wisp.panel`. Registered with `registerWebviewViewProvider` in `src/extension.ts`; provider is `WispPanelProvider` in `src/sidePanelProvider.ts`.
 - The provider serves an HTML shell (strict CSP + script nonce, `asWebviewUri` for assets) loading the Vite bundle (`dist/webview/main.js` + `main.css`).
 - The panel calls the same shared actions as the commands (`storeApiKey`/`clearApiKey`/`fetchModelIds`/`setModel`/`setEnabled`/`getState`), injected as a `PanelHost` — panel and commands never drift.
 
@@ -41,7 +41,7 @@ The project's surface is a VS Code extension: an inline-completion provider, com
 - **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `setEnabled{value}` · `refreshModels`.
 - **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', model, enabled, baseUrl}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`.
 - **Key is write-only across the boundary** — the value is never sent back (only presence + source), and error text is `sanitizeError`'d so a server 401 body can't leak key fragments. See [[gotchas]].
-- State is pushed on `ready`, on `onDidChangeConfiguration` (any `opencodeAutocomplete.*`), and on `secrets.onDidChange` (covers this window's key writes and changes from other windows).
+- State is pushed on `ready`, on `onDidChangeConfiguration` (any `wisp.*`), and on `secrets.onDidChange` (covers this window's key writes and changes from other windows).
 - **Activity** (`activity{thinking}`) is the live Thinking/Idle signal, pushed separately from `state` on every in-flight transition (`enter/exitInFlight`) **and** on `ready` (via `PanelHost.getActivity`), so it never drags the async `getState`/model-refetch path. The panel renders it as a top status row (pulse dot, muted when disabled); the status bar shows the same Activity as `ready`/`thinking`. See [[decisions]].
 
 ## Related

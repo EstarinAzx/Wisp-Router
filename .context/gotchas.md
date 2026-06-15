@@ -1,7 +1,7 @@
 ---
 type: gotchas
-project: opencode-autocomplete
-updated: 2026-06-10
+project: wisp
+updated: 2026-06-15
 tags: [context, gotchas]
 ---
 
@@ -41,7 +41,7 @@ The chat endpoint returns `401 Model opencode/minimax-m3 is not supported` for a
 Most `zen/go` ids (minimax-m3, mimo, qwen3*, glm5*) emit chain-of-thought **inline** in the completion as `<think>…</think>`, then the real answer. Two consequences: (1) `stripThink` in `src/extension.ts` must drop the block (and treat an unterminated `<think>` as "no answer yet" → insert nothing) or the ghost text is the model's thinking; (2) a low `max_tokens` cap starves the answer — the model spends the budget thinking and never reaches code. `maxTokens` default is therefore `0` (uncapped); `max_tokens` is omitted from the request unless set `>0`. For snappy completions use a non-reasoning id (`deepseek-v4-flash`, `kimi-k2.6`). See [[decisions]].
 
 ### Output-channel logs persist on disk — read them to debug a user's error
-`OutputChannel` content is written to `%APPDATA%\Code\logs\<session>\window<n>\exthost\output_logging_<ts>\<n>-OpenCode Autocomplete.log`. When the user can't surface the Output panel, glob the newest matching file and grep `[error]` instead of walking them through the UI. This is how the `401 … not supported` cause was found.
+`OutputChannel` content is written to `%APPDATA%\Code\logs\<session>\window<n>\exthost\output_logging_<ts>\<n>-Wisp.log`. When the user can't surface the Output panel, glob the newest matching file and grep `[error]` instead of walking them through the UI. This is how the `401 … not supported` cause was found.
 
 ### Comment-line guard fires only on WHOLE-LINE comments at the true end of line
 `relocateAfterComment` (`src/extension.ts`) stops the model from continuing a comment line. Its gates

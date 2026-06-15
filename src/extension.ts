@@ -1,4 +1,4 @@
-// ------------- extension.ts — OpenCode Zen inline autocomplete for VS Code ------------- //
+// ----------------- extension.ts — Wisp: inline autocomplete + Inquire ----------------- //
 
 /*
  * Depends on:
@@ -24,12 +24,12 @@
 
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
-import { NO_KEY_MESSAGE, OpenCodePanelProvider, PanelState } from './sidePanelProvider';
+import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 
 // ----------------------------- Constants ----------------------------- //
 
-const CONFIG_NS = 'opencodeAutocomplete';
-const SECRET_KEY = 'opencodeAutocomplete.apiKey'; // keychain entry name, not a literal key
+const CONFIG_NS = 'wisp';
+const SECRET_KEY = 'wisp.apiKey'; // keychain entry name, not a literal key
 const DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1';
 // Bare id, not "opencode/minimax-m3": the /go chat endpoint rejects the provider-prefixed
 // form ("401 Model … is not supported") and wants the id exactly as /models serves it.
@@ -85,7 +85,7 @@ let inFlight = 0;
 let lastError = false;
 
 // Side panel handle so key/config changes can push fresh state into the webview.
-let panel: OpenCodePanelProvider | undefined;
+let panel: WispPanelProvider | undefined;
 
 // Inquire stashes its one-shot result here; the inline provider returns it (before every normal
 // gate, even when completion is disabled) when the caret matches, then clears it. Keyed to the
@@ -264,17 +264,17 @@ const relocateAfterComment = (
 const renderStatus = (): void => {
   if (!statusBar) return;
   if (!cfg().get<boolean>('enabled', true)) {
-    statusBar.text = '$(circle-slash) OpenCode';
-    statusBar.tooltip = 'OpenCode autocomplete: disabled (click to enable)';
+    statusBar.text = '$(circle-slash) Wisp';
+    statusBar.tooltip = 'Wisp autocomplete: disabled (click to enable)';
   } else if (inFlight > 0) {
-    statusBar.text = '$(sync~spin) OpenCode';
-    statusBar.tooltip = 'OpenCode autocomplete: thinking…';
+    statusBar.text = '$(sync~spin) Wisp';
+    statusBar.tooltip = 'Wisp autocomplete: thinking…';
   } else if (lastError) {
-    statusBar.text = '$(error) OpenCode';
-    statusBar.tooltip = 'OpenCode autocomplete: last request failed — see the OpenCode Autocomplete output channel';
+    statusBar.text = '$(error) Wisp';
+    statusBar.tooltip = 'Wisp autocomplete: last request failed — see the Wisp output channel';
   } else {
-    statusBar.text = '$(sparkle) OpenCode';
-    statusBar.tooltip = 'OpenCode autocomplete: ready (click to toggle)';
+    statusBar.text = '$(sparkle) Wisp';
+    statusBar.tooltip = 'Wisp autocomplete: ready (click to toggle)';
   }
 };
 
@@ -440,7 +440,7 @@ const getState = async (): Promise<PanelState> => {
 // Prompt for the API key and store it in the OS keychain.
 const setApiKey = async (): Promise<void> => {
   const value = await vscode.window.showInputBox({
-    prompt: 'OpenCode API key (from https://opencode.ai/auth)',
+    prompt: 'API key (from https://opencode.ai/auth)',
     password: true,
     ignoreFocusOut: true,
   });
@@ -451,13 +451,13 @@ const setApiKey = async (): Promise<void> => {
     return;
   }
   await storeApiKey(value);
-  vscode.window.showInformationMessage('OpenCode API key saved.');
+  vscode.window.showInformationMessage('Wisp: API key saved.');
 };
 
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
-    vscode.window.showWarningMessage("Set your OpenCode API key first (command: 'OpenCode: Set API Key').");
+    vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
     return;
   }
   try {
@@ -466,7 +466,7 @@ const listModels = async (): Promise<void> => {
     const pick = await vscode.window.showQuickPick(ids, { placeHolder: 'Select a model (updates the setting)' });
     if (pick) {
       await setModel(pick);
-      vscode.window.showInformationMessage(`OpenCode model set to ${pick}.`);
+      vscode.window.showInformationMessage(`Wisp: model set to ${pick}.`);
     }
   } catch (err) {
     vscode.window.showErrorMessage(`Failed to list models: ${String(err)}`);
@@ -487,7 +487,7 @@ const inquire = async (): Promise<void> => {
     return;
   }
   if (!(await resolveApiKey())) {
-    vscode.window.showWarningMessage("Set your OpenCode API key first (command: 'OpenCode: Set API Key').");
+    vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
     return;
   }
   const client = await getClient();
@@ -497,7 +497,7 @@ const inquire = async (): Promise<void> => {
   const caret = editor.selection.end; // collapsed caret = end of selection; code is appended here
   const selectionText = document.getText(editor.selection);
   const { content, truncated } = buildInquiryPrompt(document, caret, selectionText);
-  if (truncated) vscode.window.showInformationMessage('OpenCode: file too big — used nearby context.');
+  if (truncated) vscode.window.showInformationMessage('Wisp: file too big — used nearby context.');
 
   const model = cfg().get<string>('model') || DEFAULT_MODEL;
   // Bridge the progress notification's Cancel to an AbortController so it also kills the HTTP call.
@@ -507,7 +507,7 @@ const inquire = async (): Promise<void> => {
   let text = '';
   try {
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'OpenCode: inquiring…', cancellable: true },
+      { location: vscode.ProgressLocation.Notification, title: 'Wisp: inquiring…', cancellable: true },
       async (_progress, token) => {
         token.onCancellationRequested(() => controller.abort());
         const maxTokens = cfg().get<number>('maxTokens') ?? 0;
@@ -537,7 +537,7 @@ const inquire = async (): Promise<void> => {
     if (!controller.signal.aborted) {
       lastError = true;
       output.appendLine(`[error] inquire ${String(err)}`);
-      vscode.window.showErrorMessage(`OpenCode: inquire failed — ${String(err)}`);
+      vscode.window.showErrorMessage(`Wisp: inquire failed — ${String(err)}`);
     }
     return;
   } finally {
@@ -545,7 +545,7 @@ const inquire = async (): Promise<void> => {
   }
 
   if (!text.trim()) {
-    vscode.window.showInformationMessage('OpenCode: nothing to insert.');
+    vscode.window.showInformationMessage('Wisp: nothing to insert.');
     return;
   }
 
@@ -559,15 +559,15 @@ const inquire = async (): Promise<void> => {
 // ----------------------------- Activation ----------------------------- //
 
 export const activate = (context: vscode.ExtensionContext): void => {
-  output = vscode.window.createOutputChannel('OpenCode Autocomplete');
+  output = vscode.window.createOutputChannel('Wisp');
   secrets = context.secrets;
 
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBar.command = 'opencodeAutocomplete.toggle';
+  statusBar.command = 'wisp.toggle';
   statusBar.show();
   renderStatus();
 
-  panel = new OpenCodePanelProvider(context.extensionUri, {
+  panel = new WispPanelProvider(context.extensionUri, {
     getState,
     getActivity: () => inFlight > 0, // current Activity for the panel's initial sync on 'ready'
     storeApiKey,
@@ -582,15 +582,15 @@ export const activate = (context: vscode.ExtensionContext): void => {
     statusBar,
     // Match every file; narrow with a language selector if you want per-language control.
     vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, provider),
-    vscode.window.registerWebviewViewProvider(OpenCodePanelProvider.viewId, panel),
-    vscode.commands.registerCommand('opencodeAutocomplete.setApiKey', setApiKey),
-    vscode.commands.registerCommand('opencodeAutocomplete.listModels', listModels),
-    vscode.commands.registerCommand('opencodeAutocomplete.toggle', toggle),
-    vscode.commands.registerCommand('opencodeAutocomplete.inquire', inquire),
+    vscode.window.registerWebviewViewProvider(WispPanelProvider.viewId, panel),
+    vscode.commands.registerCommand('wisp.setApiKey', setApiKey),
+    vscode.commands.registerCommand('wisp.listModels', listModels),
+    vscode.commands.registerCommand('wisp.toggle', toggle),
+    vscode.commands.registerCommand('wisp.inquire', inquire),
     // Keep derived state in sync when settings change out from under us.
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('opencodeAutocomplete.baseUrl')) cachedClient = undefined;
-      if (e.affectsConfiguration('opencodeAutocomplete.enabled')) renderStatus();
+      if (e.affectsConfiguration('wisp.baseUrl')) cachedClient = undefined;
+      if (e.affectsConfiguration('wisp.enabled')) renderStatus();
       // Any of our settings may be on screen in the panel — mirror every change there.
       if (e.affectsConfiguration(CONFIG_NS)) void panel?.postState();
     }),

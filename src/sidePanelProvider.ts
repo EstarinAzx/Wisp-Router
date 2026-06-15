@@ -57,8 +57,8 @@ const sanitizeError = (err: unknown): string => {
 // ----------------------------- Provider ----------------------------- //
 
 // Serves the Preact UI bundle and routes its messages onto the injected host helpers.
-export class OpenCodePanelProvider implements vscode.WebviewViewProvider {
-  public static readonly viewId = 'opencodeAutocomplete.panel';
+export class WispPanelProvider implements vscode.WebviewViewProvider {
+  public static readonly viewId = 'wisp.panel';
 
   private view: vscode.WebviewView | undefined;
 
@@ -157,7 +157,7 @@ export class OpenCodePanelProvider implements vscode.WebviewViewProvider {
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
-  <title>OpenCode</title>
+  <title>Wisp</title>
 </head>
 <body>
   <div id="root"></div>

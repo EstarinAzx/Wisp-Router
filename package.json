@@ -1,8 +1,8 @@
 {
-  "name": "opencode-autocomplete",
-  "displayName": "OpenCode Zen Autocomplete",
-  "description": "AI inline completions routed through the OpenCode Zen (go) OpenAI-compatible endpoint.",
-  "version": "0.0.4",
+  "name": "wisp",
+  "displayName": "Wisp",
+  "description": "Wisp: AI inline completions and on-demand code generation, backed by the OpenCode Zen provider.",
+  "version": "0.0.5",
   "publisher": "local",
   "private": true,
   "engines": {
@@ -20,88 +20,88 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "opencodeAutocomplete",
-          "title": "OpenCode",
-          "icon": "media/opencode.svg"
+          "id": "wisp",
+          "title": "Wisp",
+          "icon": "media/wisp.svg"
         }
       ]
     },
     "views": {
-      "opencodeAutocomplete": [
+      "wisp": [
         {
-          "id": "opencodeAutocomplete.panel",
-          "name": "OpenCode",
+          "id": "wisp.panel",
+          "name": "Wisp",
           "type": "webview"
         }
       ]
     },
     "commands": [
       {
-        "command": "opencodeAutocomplete.setApiKey",
-        "title": "OpenCode: Set API Key"
+        "command": "wisp.setApiKey",
+        "title": "Wisp: Set API Key"
       },
       {
-        "command": "opencodeAutocomplete.listModels",
-        "title": "OpenCode: List / Choose Model"
+        "command": "wisp.listModels",
+        "title": "Wisp: List / Choose Model"
       },
       {
-        "command": "opencodeAutocomplete.toggle",
-        "title": "OpenCode: Toggle Autocomplete"
+        "command": "wisp.toggle",
+        "title": "Wisp: Toggle Autocomplete"
       },
       {
-        "command": "opencodeAutocomplete.inquire",
-        "title": "OpenCode: Inquire"
+        "command": "wisp.inquire",
+        "title": "Wisp: Inquire"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "opencodeAutocomplete.inquire",
+          "command": "wisp.inquire",
           "when": "editorHasSelection",
           "group": "1_modification"
         }
       ]
     },
     "configuration": {
-      "title": "OpenCode Zen Autocomplete",
+      "title": "Wisp",
       "properties": {
-        "opencodeAutocomplete.enabled": {
+        "wisp.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Master on/off switch for inline suggestions."
         },
-        "opencodeAutocomplete.baseUrl": {
+        "wisp.baseUrl": {
           "type": "string",
           "scope": "machine",
           "default": "https://opencode.ai/zen/go/v1",
           "description": "OpenAI-compatible base URL for the OpenCode Zen provider. Machine-scoped so a workspace cannot redirect requests (and the API key) to another endpoint."
         },
-        "opencodeAutocomplete.model": {
+        "wisp.model": {
           "type": "string",
           "default": "minimax-m3",
-          "description": "Model id (bare, as served by /models — the endpoint rejects a provider-prefixed id). Run 'OpenCode: List / Choose Model' to discover valid ids."
+          "description": "Model id (bare, as served by /models — the endpoint rejects a provider-prefixed id). Run 'Wisp: List / Choose Model' to discover valid ids."
         },
-        "opencodeAutocomplete.debounceMs": {
+        "wisp.debounceMs": {
           "type": "number",
           "default": 300,
           "description": "Quiet window (ms) after the last keystroke before calling the API."
         },
-        "opencodeAutocomplete.maxTokens": {
+        "wisp.maxTokens": {
           "type": "number",
           "default": 0,
           "description": "Max tokens per suggestion. 0 = no limit (lets multi-line and reasoning-model completions finish). A positive cap bounds latency but can truncate the answer mid-output."
         },
-        "opencodeAutocomplete.temperature": {
+        "wisp.temperature": {
           "type": "number",
           "default": 0.1,
           "description": "Sampling temperature. Low keeps completions deterministic."
         },
-        "opencodeAutocomplete.maxPrefixChars": {
+        "wisp.maxPrefixChars": {
           "type": "number",
           "default": 2000,
           "description": "Characters of code before the caret sent as context."
         },
-        "opencodeAutocomplete.maxSuffixChars": {
+        "wisp.maxSuffixChars": {
           "type": "number",
           "default": 1000,
           "description": "Characters of code after the caret sent as context."

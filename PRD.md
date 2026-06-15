@@ -1,4 +1,4 @@
-# PRD: OpenCode Zen Autocomplete — VS Code extension with side-panel control UI
+# PRD: Wisp — VS Code extension with side-panel control UI
 
 ## Problem Statement
 
@@ -20,7 +20,7 @@ Three parts, as experienced by the user:
    like a code completer (the endpoint has no fill-in-middle route). A status-bar item shows whether
    the extension is ready, thinking, disabled, or errored.
 
-2. **A side panel** — a dedicated icon in the VS Code activity bar opens an OpenCode panel where I
+2. **A side panel** — a dedicated icon in the VS Code activity bar opens a Wisp panel where I
    can, in one place: set or clear my API key (shown only as "set / not set", never echoed back),
    choose my model from a live list fetched from the provider (or type a custom id), and flip
    autocomplete on/off. A status row at the top of the panel shows the live activity — "Thinking…"
@@ -67,7 +67,7 @@ Three parts, as experienced by the user:
 14. As a developer, I want a status-bar indicator of ready / thinking / disabled / error, so that I
     can tell at a glance whether the extension is working.
 15. As a developer, I want to open a side panel from the activity bar, so that I have a home for all
-    OpenCode settings.
+    Wisp settings.
 16. As a developer, I want to enter my API key in the panel, so that I do not have to remember a
     command.
 17. As a developer, I want my key stored securely in the OS keychain, so that it is never written to
@@ -163,9 +163,10 @@ Modules to build or modify (interfaces, not file paths):
   dependency. This is where the "doubled line" and fence quirks of chat-as-completer are contained.
 - **M2 — Completion context (pure, deep).** `buildContext(text, offset, limits) → { prefix, suffix }`
   and a prompt builder. Pure slicing/formatting, no VS Code dependency.
-- **M3 — OpenCodeClient (thin wrapper).** Constructed from `{ apiKey, baseURL }`; exposes
+- **M3 — ProviderClient (thin wrapper).** Constructed from `{ apiKey, baseURL }`; exposes
   `listModels()` and `complete(messages, options, signal)`. Hides the OpenAI SDK and the endpoint
-  behind a stable interface; rebuilt only when key or base URL changes.
+  behind a stable interface; rebuilt only when key or base URL changes. This is the **Provider**
+  boundary in code (see `CONTEXT.md`) — named for the role, not the current instance.
 - **M4 — Config/Secrets facade (VS Code-coupled).** `getState()` →
   `{ keyIsSet, model, enabled, baseUrl }`, plus `storeApiKey`, `clearApiKey`, `setModel`,
   `setEnabled`. The key lives in SecretStorage with an environment-variable fallback; it is never
