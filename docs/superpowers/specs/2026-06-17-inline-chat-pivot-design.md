@@ -6,11 +6,23 @@
 
 ## Summary
 
-Deprecate Wisp's always-on ghost-text autocomplete and replace it with a
-**VS Code inline-chat-style edit feature**: the user invokes a command in the
-editor, types a natural-language instruction, and the AI returns code edits
-that **add and delete** lines (not insert-only ghost text), reviewed via an
-accept/reject diff in the editor.
+In the project's ubiquitous language (`CONTEXT.md`), this is **remove Completion,
+evolve Inquire**:
+
+- **Completion** — the automatic ghost text that fires while typing, gated by the
+  **enabled** toggle ("the autocomplete you tick to enable") — is **removed**.
+- **Inquire** — the manual trigger (`wisp.inquire`) — is **evolved** from
+  "selection-as-prompt → ghost-text Suggestion" into a **VS Code inline-chat-style
+  edit**: the user invokes the command, types a natural-language **instruction**
+  in a quick input box, and the AI returns code edits that **add and delete**
+  lines over the **target span** (not insert-only ghost text), reviewed via an
+  accept/reject diff in the editor.
+
+**Entanglement note (drives slice order):** Inquire today has no output surface of
+its own — it stashes a `pendingInquiry` and the **Completion**
+`InlineCompletionItemProvider` returns it via an early-return. So Inquire
+piggybacks on the very provider being removed. Inquire must therefore get its own
+edit path **before** Completion can be ripped.
 
 The entire backend pipe is reused — the Provider catalog, the OpenAI-compatible
 client, per-Provider key/model management, and the side panel. Only the
@@ -73,7 +85,8 @@ Stable APIs this design relies on (all publishable):
 
 ### The inline-chat loop
 
-One new command, `wisp.inlineChat`, on a contributed (rebindable) keybinding
+The **existing** `wisp.inquire` command is evolved in place (kept in the
+`editor/context` menu + palette), plus a contributed (rebindable) keybinding
 **`Ctrl+Shift+I`** — `Ctrl+I` is taken by built-in Copilot inline chat as of
 VS Code 1.116.
 
@@ -127,16 +140,22 @@ CodeLens) stays in `extension.ts` and delegates to these pure cores.
 Matches the `issues.md` vertical-slice convention. Each slice compiles,
 F5-loads, and ships something working.
 
-1. **Rip ghost text.** Remove the InlineCompletionItemProvider + dead code +
-   enabled toggle (see "Goes"). Prune `getState` / webview shape. Extension
-   activates, panel manages provider/key/model, `npm test` green (catalog tests
-   adjusted). *No completion behavior yet.*
-2. **Inline-chat core (B1).** New `wisp.inlineChat` command + keybinding → input
-   box → `buildEditPrompt` → existing client → `extractEditText` →
-   `needsConfirmation` replace → native preview accept/reject. **First working
-   inline edit, end-to-end.**
-3. **Inline diff (B2).** Swap the preview for decorations + CodeLens
-   accept/reject. `diffLines` pure + TDD'd.
+1. **Evolve Inquire → inline-edit (B1).** Give `wisp.inquire` its own output
+   path: input box (instruction) → `buildEditPrompt` → existing client →
+   `extractEditText` → `WorkspaceEdit` replace over the target span with
+   `needsConfirmation` → native preview accept/reject. Inquire stops stashing
+   `pendingInquiry`/touching the provider. **Completion still runs, untouched.**
+   First working inline edit, end-to-end.
+2. **Remove Completion.** Now the `InlineCompletionItemProvider` has no other
+   user — rip it + the `enabled` toggle (`wisp.toggle`/`setEnabled`) +
+   debounce/cache/gating + the now-dead `pendingInquiry` stash + Completion-only
+   settings (`debounceMs`/`maxPrefixChars`/`maxSuffixChars`) + the panel
+   enabled-checkbox/Muted dressing + status-bar `disabled`/`ready`-vs-enabled
+   logic. Prune `getState`/webview shape. Update `CONTEXT.md` (retire
+   **Completion**/**Suggestion**/**enabled**/**Muted**/**selection-as-prompt**,
+   redefine **Inquire**). `npm test` green. *Wisp = Inquire-only.*
+3. **Inline diff (B2).** Swap Inquire's native preview for in-editor decorations
+   + CodeLens accept/reject. `diffLines` pure + TDD'd.
 4. **Bonus (optional, deferred): Option A — native inline-chat surface.**
    Register Wisp via `registerLanguageModelChatProvider` so the same Provider
    models appear in VS Code's *native* inline chat too. **Caveat:** BYOK models
