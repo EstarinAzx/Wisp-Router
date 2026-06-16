@@ -14,7 +14,7 @@ vscode-coupled resolvers into a new **vscode-free `src/catalog.ts`** (`resolveMo
 `buildInquiryContent`, `planLegacyMigration`) and put them under **13 Vitest tests** (`src/catalog.test.ts`)
 — the project's first test runner. `extension.ts` wrappers now delegate, behaviour-identical. Also
 **verified ollama-cloud** (`gpt-oss:120b`) and dropped its ⚠. `npm test` 13/13 green, `npm run compile`
-clean. Committed on branch **`test/pure-helpers`** (off `main`) — NOT merged, NOT pushed.
+clean. **Merged to `main`** via PR #2 (merge commit `bdcf780`); branch pruned. You're on `main`, clean.
 
 **Next task: USER-LED — discuss a new scope addition.** The user said they'll bring a **new addition to
 the scope** next session; it is undefined here. Start with `superpowers:brainstorming` to shape it; if it
@@ -33,6 +33,6 @@ Carried-forward backlog (only if the user wants it instead):
 - Built-in base URLs are hardcoded in `PROVIDERS` (code), never settings; `wisp.provider` + `wisp.baseUrl`
   are `"scope": "machine"` — the key-redirect defense. Don't relax.
 - `wisp.model` is a **mirror**; source of truth is `globalState['wisp.models']` per-Provider map.
-- Branches `test/pure-helpers` (this work) and `feat/multi-provider-catalog` are both unmerged/unpruned.
+- `catalog.ts` is on `main` now; `test/pure-helpers` (PR #2) + `feat/multi-provider-catalog` (PR #1) both merged and pruned (local + remote).
 
 Full rolling state in [[active-work]]; settled choices in [[decisions]]; domain language in `CONTEXT.md`.

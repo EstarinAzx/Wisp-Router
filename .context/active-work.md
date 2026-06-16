@@ -8,7 +8,7 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-06-16 by Opus 4.8 (auto)_
-_On branch: `test/pure-helpers` (off `main` @ `badd981`); committed at this wrap-up, not merged, not pushed._
+_On `main` @ `bdcf780` (PR #2 merge). Backlog item 3 shipped; `test/pure-helpers` + `feat/multi-provider-catalog` merged and pruned._
 
 ## Current focus
 **Pure helpers extracted and unit-tested (backlog item 3 — DONE).** The vscode-coupled resolvers were
@@ -53,7 +53,7 @@ Carried-forward: try a snappier default Zen model (`deepseek-v4-flash` / `kimi-k
 - The 3 remaining ⚠ model ids stay unverified until keys exist (non-blocking).
 
 ## Recent context
-- Branch `test/pure-helpers` is off `main`; `feat/multi-provider-catalog` is still merged-but-not-deleted.
+- `test/pure-helpers` (PR #2) and `feat/multi-provider-catalog` (PR #1) both merged to `main` and pruned (local + remote).
 - **Pattern established:** pure, unit-testable logic lives vscode-free in `src/catalog.ts`; `extension.ts`
   reads VS Code state and delegates. Tests can't import `extension.ts` (it imports `vscode`). See [[gotchas]].
 - **No model-id transform anywhere** — each row's `defaultModel` is the Provider's native form; never
