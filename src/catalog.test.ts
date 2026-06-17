@@ -5,7 +5,7 @@ import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
   buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
-  modelSupportsVision, contextForModel,
+  modelSupportsVision,
   parseModelsDevEntry, lookupModelsDevCaps,
   CUSTOM_ID, type Provider,
 } from './catalog';
@@ -267,27 +267,18 @@ describe('buildChatModelInfos', () => {
     expect(info.maxOutputTokens).toBeGreaterThan(0);
   });
 
-  // Context follows the ACTIVE model id via the lookup table — switch a Provider to a known model and
-  // its window updates (here Zen serving a 200K Claude despite its 'minimax-m3' default). The window is
-  // DECOMPOSED into input+output (VS Code sums them for display), so the pair totals the real context.
-  it('sizes context from the active model via the lookup', () => {
-    const zen = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'minimax-m3' });
-    const [info] = buildChatModelInfos([zen], { keyed: { 'opencode-zen': true }, modelMap: { 'opencode-zen': 'claude-sonnet-4' }, customBaseUrl: '' });
-    expect(info.maxInputTokens + info.maxOutputTokens).toBe(200_000);
-    expect(info.maxOutputTokens).toBe(8_192);
-  });
-
-  // A model the table doesn't know falls back to the conservative defaults.
-  it('falls back to default caps for an unknown model', () => {
+  // No dynamic caps (no catalogKey / offline) → the neutral default window, decomposed so input+output
+  // total it. There is no per-model context guess table; an unknown model is honestly "neutral default".
+  it('uses the neutral default window when there are no caps', () => {
     const p = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'mystery-x' });
     const [info] = buildChatModelInfos([p], { keyed: { 'opencode-zen': true }, modelMap: {}, customBaseUrl: '' });
     expect(info.maxInputTokens + info.maxOutputTokens).toBe(128_000);
     expect(info.maxOutputTokens).toBe(4_096);
   });
 
-  // Dynamic models.dev caps (injected) win over the hardcoded table/heuristic — the whole point:
-  // minimax-m3 is in neither CONTEXT_TABLE nor VISION_FAMILIES, but models.dev knows its real numbers.
-  it('prefers injected dynamic caps over the table', () => {
+  // Dynamic models.dev caps (injected) drive the numbers — the whole point: minimax-m3 has no context
+  // guess and isn't in VISION_FAMILIES, but models.dev knows its real window + vision.
+  it('uses injected dynamic caps for the window and vision', () => {
     const zen = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'minimax-m3' });
     const caps = () => ({ contextInput: 512_000, maxOutput: 131_072, vision: true });
     const [info] = buildChatModelInfos([zen], { keyed: { 'opencode-zen': true }, modelMap: {}, customBaseUrl: '', caps });
@@ -307,9 +298,9 @@ describe('buildChatModelInfos', () => {
     expect(info.maxInputTokens + info.maxOutputTokens).toBe(262_144);
   });
 
-  // When caps are unavailable (model absent from models.dev / fetch failed) it degrades to today's
-  // table/heuristic behaviour.
-  it('falls back to table/default when caps return undefined', () => {
+  // When caps are unavailable (model absent from models.dev / fetch failed): neutral default window,
+  // and vision falls to the modelSupportsVision heuristic (minimax-m3 isn't a vision family → none).
+  it('falls back to the neutral default + vision heuristic when caps return undefined', () => {
     const zen = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'minimax-m3' });
     const [info] = buildChatModelInfos([zen], { keyed: { 'opencode-zen': true }, modelMap: {}, customBaseUrl: '', caps: () => undefined });
     expect(info.maxInputTokens + info.maxOutputTokens).toBe(128_000);
@@ -366,20 +357,6 @@ describe('lookupModelsDevCaps', () => {
 
   it('returns undefined for an unknown model', () => {
     expect(lookupModelsDevCaps(catalog, 'opencode-go', 'ghost')).toBeUndefined();
-  });
-});
-
-describe('contextForModel', () => {
-  // Known families resolve to their input/output windows, regardless of which Provider serves them.
-  it('returns known family context windows', () => {
-    expect(contextForModel('claude-3.5-sonnet')).toEqual({ input: 200_000, output: 8_192 });
-    expect(contextForModel('gpt-4o-mini')).toEqual({ input: 128_000, output: 16_384 });
-    expect(contextForModel('gemini-2.0-flash')).toEqual({ input: 1_000_000, output: 8_192 });
-    expect(contextForModel('codestral-latest')).toEqual({ input: 256_000, output: 4_096 });
-  });
-
-  it('returns undefined for an unknown model', () => {
-    expect(contextForModel('mystery-model-x')).toBeUndefined();
   });
 });
 

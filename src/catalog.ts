@@ -22,8 +22,8 @@ export type Provider = {
   // models.dev provider key for live context/vision (e.g. opencode-zen -> 'opencode-go', kilocode ->
   // 'kilo'). Omitted (local Ollama, Cline, Custom) -> no dynamic lookup; falls back to table/default.
   catalogKey?: string;
-  // Note: context/vision carry no per-row hints — both come from the ACTIVE model: models.dev caps via
-  // catalogKey, else the contextForModel / modelSupportsVision heuristics. So they track model switches.
+  // Note: context/vision carry no per-row hints — both come from the ACTIVE model via models.dev
+  // (catalogKey), else context = neutral default and vision = the modelSupportsVision heuristic.
 };
 
 // ----------------------------- Constants ----------------------------- //
@@ -220,38 +220,10 @@ export const modelSupportsVision = (modelId: string): boolean => {
   return VISION_FAMILIES.some((family) => id.includes(family));
 };
 
-// Best-effort context windows by model family, so the advertised size tracks the ACTIVE model rather
-// than the Provider — a single Provider serves many models with very different windows. Ordered: the
-// first substring that matches the (lowercased) model id wins, so list specific families before broad
-// ones. Numbers are approximate (no standard /models field reports them) — this table is where to fix
-// them. Unknown models fall through to the conservative DEFAULT_MAX_* constants.
-export type ModelContext = { input: number; output: number };
-const CONTEXT_TABLE: { match: string; input: number; output: number }[] = [
-  { match: 'gpt-4.1', input: 1_000_000, output: 32_768 },
-  { match: 'gpt-4o', input: 128_000, output: 16_384 },
-  { match: 'gpt-4-turbo', input: 128_000, output: 4_096 },
-  { match: 'gpt-5', input: 256_000, output: 32_768 },
-  { match: 'gpt-oss', input: 128_000, output: 32_768 },
-  { match: 'claude-3', input: 200_000, output: 8_192 },
-  { match: 'claude-opus', input: 200_000, output: 8_192 },
-  { match: 'claude-sonnet', input: 200_000, output: 8_192 },
-  { match: 'claude-haiku', input: 200_000, output: 8_192 },
-  { match: 'gemini', input: 1_000_000, output: 8_192 },
-  { match: 'codestral', input: 256_000, output: 4_096 },
-  { match: 'mistral-large', input: 128_000, output: 4_096 },
-  { match: 'llama-3', input: 128_000, output: 32_768 },
-  { match: 'qwen', input: 32_768, output: 8_192 },
-  { match: 'deepseek', input: 128_000, output: 8_192 },
-  { match: 'kimi', input: 256_000, output: 8_192 },
-  { match: 'pixtral', input: 128_000, output: 4_096 },
-];
-
-// The context window for a model id, or undefined when no family matches (caller uses the defaults).
-export const contextForModel = (modelId: string): ModelContext | undefined => {
-  const id = modelId.toLowerCase();
-  const hit = CONTEXT_TABLE.find((e) => id.includes(e.match));
-  return hit ? { input: hit.input, output: hit.output } : undefined;
-};
+// Note: there is deliberately NO context-window guess table. Context comes from models.dev or the
+// neutral DEFAULT_MAX_* constants — an unknown/offline model shows the neutral default rather than a
+// per-model guess that could be wrong (vision keeps a fallback heuristic; a wrong window is just a
+// wrong budget, a guessed vision flag would send images a backend rejects). See VISION_FAMILIES above.
 
 // ----------------------------- models.dev capability source ----------------------------- //
 
@@ -300,14 +272,13 @@ export const buildChatModelInfos = (
     // Custom has no hardcoded URL — without wisp.baseUrl there is nowhere to send the request.
     const reachable = p.id !== CUSTOM_ID || state.customBaseUrl.trim() !== '';
     if (!state.keyed[p.id] || !model || !reachable) return [];
-    // Each field: dynamic models.dev caps -> hardcoded table -> conservative default. contextInput is
-    // the TOTAL context window (models.dev limit.context). VS Code's "Context Size" column SUMS
-    // maxInput+maxOutput, so decompose the window: reserve the output budget, leave the rest for input
-    // (output capped at half the window so an anomalous "output == context" can't zero the input).
+    // Context: dynamic models.dev caps else the neutral default (no guess table). contextInput is the
+    // TOTAL window (models.dev limit.context). VS Code's "Context Size" column SUMS maxInput+maxOutput,
+    // so decompose: reserve the output budget, leave the rest for input (output capped at half the
+    // window so an anomalous "output == context" can't zero the input).
     const dyn = state.caps?.(p, model);
-    const ctx = contextForModel(model);
-    const totalContext = dyn?.contextInput ?? ctx?.input ?? DEFAULT_MAX_INPUT_TOKENS;
-    const outputBudget = dyn?.maxOutput ?? ctx?.output ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    const totalContext = dyn?.contextInput ?? DEFAULT_MAX_INPUT_TOKENS;
+    const outputBudget = dyn?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const maxOutputTokens = Math.min(outputBudget, Math.max(1, Math.floor(totalContext / 2)));
     const maxInputTokens = Math.max(totalContext - maxOutputTokens, 1);
     return [{

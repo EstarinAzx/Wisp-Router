@@ -47,8 +47,8 @@ const SECRET_KEY = 'wisp.apiKey';
 // /models, so the panel's model picker / type-field is the correction path. ⚠ Ollama Cloud is `/v1`,
 // NOT `/api/v1` (the `/api` prefix is Ollama's native protocol and breaks the OpenAI SDK — see gotchas.md).
 // Chat-surface context windows and vision are read LIVE for the active model from models.dev (via each
-// row's catalogKey), falling back to the contextForModel / modelSupportsVision heuristics when a model
-// isn't in models.dev or the fetch fails — so they track model switches with no per-row hints to drift.
+// row's catalogKey). Fallback when a model isn't in models.dev or the fetch fails: context = a neutral
+// default (no guess table); vision = the conservative modelSupportsVision id heuristic.
 const PROVIDERS: Provider[] = [
   { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/go/v1', defaultModel: 'minimax-m3', apiKeyEnv: 'OPENCODE_API_KEY', catalogKey: 'opencode-go' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
