@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
-  buildEditPrompt, extractEditText, diffLines,
+  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -68,56 +68,145 @@ describe('planLegacyMigration', () => {
   });
 });
 
-describe('extractEditText', () => {
-  // Bare code (the happy path) passes straight through.
-  it('passes bare code through unchanged', () => {
-    expect(extractEditText('const x = 1')).toBe('const x = 1');
+describe('parseEditBlocks', () => {
+  // The happy path: one Aider-style block → one { search, replace } pair.
+  it('parses a single SEARCH/REPLACE block', () => {
+    const raw = '<<<<<<< SEARCH\nconst x = 1\n=======\nconst x = 2\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'const x = 1', replace: 'const x = 2' }]);
   });
 
-  // A model that wraps its reply in a ``` fence despite instructions → unwrap it.
-  it('strips a wrapping ``` fence', () => {
-    expect(extractEditText('```ts\nconst x = 1\n```')).toBe('const x = 1');
+  // Multiple blocks come back in document order.
+  it('parses multiple blocks in order', () => {
+    const raw =
+      '<<<<<<< SEARCH\na\n=======\nA\n>>>>>>> REPLACE\n' +
+      '<<<<<<< SEARCH\nb\n=======\nB\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([
+      { search: 'a', replace: 'A' },
+      { search: 'b', replace: 'B' },
+    ]);
   });
 
-  // Reasoning models emit a <think>…</think> block before the answer → drop it.
-  it('strips a <think> reasoning block', () => {
-    expect(extractEditText('<think>plan the change</think>const x = 1')).toBe('const x = 1');
+  // An empty REPLACE body is a pure deletion — the pair still parses, replace is ''.
+  it('treats an empty REPLACE body as a deletion', () => {
+    const raw = '<<<<<<< SEARCH\ngone\n=======\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'gone', replace: '' }]);
   });
 
-  // Unterminated <think> = the token budget ran out mid-thought, no answer yet → insert nothing.
-  it('returns empty string for an unterminated <think>', () => {
-    expect(extractEditText('<think>still thinking')).toBe('');
+  // Scanning is marker-driven, so a wrapping ``` fence and surrounding prose are ignored for free.
+  it('ignores a surrounding markdown fence and prose', () => {
+    const raw = 'Here:\n```\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n```';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'a', replace: 'b' }]);
+  });
+
+  // Reasoning models emit a <think>…</think> block before the blocks → drop it first.
+  it('strips a <think> block before parsing', () => {
+    const raw = '<think>plan</think>\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'a', replace: 'b' }]);
+  });
+
+  // Unterminated <think> = the token budget ran out mid-thought, no answer yet → no blocks.
+  it('returns [] for an unterminated <think>', () => {
+    expect(parseEditBlocks('<think>still thinking')).toEqual([]);
+  });
+
+  // No markers at all → nothing to apply.
+  it('returns [] when there are no blocks', () => {
+    expect(parseEditBlocks('no edits here')).toEqual([]);
+  });
+
+  // Multi-line bodies are captured whole.
+  it('parses multi-line search and replace', () => {
+    const raw = '<<<<<<< SEARCH\nline1\nline2\n=======\nnew1\nnew2\nnew3\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'line1\nline2', replace: 'new1\nnew2\nnew3' }]);
+  });
+
+  // CRLF markers (a Windows model reply) normalize to LF, like the rest of the diff pipeline.
+  it('normalizes CRLF markers to LF', () => {
+    const raw = '<<<<<<< SEARCH\r\na\r\n=======\r\nb\r\n>>>>>>> REPLACE';
+    expect(parseEditBlocks(raw)).toEqual([{ search: 'a', replace: 'b' }]);
+  });
+});
+
+describe('applyEditBlocks', () => {
+  // Locate the search text and splice in the replacement; the rest of the doc is untouched.
+  it('applies a single block to the document', () => {
+    const plan = applyEditBlocks('const x = 1\nconst y = 2', [{ search: 'const x = 1', replace: 'const x = 99' }]);
+    expect(plan.text).toBe('const x = 99\nconst y = 2');
+    expect(plan.notFound).toEqual([]);
+  });
+
+  // Each block applies in turn against the running result.
+  it('applies multiple blocks', () => {
+    const plan = applyEditBlocks('a\nb\nc', [
+      { search: 'a', replace: 'A' },
+      { search: 'c', replace: 'C' },
+    ]);
+    expect(plan.text).toBe('A\nb\nC');
+    expect(plan.notFound).toEqual([]);
+  });
+
+  // An empty replace deletes — a search that includes the trailing newline drops the whole line.
+  it('deletes when the replace body is empty', () => {
+    const plan = applyEditBlocks('keep\nremove me\nkeep2', [{ search: 'remove me\n', replace: '' }]);
+    expect(plan.text).toBe('keep\nkeep2');
+    expect(plan.notFound).toEqual([]);
+  });
+
+  // A search that isn't in the document is reported, not silently dropped — and never corrupts the file.
+  it('records a block whose search text is not found', () => {
+    const block = { search: 'zzz', replace: 'q' };
+    const plan = applyEditBlocks('a\nb', [block]);
+    expect(plan.text).toBe('a\nb');
+    expect(plan.notFound).toEqual([block]);
+  });
+
+  // EOL-agnostic: a CRLF document matches an LF search (the diffLines trap). Output is LF; the caller
+  // rejoins with the document's own EOL.
+  it('matches EOL-agnostically (CRLF document vs LF search)', () => {
+    const plan = applyEditBlocks('a\r\nb\r\nc', [{ search: 'b', replace: 'B' }]);
+    expect(plan.text).toBe('a\nB\nc');
+    expect(plan.notFound).toEqual([]);
+  });
+
+  // Found blocks apply; missing ones are reported so the caller can warn.
+  it('applies found blocks and reports the missing ones', () => {
+    const plan = applyEditBlocks('a\nb', [
+      { search: 'a', replace: 'A' },
+      { search: 'nope', replace: 'X' },
+    ]);
+    expect(plan.text).toBe('A\nb');
+    expect(plan.notFound).toEqual([{ search: 'nope', replace: 'X' }]);
+  });
+
+  // An empty search would match at position 0 and inject text at the top — guard it as not-found.
+  it('treats an empty search as not-found', () => {
+    const block = { search: '', replace: 'X' };
+    const plan = applyEditBlocks('a\nb', [block]);
+    expect(plan.text).toBe('a\nb');
+    expect(plan.notFound).toEqual([block]);
   });
 });
 
 describe('buildEditPrompt', () => {
   // The request is a system message (the edit rules) then a user message (the work).
   it('returns a system message then a user message', () => {
-    const msgs = buildEditPrompt({ selectionText: 'a', instruction: 'b', languageId: 'ts', context: 'c' });
+    const msgs = buildEditPrompt({ instruction: 'b', languageId: 'ts', context: 'c' });
     expect(msgs.map((m) => m.role)).toEqual(['system', 'user']);
   });
 
-  // The user message carries the four inputs the model needs to do the edit.
-  it('puts language, context, target span and instruction in the user message', () => {
-    const [, user] = buildEditPrompt({
-      selectionText: 'const x = 1', instruction: 'make it 2', languageId: 'typescript', context: 'const x = 1\n',
-    });
+  // The user message carries the three inputs the model needs to produce edit blocks.
+  it('puts language, context and instruction in the user message', () => {
+    const [, user] = buildEditPrompt({ instruction: 'make it 2', languageId: 'typescript', context: 'const x = 1\n' });
     expect(user.content).toContain('typescript');
     expect(user.content).toContain('const x = 1');
     expect(user.content).toContain('make it 2');
   });
 
-  // The system message must constrain the model to return ONLY the rewritten span.
-  it('tells the model to return only the rewritten span', () => {
-    const [system] = buildEditPrompt({ selectionText: '', instruction: 'x', languageId: 'js', context: '' });
-    expect(system.content.toLowerCase()).toContain('only');
-  });
-
-  // Empty span (no selection → a blank current line) still produces a valid two-message request.
-  it('handles an empty target span', () => {
-    const msgs = buildEditPrompt({ selectionText: '', instruction: 'add a header', languageId: 'md', context: '' });
-    expect(msgs).toHaveLength(2);
-    expect(msgs[1].content).toContain('add a header');
+  // The system message must elicit the SEARCH/REPLACE block format.
+  it('instructs the model to emit SEARCH/REPLACE edit blocks', () => {
+    const [system] = buildEditPrompt({ instruction: 'x', languageId: 'js', context: '' });
+    expect(system.content).toContain('SEARCH');
+    expect(system.content).toContain('REPLACE');
   });
 });
 

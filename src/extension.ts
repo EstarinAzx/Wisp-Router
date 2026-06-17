@@ -21,7 +21,7 @@ import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
   Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, planLegacyMigration,
-  buildEditPrompt, extractEditText, diffLines,
+  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
 } from './catalog';
 
 // ----------------------------- Constants ----------------------------- //
@@ -389,22 +389,16 @@ const listModels = async (): Promise<void> => {
   }
 };
 
-// Inquire: type an instruction → the AI rewrites the target span (the selection, or the current line
-// when nothing is selected) over the whole-file context. Applied as a confirmable WorkspaceEdit, so
-// VS Code's native refactor-preview shows the diff and the user accepts/rejects. One replace covers
-// both add and delete. No longer routes through the inline-completion provider (no pendingInquiry).
+// Inquire: type an instruction → the model returns SEARCH/REPLACE edit blocks over the whole-file
+// context; Wisp locates each block and applies it to produce the edited file, then renders the
+// before/after as an in-editor diff (red removed / green added) with Accept/Reject CodeLenses.
+// Editing via blocks — not a span or whole-file re-emit — keeps untouched code byte-for-byte intact,
+// so the diff shows only the real changes. No longer routes through the inline-completion provider.
 const inquire = async (): Promise<void> => {
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
 
   const document = editor.document;
-  // Target span = the selection, or the whole current line when there is no selection. (Whole-file,
-  // caret-agnostic editing is delivered safely by the SEARCH/REPLACE edit-blocks slice — a whole-file
-  // re-emit here risks the model mangling untouched code, which Accept would then apply.)
-  const span = editor.selection.isEmpty
-    ? document.lineAt(editor.selection.active.line).range
-    : new vscode.Range(editor.selection.start, editor.selection.end);
-  const selectionText = document.getText(span);
 
   const instruction = await vscode.window.showInputBox({
     prompt: 'Wisp: describe the edit',
@@ -425,15 +419,14 @@ const inquire = async (): Promise<void> => {
   if (!client) return;
 
   const model = activeModel();
-  const messages = buildEditPrompt({
-    selectionText, instruction, languageId: document.languageId, context: document.getText(),
-  });
+  const original = document.getText();
+  const messages = buildEditPrompt({ instruction, languageId: document.languageId, context: original });
 
   // Bridge the progress notification's Cancel to an AbortController so it also kills the HTTP call.
   const controller = new AbortController();
   enterInFlight();
   const started = Date.now();
-  let replacement = '';
+  let reply = '';
   try {
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Wisp: editing…', cancellable: true },
@@ -449,11 +442,11 @@ const inquire = async (): Promise<void> => {
           },
           { signal: controller.signal },
         );
-        replacement = extractEditText(res.choices[0]?.message?.content ?? '');
+        reply = res.choices[0]?.message?.content ?? '';
       },
     );
     lastError = false;
-    output.appendLine(`inquire ${model} ${Date.now() - started}ms ${replacement.length}c`);
+    output.appendLine(`inquire ${model} ${Date.now() - started}ms ${reply.length}c`);
   } catch (err) {
     // Cancelling via the notification is normal (aborts); only surface real failures.
     if (!controller.signal.aborted) {
@@ -463,7 +456,7 @@ const inquire = async (): Promise<void> => {
       // (ENOTFOUND / ECONNRESET / ETIMEDOUT / cert) is on err.cause. Log it so failures are diagnosable.
       const cause = (err as { cause?: { message?: string; code?: string } })?.cause;
       if (cause) output.appendLine(`[error] inquire cause: ${cause.code ?? ''} ${cause.message ?? String(cause)}`);
-      output.appendLine(`[error] inquire ctx: base=${activeBaseUrl()} provider=${activeProvider().id} model=${activeModel()} chars=${document.getText().length}`);
+      output.appendLine(`[error] inquire ctx: base=${activeBaseUrl()} provider=${activeProvider().id} model=${activeModel()} chars=${original.length}`);
       vscode.window.showErrorMessage(`Wisp: inquire failed — ${String(err)}`);
     }
     return;
@@ -471,19 +464,36 @@ const inquire = async (): Promise<void> => {
     exitInFlight();
   }
 
-  // Nothing came back, or the model echoed the span verbatim → no edit to offer.
-  if (!replacement.trim()) {
+  // Parse the reply into edit blocks and apply them to the whole document.
+  const blocks = parseEditBlocks(reply);
+  if (blocks.length === 0) {
     vscode.window.showInformationMessage('Wisp: nothing to change.');
     return;
   }
-  if (replacement === selectionText) {
+  const plan = applyEditBlocks(original, blocks);
+  // Every block's SEARCH text was missing → the model quoted code that isn't in the file; nothing safe
+  // to apply. Surface it rather than render an empty diff.
+  if (plan.notFound.length === blocks.length) {
+    vscode.window.showWarningMessage('Wisp: could not locate the text to edit — no changes applied.');
+    return;
+  }
+  // applyEditBlocks output is LF; compare against the LF-normalized original so a no-op edit is caught.
+  if (plan.text === original.replace(/\r\n/g, '\n')) {
     vscode.window.showInformationMessage('Wisp: no change suggested.');
     return;
   }
+  // Some blocks applied, some didn't — let the user review what landed, but warn about the misses.
+  if (plan.notFound.length > 0) {
+    vscode.window.showWarningMessage(
+      `Wisp: ${plan.notFound.length} of ${blocks.length} edits could not be located and were skipped.`,
+    );
+  }
 
-  // Render the rewrite as an in-editor diff (red removed / green added lines) with Accept/Reject
-  // CodeLenses over the span — replaces B1's native refactor-preview.
-  await renderInlineDiff(editor, span, selectionText, replacement);
+  // Whole-document span: blocks edit targeted regions, so diff the whole file before/after. Safe — the
+  // untouched code is copied verbatim by applyEditBlocks, so diffLines emits a minimal diff (this is the
+  // applied result, NOT the whole-file model re-emit that mangles code).
+  const span = new vscode.Range(document.positionAt(0), document.positionAt(original.length));
+  await renderInlineDiff(editor, span, original, plan.text);
 };
 
 // ----------------------------- Activation ----------------------------- //

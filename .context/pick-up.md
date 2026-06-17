@@ -9,40 +9,41 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task finished (2026-06-17): slice #6 — Inquire reviews edits via an in-editor inline diff (B2).**
-Added `diffLines(before, after)` + `DiffOp` to `src/catalog.ts` (LCS keep/add/remove op list,
-EOL-agnostic), TDD'd with 6 cases. Wired `renderInlineDiff` in `src/extension.ts`: red-removed /
-green-added line decorations + `✓ Accept` / `✗ Reject` CodeLenses (anchored at the first changed line)
-over the span; Accept applies kept+added, Reject restores the original. Replaced B1's
-`needsConfirmation` refactor-preview. Internal `wisp.acceptEdit` / `wisp.rejectEdit` commands (not in
-the palette). **Reverted** a whole-file-span experiment (mangling / data-loss on Accept) → span is back
-to selection / current-line. `npm test` **24/24**, `npm run compile` clean, F5 PASSED. Committed on
-`feat/inline-chat-pivot`.
+**Last task finished (2026-06-17): slice #8 — Inquire edits via SEARCH/REPLACE edit blocks.**
+Added `parseEditBlocks(raw)` → `{ search, replace }[]` and `applyEditBlocks(doc, blocks)` →
+`{ text, notFound }` to `src/catalog.ts` (Aider markers `<<<<<<< SEARCH` / `=======` / `>>>>>>> REPLACE`;
+strips `<think>`, CRLF→LF, ignores fences/prose, empty REPLACE = delete; EOL-agnostic first-occurrence
+locate+splice, empty-search guarded), TDD'd — **35/35**. New block-eliciting `EDIT_SYSTEM_PROMPT`;
+`buildEditPrompt` dropped `selectionText`. **Removed** orphaned `extractEditText` + `stripFences`
+(`stripThink` kept, reused by the parser). `extension.ts` `inquire` now parses → applies → diffs the
+**whole document** before/after through the **unchanged** B2 `renderInlineDiff` (Accept/Reject lenses).
+Guards: 0 blocks → "nothing to change"; all-miss → "could not locate"; no-op → "no change"; partial miss
+→ warn N/M. `npm test` **35/35**, `npm run compile` clean, **F5 PASSED**. Debug instrumentation added to
+diagnose F5 misses, then **removed** before commit. Committed on `feat/inline-chat-pivot`.
 
-**Next task: slice #8 — SEARCH/REPLACE edit blocks (Inquire edit fidelity).** Decision + rationale in
-[[decisions]] (2026-06-17 edit-fidelity entry); trap in [[gotchas]] ("don't make the edit span the whole
-file"). Make the model emit only the **changed regions** (`SEARCH` snippet → `REPLACE`) instead of
-re-emitting the span/file — that re-emit is what mangles untouched code. **TDD the pure core first** in
-`src/catalog.ts`: `parseEditBlocks(raw)` → `{ search, replace }[]` + an apply planner (locate each
-`search` in the document → new text / not-found), then feed the applied result through the **existing**
-`diffLines` + `renderInlineDiff` (B2 reused as-is). Load `superpowers:test-driven-development`. Then
-**#7** (LM-chat-provider bonus) stays deferred — resolve its Option-A BYOK/Copilot-plan gating first
-(non-blocking for #8).
+**Next task: slice #7 — register Wisp as a VS Code Language Model Chat Provider (deferred bonus, HITL).**
+**Resolve the gate FIRST:** Option-A BYOK gating may need GitHub Copilot Business/Enterprise (Apr 2026)
+vs docs saying no Copilot plan needed — settle this before building (see [[decisions]] 2026-06-17 pivot
+entry). #7 only adds a *surface* (Wisp models in native inline chat); inference stays on Wisp's own
+OpenAI-compatible client. It's the LAST planned pivot slice — core is shipped.
 
 **Landmines:**
-- **Inquire knows the whole file (context) but edits only the target span.** Don't "fix" that by
-  widening the span to the whole file — the whole-file re-emit is the confirmed mangling / data-loss
-  vector (see [[gotchas]]). #8's edit blocks are the safe way to edit anywhere.
-- **Keep new diff/edit logic vscode-free in `catalog.ts`** — `extension.ts` imports `vscode`, so Vitest
-  can't import it. `diffLines` lives in `catalog.ts`; `parseEditBlocks` belongs there too. `extension.ts`
-  reads editor state and renders.
-- **`diffLines` is EOL-agnostic** (splits `/\r?\n/`); op text is `\r`-free and the caller rejoins with
-  the document's EOL. Match this for any `search`-text comparison in #8 (CRLF buffer vs LF model reply).
-- **B2 is done — reuse it.** #8 only changes how the new text is *produced* (blocks → applied text);
-  the preview/decorations/Accept-Reject path is unchanged.
+- **Edit blocks are flaky with reasoning models, but fail SAFE.** A run may miss (non-verbatim SEARCH →
+  "could not locate") or return no blocks ("nothing to change"); retry usually works. Match is **exact**
+  (EOL-agnostic only) on purpose — a miss is skipped, never force-matched, so no data loss. Don't
+  reflexively add fuzzy/trimmed matching (wrong-region risk); the fuzzy fork is deferred to "only if real
+  use shows frequent misses." See [[gotchas]].
+- **Don't reintroduce whole-file re-emit** as the edit path — confirmed mangling/data-loss vector. The
+  whole-doc diff *span* in `inquire` is fine (it diffs the *applied* result, which preserves untouched
+  code verbatim) — that is NOT a re-emit.
+- **Keep new pure logic vscode-free in `catalog.ts`** — `extension.ts` imports `vscode`, so Vitest can't
+  import it. `parseEditBlocks`/`applyEditBlocks` live in `catalog.ts`; `extension.ts` reads editor state
+  and renders.
+- **EOL-agnostic everywhere** — `applyEditBlocks` output is LF; the caller rejoins with the document EOL
+  (same contract as `diffLines`). Match this for any new text comparison.
 - **No model-id transform** — each Provider's `defaultModel` is its native form (`opencode/` prefix 401s Zen).
-- **Uncommitted, NOT part of slice #6:** `CLAUDE.md` has a pre-existing edit (guideline sections) left
+- **Uncommitted, NOT part of slice #8:** `CLAUDE.md` has a pre-existing edit (guideline sections) left
   unstaged — commit separately if wanted.
 
-Full rolling state in [[active-work]]; pivot + edit-fidelity rationale in [[decisions]] (2026-06-17);
-domain language in `CONTEXT.md`.
+Full rolling state in [[active-work]]; edit-blocks rationale in [[decisions]] (2026-06-17); domain
+language in `CONTEXT.md`.
