@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
-  buildEditPrompt, extractEditText,
+  buildEditPrompt, extractEditText, diffLines,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -118,5 +118,62 @@ describe('buildEditPrompt', () => {
     const msgs = buildEditPrompt({ selectionText: '', instruction: 'add a header', languageId: 'md', context: '' });
     expect(msgs).toHaveLength(2);
     expect(msgs[1].content).toContain('add a header');
+  });
+});
+
+describe('diffLines', () => {
+  // B2's in-editor diff walks this op list to paint kept/added/removed lines and to rebuild the
+  // buffer on accept. An identical before/after is all 'keep' — the no-op edit shows no diff.
+  it('returns all keeps when before and after are identical', () => {
+    expect(diffLines('a\nb', 'a\nb')).toEqual([
+      { type: 'keep', text: 'a' },
+      { type: 'keep', text: 'b' },
+    ]);
+  });
+
+  // Pure append: the shared prefix stays kept, the new tail is added.
+  it('marks appended lines as adds', () => {
+    expect(diffLines('a\nb', 'a\nb\nc')).toEqual([
+      { type: 'keep', text: 'a' },
+      { type: 'keep', text: 'b' },
+      { type: 'add', text: 'c' },
+    ]);
+  });
+
+  // Pure delete: the dropped line is a remove between two kept lines.
+  it('marks dropped lines as removes', () => {
+    expect(diffLines('a\nb\nc', 'a\nc')).toEqual([
+      { type: 'keep', text: 'a' },
+      { type: 'remove', text: 'b' },
+      { type: 'keep', text: 'c' },
+    ]);
+  });
+
+  // A changed line is a remove of the old followed by an add of the new (removes precede adds in a hunk).
+  it('renders a replaced line as remove-then-add', () => {
+    expect(diffLines('a\nb\nc', 'a\nx\nc')).toEqual([
+      { type: 'keep', text: 'a' },
+      { type: 'remove', text: 'b' },
+      { type: 'add', text: 'x' },
+      { type: 'keep', text: 'c' },
+    ]);
+  });
+
+  // An empty target span is one empty line; replacing it removes that blank line and adds the new code.
+  it('treats an empty before as a removed blank line plus the added code', () => {
+    expect(diffLines('', 'const x = 1')).toEqual([
+      { type: 'remove', text: '' },
+      { type: 'add', text: 'const x = 1' },
+    ]);
+  });
+
+  // EOL-agnostic: a CRLF buffer vs an LF model reply must match line-for-line (else every line
+  // mismatches on a stray \r and the whole file renders as remove-all + add-all). Op text is \r-free.
+  it('matches lines across CRLF/LF differences', () => {
+    expect(diffLines('a\r\nb\r\nc', 'a\nb\nc')).toEqual([
+      { type: 'keep', text: 'a' },
+      { type: 'keep', text: 'b' },
+      { type: 'keep', text: 'c' },
+    ]);
   });
 });

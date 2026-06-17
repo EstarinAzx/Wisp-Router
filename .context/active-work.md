@@ -8,72 +8,81 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-06-17 by Opus 4.8 (auto)_
-_At commit: uncommitted (slice #5 staged for commit on `feat/inline-chat-pivot`)_
+_At commit: uncommitted (slice #6 staged for commit on `feat/inline-chat-pivot`)_
 
 ## Current focus
-**Slice #5 DONE — Completion removed; Wisp is Inquire-only.** No more always-on ghost-text
-autocomplete and no `enabled` toggle. The only feature is **Inquire**: type an instruction → the AI
-rewrites the target span (selection, or current line if none) over whole-file context → confirmable
-`WorkspaceEdit` replace via VS Code's native refactor-preview. Next: **slice #6 — inline diff (B2)**.
+**Slice #6 DONE — Inquire reviews edits via an in-editor inline diff (B2).** Instruction →
+the model rewrites the **target span** (selection, or the current line if none) over whole-file
+context → the rewrite renders as red-removed / green-added line decorations with **Accept / Reject**
+CodeLenses over the change; Accept applies, Reject reverts. Replaces B1's native refactor-preview.
+Next: **slice #8 — SEARCH/REPLACE edit blocks** (edit anywhere, safely; supersedes whole-file rewrite).
 
 ## State
 - **In flight:** nothing.
-- **Done this session (slice #5 / issue #5):**
-  - `src/extension.ts`: ripped the `InlineCompletionItemProvider` + registration, `SYSTEM_PROMPT`,
-    `buildContext`/`buildUserPrompt`/`stripPrefixOverlap`/`delay`, the comment-line guard
-    (`LINE_COMMENT`/`looksLikeCode`/`reindent`/`relocateAfterComment`), the inert `pendingInquiry`
-    stash + provider early-return, the `lastResult` cache, `setEnabled`, the `toggle` command, and
-    every `enabled` reference. Status bar collapsed to **thinking/error/ready** (no longer clickable).
-    **~260 net lines gone.**
-  - `src/catalog.ts` + `catalog.test.ts`: removed `buildInquiryContent` + `INQUIRE_CONTEXT_LIMIT`
-    (dead since #4) and their 3 tests. `stripThink`/`stripFences` stay (Inquire's `extractEditText`).
-  - `package.json`: dropped `wisp.toggle` command + settings `enabled`/`debounceMs`/`maxPrefixChars`/
-    `maxSuffixChars`; reworded `description`.
-  - `src/sidePanelProvider.ts` + `webview/app.tsx`: dropped `enabled` from `PanelState`, `setEnabled`
-    from `PanelHost` + routing, the toggle checkbox UI, and the **Muted** opacity dressing.
-  - `CONTEXT.md`: retired **Completion**/**Suggestion**/**enabled**/**Muted**/**selection-as-prompt**;
-    redefined **Inquire** (instruction + target span); status bar 4→3 labels.
-  - `.context/overview.md` + `api.md` + `gotchas.md`: reframed to Inquire-only (pruned stale gotchas
-    that pointed at the deleted `stripPrefixOverlap`/`delay`/`relocateAfterComment`).
-  - **Verification:** `npm test` **18/18** · `npm run compile` **clean** · **F5 eyeball PASSED**
-    (panel renders with no toggle, Idle indicator; user screenshot 2026-06-17).
+- **Done this session (slice #6 / B2 inline diff):**
+  - `src/catalog.ts`: `diffLines(before, after)` + `DiffOp` type — LCS-backtracked keep/add/remove op
+    list, removes-before-adds per hunk, **EOL-agnostic** (splits on `/\r?\n/`; op text is `\r`-free so
+    the caller rejoins with the document's own EOL). vscode-free, the testable core.
+  - `src/catalog.test.ts`: 6 `diffLines` cases (identical / append / delete / replace / empty-before /
+    **CRLF-vs-LF**), TDD red→green. **24/24.**
+  - `src/extension.ts`: `renderInlineDiff` (replace span with old+new interleaved, paint
+    `diffEditor.insertedTextBackground` / `removedTextBackground` whole-line decorations, removed gets
+    `line-through`); CodeLens provider for `✓ Accept` / `✗ Reject` anchored at the **first changed
+    line** (so whole-span edits don't strand the lenses off-screen); `resolvePreview(accept)` applies
+    kept+added or restores the original; `clearPreview`; preview rejoined with the document EOL. The
+    `inquire` tail swapped from the `needsConfirmation` WorkspaceEdit to `renderInlineDiff`. Added
+    `err.cause` + ctx logging in the `inquire` catch (diagnostics).
+  - Internal commands `wisp.acceptEdit` / `wisp.rejectEdit` (CodeLens-invoked, **not** contributed to
+    the palette); two `TextEditorDecorationType`s + the CodeLens provider registered in `activate`.
+  - **Reverted** a mid-session experiment that targeted the **whole file** on no-selection — it
+    risked the model mangling untouched code (data loss on Accept). Span is back to selection /
+    current-line (B2's documented scope). See [[gotchas]] + [[decisions]] edit-fidelity entry.
+  - **Verification:** `npm test` **24/24** · `npm run compile` **clean** · F5 eyeball (add-on-line +
+    delete-selected-line diffs, Accept/Reject) PASSED earlier this session.
 - **Blocked:** nothing.
 
 ## Pick up here
-**Slice #6 — issue #6 (in-editor inline diff for Inquire, B2).** `gh issue view 6 --comments`.
-Today Inquire reviews via VS Code's **native refactor-preview** (B1, `needsConfirmation`); B2 replaces
-that with an **in-editor** diff — `setDecorations` (added/removed line backgrounds) + `CodeLens`
-(Accept / Reject) over the proposed span.
-- **TDD the pure core first:** add `diffLines(before, after)` to `src/catalog.ts` (vscode-free, returns
-  a line op list — keep/add/remove) with Vitest cases in `catalog.test.ts` **before** any decoration
-  wiring. The decorations + CodeLens are VS Code glue → manual/F5 verify.
-- Keep `extension.ts` thin: it reads editor state and renders the diff; the diff math lives in
-  `catalog.ts` (see [[gotchas]] — vscode-free logic is the testable layer).
+**Slice #8 — SEARCH/REPLACE edit blocks (Inquire edit fidelity).** Decision recorded in
+[[decisions]] (2026-06-17 edit-fidelity entry); trap in [[gotchas]].
+- **Why:** the span/whole-file **re-emit** is the failure mode — asking the model to return the whole
+  file to change one line makes it drop/reformat untouched code. Edit blocks make the model emit only
+  the **changed regions** (`SEARCH` snippet → `REPLACE`), so untouched code is structurally preserved
+  and the user gets caret-agnostic "edit anywhere" safely.
+- **TDD the pure core first** (vscode-free, in `src/catalog.ts`): `parseEditBlocks(raw)` → list of
+  `{ search, replace }` pairs, and an apply planner (locate each `search` in the document text →
+  produce the new text / a not-found result). Then feed the applied result through the **existing**
+  `diffLines` + `renderInlineDiff` (B2 reused unchanged) for preview + Accept/Reject.
+- New `EDIT_SYSTEM_PROMPT` (or a sibling) that elicits the block format; `extractEditText` may need a
+  block-aware variant. Boundaries to test: multiple blocks, search-not-found, empty replace (delete),
+  fenced reply, `<think>` wrapper, no-match-safe.
 - `npm test` green, `npm run compile` clean, F5.
 
-Then **#7** (bonus: register Wisp as a VS Code LM chat provider) — **deferred**, resolve the Option A
-BYOK/Copilot-plan gating question first (below).
+Then **#7** (bonus: register Wisp as a VS Code LM chat provider) — still **deferred**, resolve the
+Option A BYOK/Copilot-plan gating question first (below).
 
 ## Skills for next session
-- `superpowers:test-driven-development` — `diffLines` is a pure core; red-green-refactor it into `catalog.ts`.
-- `superpowers:executing-plans` — the slices run in order (#6 next).
+- `superpowers:test-driven-development` — `parseEditBlocks` + the apply planner are pure cores; red-green them.
+- `superpowers:executing-plans` — pivot slices run in order (#8 next, then deferred #7).
 
 ## Open questions
 - **Slice #7 (Option A) gating** — BYOK / LM-chat-provider may need Copilot Business/Enterprise (Apr
-  2026) vs docs saying no Copilot plan needed. Resolve before #7 (non-blocking for #6).
+  2026) vs docs saying no Copilot plan needed. Resolve before #7 (non-blocking for #8).
+- **#8 block format** — pick the exact `SEARCH/REPLACE` marker syntax (Aider-style `<<<<<<< SEARCH` /
+  `=======` / `>>>>>>> REPLACE`) and decide fuzzy-match policy when the model's `search` text doesn't
+  byte-match (whitespace/EOL). Keep matching EOL-agnostic like `diffLines`.
 
 ## Recent context
-- Inquire's review UX is **B1** (native refactor-preview via `needsConfirmation`); **B2** (in-editor
-  decorations + CodeLens) is slice #6 — the next task.
-- **Completion is gone, not flag-gated** — the rip is one-way (see [[decisions]] 2026-06-17). The
-  status bar no longer has a click action (nothing to toggle).
-- Pure, unit-testable logic lives **vscode-free in `catalog.ts`**; `extension.ts` imports `vscode` so
-  tests can't import it. `diffLines` for #6 belongs there.
-- **Uncommitted, NOT this slice:** `CLAUDE.md` has a pre-existing edit (guideline sections 5–7) from
-  before this session — leave it out of the slice-#5 commit; commit separately if wanted.
+- Inquire's review UX is now **B2** (in-editor decorations + CodeLens). **B1** (native refactor-preview
+  via `needsConfirmation`) is gone — the WorkspaceEdit-with-confirmation tail was replaced.
+- Inquire **knows** the whole file (whole-file context, unchanged) but **edits** only the target span —
+  that span/re-emit limit is exactly what #8 fixes.
+- Pure, unit-testable logic lives **vscode-free in `catalog.ts`**; `extension.ts` imports `vscode`.
+  `diffLines` lives there; `parseEditBlocks` for #8 belongs there too.
+- **Uncommitted, NOT this slice:** `CLAUDE.md` has a pre-existing edit (guideline sections) from before
+  this session — keep it out of the slice-#6 commit; commit separately if wanted.
 
 ## Related
 - [[overview]]
-- [[api]] — Inquire is the only surface now; Completion provider/settings/protocol removed
-- [[decisions]] — the pivot + slice-#5 (Completion removed) entries
-- [[gotchas]] — vscode-free `catalog.ts` is the testable layer for `diffLines`
+- [[api]] — Inquire is the only surface; review is now in-editor B2
+- [[decisions]] — 2026-06-17 edit-fidelity entry (edit blocks chosen over whole-file rewrite)
+- [[gotchas]] — don't make the edit span the whole file (mangling / data loss); vscode-free `catalog.ts`

@@ -21,7 +21,7 @@ import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
   Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, planLegacyMigration,
-  buildEditPrompt, extractEditText,
+  buildEditPrompt, extractEditText, diffLines,
 } from './catalog';
 
 // ----------------------------- Constants ----------------------------- //
@@ -80,6 +80,16 @@ let lastError = false;
 
 // Side panel handle so key/config changes can push fresh state into the webview.
 let panel: WispPanelProvider | undefined;
+
+// B2 inline-diff state. While a preview is on screen the buffer holds old+new lines together
+// (decorated), and exactly one preview is live at a time. `range` covers the rendered preview text;
+// Accept replaces it with `acceptText` (kept+added), Reject restores `originalText` (the span).
+let addedDecoration: vscode.TextEditorDecorationType;
+let removedDecoration: vscode.TextEditorDecorationType;
+let activePreview: { uri: vscode.Uri; range: vscode.Range; lensLine: number; acceptText: string; originalText: string } | undefined;
+// CodeLens refresh signal — fired when a preview appears or resolves so the Accept/Reject lenses
+// re-evaluate against the new activePreview.
+const onDidChangeCodeLenses = new vscode.EventEmitter<void>();
 
 // ----------------------------- Configuration ----------------------------- //
 
@@ -250,6 +260,97 @@ const migrateLegacyKey = async (): Promise<void> => {
   await secrets.delete(SECRET_KEY);
 };
 
+// ----------------------------- Inline diff (B2) ----------------------------- //
+
+// A visible editor showing the given document, if any (Accept/Reject and decorations need the editor,
+// not just the document — they may run from a CodeLens click after focus moved).
+const editorFor = (uri: vscode.Uri): vscode.TextEditor | undefined =>
+  vscode.window.visibleTextEditors.find((e) => e.document.uri.toString() === uri.toString());
+
+// Tear down the current preview: drop both decoration sets on its editor and forget it. Idempotent —
+// called before rendering a new preview and after Accept/Reject so two previews can never coexist.
+const clearPreview = (): void => {
+  if (!activePreview) return;
+  const editor = editorFor(activePreview.uri);
+  editor?.setDecorations(addedDecoration, []);
+  editor?.setDecorations(removedDecoration, []);
+  activePreview = undefined;
+  onDidChangeCodeLenses.fire();
+};
+
+// Render the model's rewrite as an in-editor diff: replace the span with the old+new lines interleaved
+// (unified-diff order), paint removed lines red / added lines green, and arm the Accept/Reject lenses.
+// Each diff op consumes exactly one preview line, so line bookkeeping is exact (kept text stays
+// undecorated). Pure line-diff math lives in catalog.diffLines; this is the vscode rendering glue.
+const renderInlineDiff = async (
+  editor: vscode.TextEditor, span: vscode.Range, originalText: string, replacement: string,
+): Promise<void> => {
+  clearPreview();
+  const ops = diffLines(originalText, replacement);
+
+  // diffLines op text is \r-free; rejoin with the document's own EOL so a CRLF file stays CRLF.
+  const eol = editor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+  // The preview buffer text = every op's line in order; accept keeps only kept+added lines.
+  const previewLines = ops.map((o) => o.text);
+  const acceptText = ops.filter((o) => o.type !== 'remove').map((o) => o.text).join(eol);
+
+  await editor.edit((b) => b.replace(span, previewLines.join(eol)));
+
+  // The preview occupies ops.length lines from span.start; mark each add/remove line for decoration.
+  const added: vscode.Range[] = [];
+  const removed: vscode.Range[] = [];
+  ops.forEach((op, idx) => {
+    const line = span.start.line + idx;
+    const lineRange = new vscode.Range(line, 0, line, 0);
+    if (op.type === 'add') added.push(lineRange);
+    else if (op.type === 'remove') removed.push(lineRange);
+  });
+  editor.setDecorations(addedDecoration, added);
+  editor.setDecorations(removedDecoration, removed);
+
+  // Range covering exactly the rendered preview, so Accept/Reject replace the whole block. End char is
+  // span.start.character only on a single-line preview (the first line keeps any pre-span prefix).
+  const endLine = span.start.line + previewLines.length - 1;
+  const endChar = previewLines.length === 1
+    ? span.start.character + previewLines[0].length
+    : previewLines[previewLines.length - 1].length;
+  // Anchor the Accept/Reject lenses at the first changed line, not the span top — for a whole-file
+  // edit span.start is line 0, which would strand the lenses off-screen above the actual diff.
+  const firstChange = ops.findIndex((o) => o.type !== 'keep');
+  activePreview = {
+    uri: editor.document.uri,
+    range: new vscode.Range(span.start, new vscode.Position(endLine, endChar)),
+    lensLine: span.start.line + (firstChange < 0 ? 0 : firstChange),
+    acceptText,
+    originalText,
+  };
+  onDidChangeCodeLenses.fire();
+};
+
+// Resolve the preview: Accept swaps the old+new block for the accepted text, Reject restores the
+// original span. Both then tear the preview down.
+const resolvePreview = async (accept: boolean): Promise<void> => {
+  if (!activePreview) return;
+  const { uri, range, acceptText, originalText } = activePreview;
+  const editor = editorFor(uri);
+  if (editor) await editor.edit((b) => b.replace(range, accept ? acceptText : originalText));
+  clearPreview();
+};
+
+// CodeLens provider for the Accept/Reject pair. Two lenses on the preview's first line, shown only
+// while a preview is live for this document — nothing to contribute otherwise.
+const editCodeLensProvider: vscode.CodeLensProvider = {
+  onDidChangeCodeLenses: onDidChangeCodeLenses.event,
+  provideCodeLenses: (document) => {
+    if (!activePreview || activePreview.uri.toString() !== document.uri.toString()) return [];
+    const at = new vscode.Range(activePreview.lensLine, 0, activePreview.lensLine, 0);
+    return [
+      new vscode.CodeLens(at, { title: '$(check) Accept', command: 'wisp.acceptEdit' }),
+      new vscode.CodeLens(at, { title: '$(x) Reject', command: 'wisp.rejectEdit' }),
+    ];
+  },
+};
+
 // ----------------------------- Commands ----------------------------- //
 
 // Prompt for the API key and store it in the OS keychain.
@@ -297,7 +398,9 @@ const inquire = async (): Promise<void> => {
   if (!editor) return;
 
   const document = editor.document;
-  // Target span = the selection, or the whole current line when there is no selection.
+  // Target span = the selection, or the whole current line when there is no selection. (Whole-file,
+  // caret-agnostic editing is delivered safely by the SEARCH/REPLACE edit-blocks slice — a whole-file
+  // re-emit here risks the model mangling untouched code, which Accept would then apply.)
   const span = editor.selection.isEmpty
     ? document.lineAt(editor.selection.active.line).range
     : new vscode.Range(editor.selection.start, editor.selection.end);
@@ -356,6 +459,11 @@ const inquire = async (): Promise<void> => {
     if (!controller.signal.aborted) {
       lastError = true;
       output.appendLine(`[error] inquire ${String(err)}`);
+      // OpenAI's APIConnectionError says only "Connection error." — the real transport failure
+      // (ENOTFOUND / ECONNRESET / ETIMEDOUT / cert) is on err.cause. Log it so failures are diagnosable.
+      const cause = (err as { cause?: { message?: string; code?: string } })?.cause;
+      if (cause) output.appendLine(`[error] inquire cause: ${cause.code ?? ''} ${cause.message ?? String(cause)}`);
+      output.appendLine(`[error] inquire ctx: base=${activeBaseUrl()} provider=${activeProvider().id} model=${activeModel()} chars=${document.getText().length}`);
       vscode.window.showErrorMessage(`Wisp: inquire failed — ${String(err)}`);
     }
     return;
@@ -373,10 +481,9 @@ const inquire = async (): Promise<void> => {
     return;
   }
 
-  // needsConfirmation routes the replace through VS Code's native refactor-preview → accept/reject.
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(document.uri, span, replacement, { needsConfirmation: true, label: 'Wisp: apply edit' });
-  await vscode.workspace.applyEdit(edit);
+  // Render the rewrite as an in-editor diff (red removed / green added lines) with Accept/Reject
+  // CodeLenses over the span — replaces B1's native refactor-preview.
+  await renderInlineDiff(editor, span, selectionText, replacement);
 };
 
 // ----------------------------- Activation ----------------------------- //
@@ -390,6 +497,15 @@ export const activate = (context: vscode.ExtensionContext): void => {
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBar.show();
   renderStatus();
+
+  // Whole-line diff backgrounds reusing the theme's diff colors so the preview reads like a real diff.
+  addedDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true, backgroundColor: new vscode.ThemeColor('diffEditor.insertedTextBackground'),
+  });
+  removedDecoration = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true, backgroundColor: new vscode.ThemeColor('diffEditor.removedTextBackground'),
+    textDecoration: 'line-through',
+  });
 
   panel = new WispPanelProvider(context.extensionUri, {
     getState,
@@ -409,6 +525,13 @@ export const activate = (context: vscode.ExtensionContext): void => {
     vscode.commands.registerCommand('wisp.setApiKey', setApiKey),
     vscode.commands.registerCommand('wisp.listModels', listModels),
     vscode.commands.registerCommand('wisp.inquire', inquire),
+    // Internal — invoked by the inline-diff CodeLenses, not contributed to the palette.
+    vscode.commands.registerCommand('wisp.acceptEdit', () => resolvePreview(true)),
+    vscode.commands.registerCommand('wisp.rejectEdit', () => resolvePreview(false)),
+    addedDecoration,
+    removedDecoration,
+    onDidChangeCodeLenses,
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, editCodeLensProvider),
     // Keep derived state in sync when settings change out from under us.
     vscode.workspace.onDidChangeConfiguration((e) => {
       // Active Provider, its (Custom) base URL, or its mirrored model changed → rebuild the client.

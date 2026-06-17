@@ -162,6 +162,14 @@ F5-loads, and ships something working.
    may require Copilot Business/Enterprise on the GitHub side (as of Apr 2026);
    verify gating against the target VS Code version before relying on it. Pure
    extra surface — never the core, and explicitly not committed in this spec.
+5. **Edit fidelity — SEARCH/REPLACE blocks (next; global slice #8, built BEFORE
+   the bonus above).** Replace the span re-emit with targeted edit blocks: the
+   model returns `SEARCH`/`REPLACE` pairs, Wisp locates + applies each to the
+   buffer, then previews the result through B2's diff. New pure cores
+   (`parseEditBlocks` + an apply planner) in `catalog.ts`, TDD'd. Delivers
+   caret-agnostic "edit anywhere" **safely** — only changed regions are emitted,
+   so untouched code is never re-emitted/mangled. Supersedes the rejected
+   whole-file rewrite (see `decisions.md` 2026-06-17 edit-fidelity entry).
 
 ## Testing & verification
 

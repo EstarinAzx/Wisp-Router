@@ -9,35 +9,40 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task finished (2026-06-17): slice #5 (issue #5) — Completion removed; Wisp is Inquire-only.**
-Ripped the `InlineCompletionItemProvider` + registration, `SYSTEM_PROMPT`, the prefix/suffix context
-helpers, `stripPrefixOverlap`, `delay`/debounce, the `lastResult` cache, the whole comment-line guard
-(`relocateAfterComment` & friends), the inert `pendingInquiry`, and the **`enabled` toggle** across
-every layer (`wisp.toggle`, `setEnabled`, status-bar disabled state, panel checkbox + **Muted**). Dropped
-Completion-only settings (`enabled`/`debounceMs`/`maxPrefixChars`/`maxSuffixChars`) and the dead
-`buildInquiryContent`/`INQUIRE_CONTEXT_LIMIT` + tests. Status bar is now **thinking/error/ready** and
-non-clickable. `npm test` **18/18**, `npm run compile` clean, **F5 PASSED**. Committed on
+**Last task finished (2026-06-17): slice #6 — Inquire reviews edits via an in-editor inline diff (B2).**
+Added `diffLines(before, after)` + `DiffOp` to `src/catalog.ts` (LCS keep/add/remove op list,
+EOL-agnostic), TDD'd with 6 cases. Wired `renderInlineDiff` in `src/extension.ts`: red-removed /
+green-added line decorations + `✓ Accept` / `✗ Reject` CodeLenses (anchored at the first changed line)
+over the span; Accept applies kept+added, Reject restores the original. Replaced B1's
+`needsConfirmation` refactor-preview. Internal `wisp.acceptEdit` / `wisp.rejectEdit` commands (not in
+the palette). **Reverted** a whole-file-span experiment (mangling / data-loss on Accept) → span is back
+to selection / current-line. `npm test` **24/24**, `npm run compile` clean, F5 PASSED. Committed on
 `feat/inline-chat-pivot`.
 
-**Next task: slice #6 — issue #6 (in-editor inline diff for Inquire, B2).** `gh issue view 6 --comments`.
-Replace B1's native refactor-preview with an **in-editor** diff: `setDecorations` (added/removed line
-backgrounds) + `CodeLens` (Accept/Reject) over the proposed span. **TDD the pure core first** — add
-`diffLines(before, after)` to `src/catalog.ts` (vscode-free, returns a keep/add/remove op list) with
-Vitest cases **before** wiring decorations. Decorations + CodeLens are VS Code glue → F5 verify. Load
-`superpowers:test-driven-development`. Then **#7** (LM-chat-provider bonus) is deferred — resolve its
-Option-A BYOK/Copilot-plan gating first (non-blocking for #6).
+**Next task: slice #8 — SEARCH/REPLACE edit blocks (Inquire edit fidelity).** Decision + rationale in
+[[decisions]] (2026-06-17 edit-fidelity entry); trap in [[gotchas]] ("don't make the edit span the whole
+file"). Make the model emit only the **changed regions** (`SEARCH` snippet → `REPLACE`) instead of
+re-emitting the span/file — that re-emit is what mangles untouched code. **TDD the pure core first** in
+`src/catalog.ts`: `parseEditBlocks(raw)` → `{ search, replace }[]` + an apply planner (locate each
+`search` in the document → new text / not-found), then feed the applied result through the **existing**
+`diffLines` + `renderInlineDiff` (B2 reused as-is). Load `superpowers:test-driven-development`. Then
+**#7** (LM-chat-provider bonus) stays deferred — resolve its Option-A BYOK/Copilot-plan gating first
+(non-blocking for #8).
 
 **Landmines:**
-- **Completion is gone, not flag-gated.** Don't look for `pendingInquiry`, `enabled`, the inline
-  provider, or the comment-line guard — all deleted. The status bar has no click action now.
-- **Keep diff math vscode-free in `catalog.ts`** — `extension.ts` imports `vscode`, so Vitest can't
-  import it. `diffLines` (and any new pure logic) lives in `catalog.ts`; `extension.ts` reads editor
-  state and renders. (`stripThink`/`stripFences`/`extractEditText`/`buildEditPrompt` already live there.)
+- **Inquire knows the whole file (context) but edits only the target span.** Don't "fix" that by
+  widening the span to the whole file — the whole-file re-emit is the confirmed mangling / data-loss
+  vector (see [[gotchas]]). #8's edit blocks are the safe way to edit anywhere.
+- **Keep new diff/edit logic vscode-free in `catalog.ts`** — `extension.ts` imports `vscode`, so Vitest
+  can't import it. `diffLines` lives in `catalog.ts`; `parseEditBlocks` belongs there too. `extension.ts`
+  reads editor state and renders.
+- **`diffLines` is EOL-agnostic** (splits `/\r?\n/`); op text is `\r`-free and the caller rejoins with
+  the document's EOL. Match this for any `search`-text comparison in #8 (CRLF buffer vs LF model reply).
+- **B2 is done — reuse it.** #8 only changes how the new text is *produced* (blocks → applied text);
+  the preview/decorations/Accept-Reject path is unchanged.
 - **No model-id transform** — each Provider's `defaultModel` is its native form (`opencode/` prefix 401s Zen).
-- **`EditMessage`** must stay a union of two single-role object types (not one object with a
-  `'system'|'user'` role) or it stops assigning to the OpenAI SDK message-param array.
-- **Uncommitted, NOT part of slice #5:** `CLAUDE.md` has a pre-existing edit (guideline sections 5–7)
-  left unstaged — commit separately if wanted.
+- **Uncommitted, NOT part of slice #6:** `CLAUDE.md` has a pre-existing edit (guideline sections) left
+  unstaged — commit separately if wanted.
 
-Full rolling state in [[active-work]]; pivot + slice-#5 rationale in [[decisions]] (2026-06-17);
-domain language in `CONTEXT.md` (Inquire-only).
+Full rolling state in [[active-work]]; pivot + edit-fidelity rationale in [[decisions]] (2026-06-17);
+domain language in `CONTEXT.md`.
