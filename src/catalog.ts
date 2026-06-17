@@ -191,7 +191,7 @@ export type ChatModelInfo = {
   version: string;
   maxInputTokens: number;
   maxOutputTokens: number;
-  capabilities: Record<string, never>; // {} — no tool calling / image input in this surface
+  capabilities: { toolCalling?: boolean; imageInput?: boolean };
 };
 
 // Arbitrary OpenAI-compatible backends don't report their own limits, so advertise conservative caps.
@@ -218,9 +218,81 @@ export const buildChatModelInfos = (
       version: '1',
       maxInputTokens: DEFAULT_MAX_INPUT_TOKENS,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-      capabilities: {},
+      // Advertise tool calling so the model is selectable in agent/edit/Ctrl+I — those pickers hide
+      // models that don't declare it. The response glue forwards the tools and emits tool-call parts.
+      capabilities: { toolCalling: true },
     }];
   });
+
+// ----------------------------- Tool calling (chat surface) ----------------------------- //
+
+// vscode-free mirrors of the tool-calling shapes, so the message/tool/stream plumbing stays unit-
+// testable. chatProvider.ts extracts the vscode parts into these plain forms and feeds them here.
+
+// A tool the model may call (name + description + JSON-schema input), and its OpenAI function-tool form.
+export type ToolSpec = { name: string; description: string; inputSchema?: object };
+export type OAToolDef = { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } };
+
+// Map VS Code tool defs to OpenAI function tools — inputSchema becomes the function parameters
+// (empty object when a tool takes no input, which the OpenAI API still requires as a present field).
+export const toOpenAiTools = (tools: ToolSpec[]): OAToolDef[] =>
+  tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: (t.inputSchema as Record<string, unknown>) ?? {} },
+  }));
+
+// One chat turn flattened to plain data: its text, any tool calls it made (assistant turns), and any
+// tool results it carries (user turns). chatProvider.ts builds these from the vscode message parts.
+export type NormalizedTurn = {
+  role: 'user' | 'assistant';
+  text: string;
+  toolCalls: { id: string; name: string; argsJson: string }[];
+  toolResults: { callId: string; content: string }[];
+};
+
+// One OpenAI chat message. Assistant turns may carry tool_calls; a tool result is its own 'tool'
+// message keyed by the call id. Hand-rolled (catalog imports nothing) — structurally the SDK's param.
+export type OAChatMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+// Flatten the normalized turns into the OpenAI message sequence. A user turn's tool results expand into
+// standalone 'tool' messages (emitted before any user text so the assistant(tool_calls)→tool ordering
+// the API requires is preserved); a user turn with only tool results yields no empty user message.
+export const buildOpenAiChatMessages = (turns: NormalizedTurn[]): OAChatMessage[] =>
+  turns.flatMap((turn) => {
+    if (turn.role === 'assistant') {
+      const calls = turn.toolCalls.map((c) => ({ id: c.id, type: 'function' as const, function: { name: c.name, arguments: c.argsJson } }));
+      return [calls.length
+        ? { role: 'assistant' as const, content: turn.text, tool_calls: calls }
+        : { role: 'assistant' as const, content: turn.text }];
+    }
+    const toolMsgs: OAChatMessage[] = turn.toolResults.map((r) => ({ role: 'tool', tool_call_id: r.callId, content: r.content }));
+    // A bare tool-result turn carries no user prose, so don't emit an empty user message for it.
+    if (turn.toolResults.length && !turn.text) return toolMsgs;
+    return [...toolMsgs, { role: 'user' as const, content: turn.text }];
+  });
+
+// OpenAI streams a tool call across chunks: id + name land on the first delta for an index, the
+// arguments arrive as fragments on later deltas. Folded form once the stream completes.
+export type ToolCallDelta = { index: number; id?: string; name?: string; args?: string };
+export type AssembledToolCall = { id: string; name: string; argsJson: string };
+
+// Reassemble streamed tool-call deltas into whole calls. Keyed by the stream index so parallel calls
+// stay separate; id/name are taken from whichever fragment carries them and argument fragments are
+// concatenated in arrival order. Returned in first-seen index order.
+export const assembleToolCalls = (deltas: ToolCallDelta[]): AssembledToolCall[] => {
+  const byIndex = new Map<number, AssembledToolCall>();
+  for (const d of deltas) {
+    const call = byIndex.get(d.index) ?? { id: '', name: '', argsJson: '' };
+    if (d.id) call.id = d.id;
+    if (d.name) call.name = d.name;
+    if (d.args) call.argsJson += d.args;
+    byIndex.set(d.index, call);
+  }
+  return [...byIndex.values()];
+};
 
 // ----------------------------- Migration ----------------------------- //
 

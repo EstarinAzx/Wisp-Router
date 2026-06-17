@@ -17,13 +17,19 @@
  * Data shapes:
  *   - ChatProviderDeps: the seam to extension.ts — the catalog, the current model-map/baseUrl getters,
  *     and async per-Provider key/client resolvers.
- *   - ChatMsg: one OpenAI chat message; a single-role union (like catalog.EditMessage) so the array
- *     stays assignable to the SDK's params without a cast.
+ *   - NormalizedTurn (from ./catalog): a vscode-free flattening of each chat turn (text + tool calls +
+ *     tool results) that the pure builder turns into OpenAI messages — this file does the vscode-part
+ *     extraction, catalog does the shaping. Tool calling is supported: agent tools are forwarded and
+ *     streamed tool-call fragments are emitted back as LanguageModelToolCallParts.
  */
 
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
-import { Provider, resolveModel, buildChatModelInfos } from './catalog';
+import {
+  Provider, resolveModel, buildChatModelInfos,
+  buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
+  type NormalizedTurn, type ToolCallDelta,
+} from './catalog';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -40,23 +46,29 @@ export type ChatProviderDeps = {
 
 // ----------------------------- Message mapping ----------------------------- //
 
-// One OpenAI chat message. Native chat only ever sends User/Assistant turns, so the union has just the
-// two roles we emit; single-role members keep the array assignable to the SDK's params without a cast.
-type ChatMsg = { role: 'user'; content: string } | { role: 'assistant'; content: string };
+// Pull the text out of a tool result's content parts — only text parts are forwarded to the backend.
+const toolResultText = (parts: readonly unknown[]): string =>
+  parts.filter((p): p is vscode.LanguageModelTextPart => p instanceof vscode.LanguageModelTextPart)
+    .map((p) => p.value).join('');
 
-// Convert the native chat turns into OpenAI messages. Only text parts are carried — tool-call /
-// tool-result / data parts are out of scope for this surface and dropped. Role 2 is Assistant; every
-// other role (User) maps to 'user'.
-const toOpenAiMessages = (messages: readonly vscode.LanguageModelChatRequestMessage[]): ChatMsg[] =>
-  messages.map((m) => {
-    const content = m.content
-      .filter((part): part is vscode.LanguageModelTextPart => part instanceof vscode.LanguageModelTextPart)
-      .map((part) => part.value)
-      .join('');
-    return m.role === vscode.LanguageModelChatMessageRole.Assistant
-      ? { role: 'assistant', content }
-      : { role: 'user', content };
-  });
+// Flatten one native chat turn to the catalog's vscode-free NormalizedTurn: its text, the tool calls it
+// made (assistant turns) and the tool results it carries (user turns). The pure builder turns the
+// sequence into OpenAI messages; doing the vscode-part extraction here keeps that logic testable.
+const normalizeTurn = (m: vscode.LanguageModelChatRequestMessage): NormalizedTurn => {
+  const turn: NormalizedTurn = {
+    role: m.role === vscode.LanguageModelChatMessageRole.Assistant ? 'assistant' : 'user',
+    text: '', toolCalls: [], toolResults: [],
+  };
+  for (const part of m.content) {
+    if (part instanceof vscode.LanguageModelTextPart) turn.text += part.value;
+    else if (part instanceof vscode.LanguageModelToolCallPart) turn.toolCalls.push({ id: part.callId, name: part.name, argsJson: JSON.stringify(part.input) });
+    else if (part instanceof vscode.LanguageModelToolResultPart) turn.toolResults.push({ callId: part.callId, content: toolResultText(part.content) });
+  }
+  return turn;
+};
+
+const toOpenAiMessages = (messages: readonly vscode.LanguageModelChatRequestMessage[]) =>
+  buildOpenAiChatMessages(messages.map(normalizeTurn));
 
 // ----------------------------- Provider ----------------------------- //
 
@@ -77,26 +89,48 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     });
   },
 
-  // Stream the reply: resolve the picked Provider's client + model, then forward each content delta as
-  // a text part. Cancellation is bridged to an AbortController so the HTTP stream dies with the request.
-  provideLanguageModelChatResponse: async (model, messages, _options, progress, token) => {
+  // Stream the reply: resolve the picked Provider's client + model, forward any agent tools, then relay
+  // text deltas as text parts and reassemble streamed tool-call fragments into tool-call parts at the
+  // end. Cancellation is bridged to an AbortController so the HTTP stream dies with the request.
+  provideLanguageModelChatResponse: async (model, messages, options, progress, token) => {
     const provider = deps.providers.find((p) => p.id === model.id);
     if (!provider) return;
     const client = await deps.clientFor(provider);
     if (!client) return; // only usable models are advertised, so this is the rare key-revoked race
     const modelId = resolveModel(deps.modelMap(), provider);
 
+    // Forward the agent's tools so the model can call them; tool_choice mirrors VS Code's tool mode.
+    const tools = toOpenAiTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
+    const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
+
     const controller = new AbortController();
     token.onCancellationRequested(() => controller.abort());
 
     try {
       const stream = await client.chat.completions.create(
-        { model: modelId, messages: toOpenAiMessages(messages), stream: true },
+        {
+          model: modelId,
+          messages: toOpenAiMessages(messages),
+          stream: true,
+          ...(tools.length ? { tools, tool_choice: toolChoice } : {}),
+        },
         { signal: controller.signal },
       );
+      // Tool calls stream in fragments across chunks; collect them and assemble once the stream ends.
+      const toolDeltas: ToolCallDelta[] = [];
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content ?? '';
+        const choice = chunk.choices[0];
+        const delta = choice?.delta?.content ?? '';
         if (delta) progress.report(new vscode.LanguageModelTextPart(delta));
+        for (const tc of choice?.delta?.tool_calls ?? []) {
+          toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
+        }
+      }
+      for (const call of assembleToolCalls(toolDeltas)) {
+        // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
+        let input: object = {};
+        try { input = call.argsJson ? JSON.parse(call.argsJson) : {}; } catch { /* keep {} */ }
+        progress.report(new vscode.LanguageModelToolCallPart(call.id, call.name, input));
       }
     } catch (err) {
       if (controller.signal.aborted) return; // user cancelled — normal, not a failure
@@ -107,7 +141,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
 
   // No tokenizer dependency: a ~4-chars-per-token heuristic is enough for the picker's budgeting.
   provideTokenCount: async (_model, text) => {
-    const str = typeof text === 'string' ? text : toOpenAiMessages([text]).map((m) => m.content).join('');
+    const str = typeof text === 'string' ? text : normalizeTurn(text).text;
     return Math.ceil(str.length / 4);
   },
 });

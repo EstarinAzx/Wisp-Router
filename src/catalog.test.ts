@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
-  buildChatModelInfos,
+  buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -254,14 +254,95 @@ describe('buildChatModelInfos', () => {
     expect(infos).toEqual([]);
   });
 
-  // The vscode LanguageModelChatInformation shape requires these fields; capabilities is the empty
-  // object (no tool calling / image input in this MVP).
-  it('fills the vscode-required descriptor fields', () => {
+  // The vscode LanguageModelChatInformation shape requires these fields; toolCalling is advertised so
+  // the model is selectable in agent/edit/Ctrl+I (those pickers filter to tool-capable models).
+  it('fills the vscode-required descriptor fields and advertises tool calling', () => {
     const [info] = buildChatModelInfos([zen], { keyed: { 'opencode-zen': true }, modelMap: {}, customBaseUrl: '' });
-    expect(info).toMatchObject({ id: 'opencode-zen', family: 'opencode-zen', capabilities: {} });
+    expect(info).toMatchObject({ id: 'opencode-zen', family: 'opencode-zen' });
+    expect(info.capabilities).toEqual({ toolCalling: true });
     expect(typeof info.version).toBe('string');
     expect(info.maxInputTokens).toBeGreaterThan(0);
     expect(info.maxOutputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe('buildOpenAiChatMessages', () => {
+  // A plain user prompt becomes a single user message.
+  it('maps a user text turn to a user message', () => {
+    expect(buildOpenAiChatMessages([{ role: 'user', text: 'hi', toolCalls: [], toolResults: [] }]))
+      .toEqual([{ role: 'user', content: 'hi' }]);
+  });
+
+  // A plain assistant turn becomes an assistant message with no tool_calls key.
+  it('maps an assistant text turn to an assistant message', () => {
+    expect(buildOpenAiChatMessages([{ role: 'assistant', text: 'sure', toolCalls: [], toolResults: [] }]))
+      .toEqual([{ role: 'assistant', content: 'sure' }]);
+  });
+
+  // An assistant turn that called tools carries them as OpenAI tool_calls (arguments already a JSON string).
+  it('carries assistant tool calls as OpenAI tool_calls', () => {
+    const turn = {
+      role: 'assistant' as const, text: '', toolResults: [],
+      toolCalls: [{ id: 'c1', name: 'readFile', argsJson: '{"path":"a.ts"}' }],
+    };
+    expect(buildOpenAiChatMessages([turn])).toEqual([
+      { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'readFile', arguments: '{"path":"a.ts"}' } }] },
+    ]);
+  });
+
+  // Tool results live on a User turn but must become standalone OpenAI 'tool' messages keyed by callId.
+  it('maps a user turn of tool results to tool messages', () => {
+    const turn = { role: 'user' as const, text: '', toolCalls: [], toolResults: [{ callId: 'c1', content: 'file body' }] };
+    expect(buildOpenAiChatMessages([turn])).toEqual([{ role: 'tool', tool_call_id: 'c1', content: 'file body' }]);
+  });
+
+  // Full agent round-trip keeps OpenAI's required order: assistant(tool_calls) then the tool messages.
+  it('preserves order across a call/result round-trip', () => {
+    const msgs = buildOpenAiChatMessages([
+      { role: 'user', text: 'read a.ts', toolCalls: [], toolResults: [] },
+      { role: 'assistant', text: '', toolResults: [], toolCalls: [{ id: 'c1', name: 'readFile', argsJson: '{}' }] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'c1', content: 'body' }] },
+    ]);
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+  });
+});
+
+describe('assembleToolCalls', () => {
+  // OpenAI streams a tool call across chunks: id+name arrive first, arguments come in fragments.
+  it('reassembles one tool call from streamed fragments', () => {
+    expect(assembleToolCalls([
+      { index: 0, id: 'c1', name: 'readFile', args: '{"pa' },
+      { index: 0, args: 'th":"a.ts"}' },
+    ])).toEqual([{ id: 'c1', name: 'readFile', argsJson: '{"path":"a.ts"}' }]);
+  });
+
+  // Parallel tool calls are distinguished by their stream index.
+  it('keeps parallel tool calls separate by index', () => {
+    expect(assembleToolCalls([
+      { index: 0, id: 'c1', name: 'a', args: '{}' },
+      { index: 1, id: 'c2', name: 'b', args: '{}' },
+    ])).toEqual([
+      { id: 'c1', name: 'a', argsJson: '{}' },
+      { id: 'c2', name: 'b', argsJson: '{}' },
+    ]);
+  });
+
+  it('returns [] when there were no tool-call deltas', () => {
+    expect(assembleToolCalls([])).toEqual([]);
+  });
+});
+
+describe('toOpenAiTools', () => {
+  // VS Code tool defs map to OpenAI function tools; inputSchema becomes the function parameters.
+  it('maps a tool to an OpenAI function tool', () => {
+    expect(toOpenAiTools([{ name: 'readFile', description: 'read a file', inputSchema: { type: 'object' } }]))
+      .toEqual([{ type: 'function', function: { name: 'readFile', description: 'read a file', parameters: { type: 'object' } } }]);
+  });
+
+  // A tool with no schema still maps — parameters default to an empty object.
+  it('defaults missing inputSchema to an empty object', () => {
+    expect(toOpenAiTools([{ name: 'noArgs', description: 'd' }]))
+      .toEqual([{ type: 'function', function: { name: 'noArgs', description: 'd', parameters: {} } }]);
   });
 });
 
