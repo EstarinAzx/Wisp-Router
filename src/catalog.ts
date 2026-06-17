@@ -19,11 +19,11 @@ export type Provider = {
   baseUrl: string;       // hardcoded OpenAI-compatible base URL ('' for Custom — comes from settings)
   defaultModel: string;  // native-format model id used when the Provider has none remembered
   apiKeyEnv: string;     // env-var fallback for the key ('' = none, e.g. local Ollama)
-  // Chat-surface descriptor hints, all keyed to the row's DEFAULT model (approximate if the user
-  // switches model). Omitted → the conservative DEFAULT_MAX_* constants and no vision.
+  // Context/output caps for the row's DEFAULT model (approximate if the user switches model). Omitted →
+  // the conservative DEFAULT_MAX_* constants. Vision is NOT a row flag — it follows the active model id
+  // (modelSupportsVision), so a Provider serving a vision model other than its default still gets it.
   maxInputTokens?: number;
   maxOutputTokens?: number;
-  vision?: boolean;      // default model accepts image input → advertise imageInput + forward images
 };
 
 // ----------------------------- Constants ----------------------------- //
@@ -203,6 +203,23 @@ export type ChatModelInfo = {
 const DEFAULT_MAX_INPUT_TOKENS = 128_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
 
+// Substrings of known multimodal model families. Vision is really a per-MODEL trait, but a Provider
+// (Zen, OpenRouter, …) serves many models, so detect it from the active model id rather than the row —
+// that way Zen-serving-Claude or OpenRouter-serving-Gemini light up vision too. Conservative on purpose:
+// only families that broadly accept image input, so we never over-declare and send images a backend 400s.
+const VISION_FAMILIES = [
+  'claude-3', 'claude-opus', 'claude-sonnet', 'claude-haiku', // Claude 3.x / 4.x are multimodal
+  'gpt-4o', 'gpt-4.1', 'gpt-4-turbo', 'gpt-5',
+  'gemini', 'pixtral', 'llava', 'vision',                     // 'vision' catches *-vision ids
+  'qwen-vl', 'qwen2-vl', 'qwen2.5-vl',
+];
+
+// Whether a model id looks like a known vision-capable family (case-insensitive substring match).
+export const modelSupportsVision = (modelId: string): boolean => {
+  const id = modelId.toLowerCase();
+  return VISION_FAMILIES.some((family) => id.includes(family));
+};
+
 // Build the descriptors Wisp advertises into VS Code's native model picker: one row per Provider that
 // is actually usable. Usable = has a key AND a resolvable model AND (for Custom only) a base URL — a
 // keyless / URL-less / model-less Provider can't serve a request, so it stays hidden rather than
@@ -225,8 +242,8 @@ export const buildChatModelInfos = (
       maxOutputTokens: p.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
       // Advertise tool calling so the model is selectable in agent/edit/Ctrl+I — those pickers hide
       // models that don't declare it. The response glue forwards the tools and emits tool-call parts.
-      // imageInput only for vision Providers (whose default model accepts images, forwarded as data URIs).
-      capabilities: { toolCalling: true, ...(p.vision ? { imageInput: true } : {}) },
+      // imageInput when the active model id is a known vision family (images forwarded as data URIs).
+      capabilities: { toolCalling: true, ...(modelSupportsVision(model) ? { imageInput: true } : {}) },
     }];
   });
 

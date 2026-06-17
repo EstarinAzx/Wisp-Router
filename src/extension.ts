@@ -46,18 +46,19 @@ const SECRET_KEY = 'wisp.apiKey';
 // three still marked ⚠ are BEST-EFFORT presets — no key was available to verify them against each GET
 // /models, so the panel's model picker / type-field is the correction path. ⚠ Ollama Cloud is `/v1`,
 // NOT `/api/v1` (the `/api` prefix is Ollama's native protocol and breaks the OpenAI SDK — see gotchas.md).
-// The chat-surface hints (maxInputTokens/maxOutputTokens/vision) track each row's DEFAULT model and are
-// advisory (VS Code prompt budgeting); rows without them fall back to the conservative catalog defaults.
+// The context/output caps track each row's DEFAULT model and are advisory (VS Code prompt budgeting);
+// rows without them fall back to the conservative catalog defaults. Vision is detected from the active
+// model id (catalog.modelSupportsVision), so it follows model switches and isn't a per-row flag.
 const PROVIDERS: Provider[] = [
   { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/go/v1', defaultModel: 'minimax-m3', apiKeyEnv: 'OPENCODE_API_KEY' },
-  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', maxInputTokens: 128_000, maxOutputTokens: 16_384, vision: true },
+  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', maxInputTokens: 128_000, maxOutputTokens: 16_384 },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', maxInputTokens: 128_000, maxOutputTokens: 32_768 },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', maxInputTokens: 256_000 },
-  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-4o-mini', apiKeyEnv: 'OPENROUTER_API_KEY', maxInputTokens: 128_000, maxOutputTokens: 16_384, vision: true },
+  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-4o-mini', apiKeyEnv: 'OPENROUTER_API_KEY', maxInputTokens: 128_000, maxOutputTokens: 16_384 },
   { id: 'ollama', label: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', defaultModel: 'qwen2.5-coder' /* ⚠ best-effort: user must have pulled it */, apiKeyEnv: '' },
   { id: 'ollama-cloud', label: 'Ollama Cloud', baseUrl: 'https://ollama.com/v1', defaultModel: 'gpt-oss:120b' /* verified working 2026-06-16 */, apiKeyEnv: 'OLLAMA_API_KEY' },
-  { id: 'kilocode', label: 'KiloCode', baseUrl: 'https://api.kilo.ai/api/gateway', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify namespace via /models */, apiKeyEnv: 'KILOCODE_API_KEY', maxInputTokens: 200_000, maxOutputTokens: 8_192, vision: true },
-  { id: 'cline', label: 'Cline', baseUrl: 'https://api.cline.bot/api/v1', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify via /models */, apiKeyEnv: 'CLINE_API_KEY', maxInputTokens: 200_000, maxOutputTokens: 8_192, vision: true },
+  { id: 'kilocode', label: 'KiloCode', baseUrl: 'https://api.kilo.ai/api/gateway', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify namespace via /models */, apiKeyEnv: 'KILOCODE_API_KEY', maxInputTokens: 200_000, maxOutputTokens: 8_192 },
+  { id: 'cline', label: 'Cline', baseUrl: 'https://api.cline.bot/api/v1', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify via /models */, apiKeyEnv: 'CLINE_API_KEY', maxInputTokens: 200_000, maxOutputTokens: 8_192 },
   // Custom: the always-works escape hatch and the only Provider whose base URL + model are
   // user-supplied (machine-scoped wisp.baseUrl + a typed model, resolved at runtime by
   // activeBaseUrl()). No env fallback — its key lives only in the wisp.apiKey.custom slot.

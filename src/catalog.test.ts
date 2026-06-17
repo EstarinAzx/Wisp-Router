@@ -5,6 +5,7 @@ import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
   buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
+  modelSupportsVision,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -273,11 +274,34 @@ describe('buildChatModelInfos', () => {
     expect(info.maxOutputTokens).toBe(8_192);
   });
 
-  // Vision is opt-in per Provider (its default model must support image input); others stay text-only.
-  it('advertises imageInput only for vision Providers', () => {
-    const seeing = provider({ id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o-mini', vision: true });
+  // A Provider whose default model is a vision family advertises imageInput; text-only defaults (Zen's
+  // minimax-m3, covered above) stay tool-calling-only.
+  it('advertises imageInput when the default model is a vision model', () => {
+    const seeing = provider({ id: 'openai', label: 'OpenAI', defaultModel: 'gpt-4o-mini' });
     const [info] = buildChatModelInfos([seeing], { keyed: { openai: true }, modelMap: {}, customBaseUrl: '' });
     expect(info.capabilities).toEqual({ toolCalling: true, imageInput: true });
+  });
+
+  // Vision also follows the ACTIVE model id, so a non-vision Provider serving a vision model (e.g. Zen
+  // serving Claude) advertises imageInput even though its row has no vision flag.
+  it('advertises imageInput when the active model is a known vision model', () => {
+    const zenServingClaude = provider({ id: 'opencode-zen', label: 'OpenCode Zen', defaultModel: 'minimax-m3' });
+    const [info] = buildChatModelInfos([zenServingClaude], { keyed: { 'opencode-zen': true }, modelMap: { 'opencode-zen': 'claude-sonnet-4' }, customBaseUrl: '' });
+    expect(info.capabilities).toEqual({ toolCalling: true, imageInput: true });
+  });
+});
+
+describe('modelSupportsVision', () => {
+  // Known multimodal families are detected by a substring of the model id, regardless of Provider.
+  it('detects common vision model families', () => {
+    for (const id of ['claude-3.5-sonnet', 'claude-sonnet-4', 'gpt-4o-mini', 'gemini-2.0-flash', 'pixtral-large', 'llama-3.2-90b-vision'])
+      expect(modelSupportsVision(id)).toBe(true);
+  });
+
+  // Text-only coding models must NOT be flagged — over-declaring vision would send images a backend rejects.
+  it('returns false for text-only models', () => {
+    for (const id of ['minimax-m3', 'llama-3.3-70b-versatile', 'codestral-latest', 'qwen2.5-coder', 'gpt-oss:120b'])
+      expect(modelSupportsVision(id)).toBe(false);
   });
 });
 
