@@ -5,7 +5,7 @@ import {
   resolveModel, resolveBaseUrl, planLegacyMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines,
   buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
-  modelSupportsVision,
+  modelSupportsVision, contextForModel,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -266,12 +266,21 @@ describe('buildChatModelInfos', () => {
     expect(info.maxOutputTokens).toBeGreaterThan(0);
   });
 
-  // A Provider can override the conservative default context/output caps for its default model.
-  it('uses per-Provider token overrides when present', () => {
-    const big = provider({ id: 'mistral', label: 'Mistral', defaultModel: 'codestral', maxInputTokens: 256_000, maxOutputTokens: 8_192 });
-    const [info] = buildChatModelInfos([big], { keyed: { mistral: true }, modelMap: {}, customBaseUrl: '' });
-    expect(info.maxInputTokens).toBe(256_000);
+  // Context follows the ACTIVE model id via the lookup table — switch a Provider to a known model and
+  // its window updates (here Zen serving a 200K Claude despite its 'minimax-m3' default).
+  it('sizes context from the active model via the lookup', () => {
+    const zen = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'minimax-m3' });
+    const [info] = buildChatModelInfos([zen], { keyed: { 'opencode-zen': true }, modelMap: { 'opencode-zen': 'claude-sonnet-4' }, customBaseUrl: '' });
+    expect(info.maxInputTokens).toBe(200_000);
     expect(info.maxOutputTokens).toBe(8_192);
+  });
+
+  // A model the table doesn't know falls back to the conservative defaults.
+  it('falls back to default caps for an unknown model', () => {
+    const p = provider({ id: 'opencode-zen', label: 'Zen', defaultModel: 'mystery-x' });
+    const [info] = buildChatModelInfos([p], { keyed: { 'opencode-zen': true }, modelMap: {}, customBaseUrl: '' });
+    expect(info.maxInputTokens).toBe(128_000);
+    expect(info.maxOutputTokens).toBe(4_096);
   });
 
   // A Provider whose default model is a vision family advertises imageInput; text-only defaults (Zen's
@@ -288,6 +297,20 @@ describe('buildChatModelInfos', () => {
     const zenServingClaude = provider({ id: 'opencode-zen', label: 'OpenCode Zen', defaultModel: 'minimax-m3' });
     const [info] = buildChatModelInfos([zenServingClaude], { keyed: { 'opencode-zen': true }, modelMap: { 'opencode-zen': 'claude-sonnet-4' }, customBaseUrl: '' });
     expect(info.capabilities).toEqual({ toolCalling: true, imageInput: true });
+  });
+});
+
+describe('contextForModel', () => {
+  // Known families resolve to their input/output windows, regardless of which Provider serves them.
+  it('returns known family context windows', () => {
+    expect(contextForModel('claude-3.5-sonnet')).toEqual({ input: 200_000, output: 8_192 });
+    expect(contextForModel('gpt-4o-mini')).toEqual({ input: 128_000, output: 16_384 });
+    expect(contextForModel('gemini-2.0-flash')).toEqual({ input: 1_000_000, output: 8_192 });
+    expect(contextForModel('codestral-latest')).toEqual({ input: 256_000, output: 4_096 });
+  });
+
+  it('returns undefined for an unknown model', () => {
+    expect(contextForModel('mystery-model-x')).toBeUndefined();
   });
 });
 

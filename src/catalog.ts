@@ -19,11 +19,8 @@ export type Provider = {
   baseUrl: string;       // hardcoded OpenAI-compatible base URL ('' for Custom — comes from settings)
   defaultModel: string;  // native-format model id used when the Provider has none remembered
   apiKeyEnv: string;     // env-var fallback for the key ('' = none, e.g. local Ollama)
-  // Context/output caps for the row's DEFAULT model (approximate if the user switches model). Omitted →
-  // the conservative DEFAULT_MAX_* constants. Vision is NOT a row flag — it follows the active model id
-  // (modelSupportsVision), so a Provider serving a vision model other than its default still gets it.
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
+  // Note: a Provider carries no context/vision hints — both are derived from the ACTIVE model id
+  // (contextForModel / modelSupportsVision), so they track the user's model choice, not the row.
 };
 
 // ----------------------------- Constants ----------------------------- //
@@ -220,6 +217,39 @@ export const modelSupportsVision = (modelId: string): boolean => {
   return VISION_FAMILIES.some((family) => id.includes(family));
 };
 
+// Best-effort context windows by model family, so the advertised size tracks the ACTIVE model rather
+// than the Provider — a single Provider serves many models with very different windows. Ordered: the
+// first substring that matches the (lowercased) model id wins, so list specific families before broad
+// ones. Numbers are approximate (no standard /models field reports them) — this table is where to fix
+// them. Unknown models fall through to the conservative DEFAULT_MAX_* constants.
+export type ModelContext = { input: number; output: number };
+const CONTEXT_TABLE: { match: string; input: number; output: number }[] = [
+  { match: 'gpt-4.1', input: 1_000_000, output: 32_768 },
+  { match: 'gpt-4o', input: 128_000, output: 16_384 },
+  { match: 'gpt-4-turbo', input: 128_000, output: 4_096 },
+  { match: 'gpt-5', input: 256_000, output: 32_768 },
+  { match: 'gpt-oss', input: 128_000, output: 32_768 },
+  { match: 'claude-3', input: 200_000, output: 8_192 },
+  { match: 'claude-opus', input: 200_000, output: 8_192 },
+  { match: 'claude-sonnet', input: 200_000, output: 8_192 },
+  { match: 'claude-haiku', input: 200_000, output: 8_192 },
+  { match: 'gemini', input: 1_000_000, output: 8_192 },
+  { match: 'codestral', input: 256_000, output: 4_096 },
+  { match: 'mistral-large', input: 128_000, output: 4_096 },
+  { match: 'llama-3', input: 128_000, output: 32_768 },
+  { match: 'qwen', input: 32_768, output: 8_192 },
+  { match: 'deepseek', input: 128_000, output: 8_192 },
+  { match: 'kimi', input: 256_000, output: 8_192 },
+  { match: 'pixtral', input: 128_000, output: 4_096 },
+];
+
+// The context window for a model id, or undefined when no family matches (caller uses the defaults).
+export const contextForModel = (modelId: string): ModelContext | undefined => {
+  const id = modelId.toLowerCase();
+  const hit = CONTEXT_TABLE.find((e) => id.includes(e.match));
+  return hit ? { input: hit.input, output: hit.output } : undefined;
+};
+
 // Build the descriptors Wisp advertises into VS Code's native model picker: one row per Provider that
 // is actually usable. Usable = has a key AND a resolvable model AND (for Custom only) a base URL — a
 // keyless / URL-less / model-less Provider can't serve a request, so it stays hidden rather than
@@ -233,13 +263,15 @@ export const buildChatModelInfos = (
     // Custom has no hardcoded URL — without wisp.baseUrl there is nowhere to send the request.
     const reachable = p.id !== CUSTOM_ID || state.customBaseUrl.trim() !== '';
     if (!state.keyed[p.id] || !model || !reachable) return [];
+    // Size the window from the active model (falls back to the conservative defaults when unknown).
+    const ctx = contextForModel(model);
     return [{
       id: p.id,
       name: `${p.label} — ${model}`,
       family: p.id,
       version: '1',
-      maxInputTokens: p.maxInputTokens ?? DEFAULT_MAX_INPUT_TOKENS,
-      maxOutputTokens: p.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      maxInputTokens: ctx?.input ?? DEFAULT_MAX_INPUT_TOKENS,
+      maxOutputTokens: ctx?.output ?? DEFAULT_MAX_OUTPUT_TOKENS,
       // Advertise tool calling so the model is selectable in agent/edit/Ctrl+I — those pickers hide
       // models that don't declare it. The response glue forwards the tools and emits tool-call parts.
       // imageInput when the active model id is a known vision family (images forwarded as data URIs).
