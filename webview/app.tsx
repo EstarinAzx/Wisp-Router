@@ -1,4 +1,4 @@
-// ----------------- app.tsx — side-panel UI: key, model picker, on/off toggle ----------------- //
+// ----------------- app.tsx — side-panel UI: key, model picker, provider ----------------- //
 
 /*
  * Depends on:
@@ -6,12 +6,12 @@
  *   - acquireVsCodeApi (webview/vscode.d.ts): postMessage channel to the extension.
  *
  * Data shapes:
- *   - State: { keyIsSet, keySource, keyEnv, model, enabled, baseUrl, providerId, providers,
- *     isCustom } — pushed by the extension; the key value itself never arrives here, only keyIsSet.
+ *   - State: { keyIsSet, keySource, keyEnv, model, baseUrl, providerId, providers, isCustom } —
+ *     pushed by the extension; the key value itself never arrives here, only keyIsSet.
  *   - InMsg: state{state} | models{ids} | modelsError{message} | activity{thinking} — everything
  *     the extension sends. activity carries the live Thinking/Idle state, separate from state.
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
- *     | setBaseUrl{value} | setEnabled{value} | refreshModels.
+ *     | setBaseUrl{value} | refreshModels.
  */
 
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -23,7 +23,6 @@ type State = {
   keySource: 'stored' | 'env' | 'none';
   keyEnv: string;
   model: string;
-  enabled: boolean;
   baseUrl: string;
   providerId?: string;
   providers: { id: string; label: string }[];
@@ -65,7 +64,7 @@ export const App = () => {
         // First state, a newly-set key, a switched Provider, or a changed endpoint → pull the live
         // list once so the dropdown fills on its own. Without this the user only ever sees the
         // configured model until they discover the manual ↻. Gated on origin change so it can't loop
-        // on an empty result or re-fire on unrelated config pushes (model/enabled changes).
+        // on an empty result or re-fire on unrelated config pushes (model changes).
         const newOrigin = !prev || prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl || prev.keyIsSet !== msg.state.keyIsSet;
         modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet };
         setState(msg.state);
@@ -122,8 +121,8 @@ export const App = () => {
     <main class="flex flex-col gap-4 p-3">
 
       {/* ------------------------------ Activity ------------------------------ */}
-      {/* Muted (not hidden) when disabled — Idle dressed for "off", not a third state. */}
-      <section class={`flex items-center gap-2 ${state.enabled ? '' : 'opacity-50'}`}>
+      {/* The live Thinking/Idle signal — pulse while a request is on the wire, steady dot otherwise. */}
+      <section class="flex items-center gap-2">
         <span
           class={`inline-block h-2 w-2 rounded-full ${
             thinking
@@ -234,21 +233,6 @@ export const App = () => {
           onKeyDown={(e) => { if (e.key === 'Enter') applyModelDraft(); }}
         />
         {modelsError && <p class="text-[var(--vscode-errorForeground)]">{modelsError}</p>}
-      </section>
-
-      {/* ------------------------------ Toggle ------------------------------ */}
-      <section class="flex items-center gap-2">
-        <input
-          id="enabled"
-          type="checkbox"
-          checked={state.enabled}
-          onChange={(e) => {
-            const value = e.currentTarget.checked;
-            setState({ ...state, enabled: value }); // optimistic — state push confirms
-            vscode.postMessage({ type: 'setEnabled', value });
-          }}
-        />
-        <label for="enabled">Autocomplete enabled</label>
       </section>
 
       <footer class="text-xs text-[var(--vscode-descriptionForeground)] break-all">

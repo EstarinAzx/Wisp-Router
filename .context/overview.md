@@ -8,10 +8,10 @@ tags: [context, overview]
 # Overview
 
 **Project:** wisp
-**One-liner:** **Wisp** — a VS Code extension that provides AI inline (ghost-text) completions routed through a **Provider catalog** of OpenAI-compatible backends — **9 built-ins** (OpenCode Zen default · OpenAI · Groq · Mistral · OpenRouter · Ollama · Ollama Cloud · KiloCode · Cline) **+ Custom** — with a Preact + Tailwind v4 side panel for switching the **Active Provider** and managing its per-Provider API key, model, and on/off toggle. **Wisp** is the product; each backend is a **Provider** (OpenCode Zen is the default, first one).
+**One-liner:** **Wisp** — a VS Code extension that performs AI inline code **edits** (**Inquire**: type an instruction → it rewrites the selection, or the current line when nothing is selected, shown as a confirmable refactor-preview diff) routed through a **Provider catalog** of OpenAI-compatible backends — **9 built-ins** (OpenCode Zen default · OpenAI · Groq · Mistral · OpenRouter · Ollama · Ollama Cloud · KiloCode · Cline) **+ Custom** — with a Preact + Tailwind v4 side panel for switching the **Active Provider** and managing its per-Provider API key and model. **Wisp** is the product; each backend is a **Provider** (OpenCode Zen is the default, first one). _Ghost-text Completion was removed in slice #5 (2026-06-17); Wisp is Inquire-only._
 
 ## Layout
-- `src/` — extension-host (Node) TypeScript. `extension.ts` (provider, commands, shared actions) + `sidePanelProvider.ts` (the WebviewView) + `catalog.ts` (vscode-free pure Provider-catalog data + resolvers; the only unit-tested module, `catalog.test.ts`).
+- `src/` — extension-host (Node) TypeScript. `extension.ts` (the Inquire command, commands, shared actions, status bar) + `sidePanelProvider.ts` (the WebviewView) + `catalog.ts` (vscode-free pure Provider-catalog data + resolvers + Inquire edit-prompt/reply helpers; the only unit-tested module, `catalog.test.ts`).
 - `webview/` — Preact + Tailwind v4 side-panel UI (own tsconfig), bundled separately by Vite.
 - `media/` — activity-bar icon SVG.
 - `.vscode/` — `launch.json` (F5 → Extension Development Host) + `tasks.json` (build).
@@ -31,7 +31,7 @@ tags: [context, overview]
 - Set key: the **Wisp side panel** (activity-bar icon), command **Wisp: Set API Key**, or env `OPENCODE_API_KEY`.
 
 ## Where to look first
-- Entry point: `src/extension.ts` — provider registration, completion logic, commands, status bar, shared actions.
+- Entry point: `src/extension.ts` — the Inquire command + commands, status bar, shared actions.
 - Side panel: `src/sidePanelProvider.ts` + `webview/app.tsx`.
 - Product intent: `PRD.md`.
 - What's next (tests, model tuning): [[active-work]].

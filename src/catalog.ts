@@ -27,13 +27,6 @@ export type Provider = {
 // wisp.baseUrl) rather than hardcoded in the catalog.
 export const CUSTOM_ID = 'custom';
 
-// Above this many characters, sending the whole file risks overflowing the model context window,
-// so Inquire falls back to a large window around the selection instead. The window is asymmetric
-// (more before the caret than after) because the lead-up matters more than the trailing context.
-export const INQUIRE_CONTEXT_LIMIT = 32000;
-const INQUIRE_PREFIX_CHARS = 24000;
-const INQUIRE_SUFFIX_CHARS = 6000;
-
 // ----------------------------- Resolvers ----------------------------- //
 
 // Active model for a Provider: its remembered model (from the per-Provider map) else its native
@@ -46,28 +39,6 @@ export const resolveModel = (modelMap: Record<string, string>, provider: Provide
 // workspace cannot redirect a built-in's bearer key to another endpoint.
 export const resolveBaseUrl = (provider: Provider, customBaseUrl: string): string =>
   provider.id === CUSTOM_ID ? customBaseUrl : provider.baseUrl;
-
-// ----------------------------- Inquire prompt ----------------------------- //
-
-// Inquire's user message: the whole file plus the selection marked as the instruction. The caller
-// passes the file text, its languageId, and the caret's character offset (so this stays vscode-free).
-// Over INQUIRE_CONTEXT_LIMIT the whole file is swapped for a window around the caret, so a big file
-// degrades to nearby context instead of overflowing the model.
-export const buildInquiryContent = (
-  file: { text: string; languageId: string; offset: number },
-  selectionText: string,
-): { content: string; truncated: boolean } => {
-  const header = `The user selected these lines as an instruction:\n${selectionText}`;
-  if (file.text.length <= INQUIRE_CONTEXT_LIMIT) {
-    return { content: `Language: ${file.languageId}\n\nFull file:\n${file.text}\n\n${header}`, truncated: false };
-  }
-  const prefix = file.text.slice(Math.max(0, file.offset - INQUIRE_PREFIX_CHARS), file.offset);
-  const suffix = file.text.slice(file.offset, file.offset + INQUIRE_SUFFIX_CHARS);
-  return {
-    content: `Language: ${file.languageId}\n\nFile excerpt around the selection:\n${prefix}<CURSOR>${suffix}\n\n${header}`,
-    truncated: true,
-  };
-};
 
 // ----------------------------- Reply cleaners ----------------------------- //
 

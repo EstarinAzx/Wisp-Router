@@ -7,13 +7,13 @@
  *   - crypto (node): nonce generation for the CSP script-src.
  *
  * Data shapes:
- *   - PanelState: { keyIsSet, keySource, keyEnv, model, enabled, baseUrl, providerId, providers,
+ *   - PanelState: { keyIsSet, keySource, keyEnv, model, baseUrl, providerId, providers,
  *     isCustom } — everything the panel may know. The API key value itself never crosses the
  *     webview boundary, only the keyIsSet boolean.
  *   - PanelHost: the shared action helpers injected from extension.ts (store/clear key, fetch
- *     model ids, set model/enabled/provider/baseUrl, read state + Activity) — avoids a circular import.
+ *     model ids, set model/provider/baseUrl, read state + Activity) — avoids a circular import.
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
- *     | selectProvider{value} | setBaseUrl{value} | setEnabled{value} | refreshModels.
+ *     | selectProvider{value} | setBaseUrl{value} | refreshModels.
  *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
  */
 
@@ -27,7 +27,6 @@ export type PanelState = {
   keySource: 'stored' | 'env' | 'none';
   keyEnv: string; // active Provider's env-var name, so the env hint names the right var ('' = none)
   model: string;
-  enabled: boolean;
   baseUrl: string;
   providerId?: string; // Active Provider id (drives the dropdown's selected value)
   providers: { id: string; label: string }[]; // the catalog, for the dropdown
@@ -44,7 +43,6 @@ export type PanelHost = {
   clearApiKey: () => Promise<void>;
   fetchModelIds: () => Promise<string[]>;
   setModel: (id: string) => Promise<void>;
-  setEnabled: (value: boolean) => Promise<void>;
   setProvider: (id: string) => Promise<void>;
   setBaseUrl: (url: string) => Promise<void>;
 };
@@ -124,9 +122,6 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'setBaseUrl':
           if (typeof msg.value === 'string' && msg.value.trim()) await this.host.setBaseUrl(msg.value.trim());
-          return;
-        case 'setEnabled':
-          await this.host.setEnabled(!!msg.value);
           return;
         case 'refreshModels': {
           const ids = await this.host.fetchModelIds();

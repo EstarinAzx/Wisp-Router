@@ -2,9 +2,9 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  resolveModel, resolveBaseUrl, buildInquiryContent, planLegacyMigration,
+  resolveModel, resolveBaseUrl, planLegacyMigration,
   buildEditPrompt, extractEditText,
-  CUSTOM_ID, INQUIRE_CONTEXT_LIMIT, type Provider,
+  CUSTOM_ID, type Provider,
 } from './catalog';
 
 // Minimal Provider builder so each test states only the fields it cares about.
@@ -43,34 +43,6 @@ describe('resolveBaseUrl', () => {
 
   it('returns empty string for Custom when no baseUrl is set', () => {
     expect(resolveBaseUrl(provider({ id: CUSTOM_ID, baseUrl: '' }), '')).toBe('');
-  });
-});
-
-describe('buildInquiryContent', () => {
-  // Under the limit: the whole file goes in verbatim, untruncated.
-  it('embeds the whole file when under the context limit', () => {
-    const out = buildInquiryContent({ text: 'hello world', languageId: 'typescript', offset: 0 }, 'line 2');
-    expect(out).toEqual({
-      content: 'Language: typescript\n\nFull file:\nhello world\n\nThe user selected these lines as an instruction:\nline 2',
-      truncated: false,
-    });
-  });
-
-  // The limit is inclusive (`<=`), so a file exactly at the limit is still sent whole.
-  it('still sends the whole file at exactly the limit', () => {
-    const text = 'x'.repeat(INQUIRE_CONTEXT_LIMIT);
-    expect(buildInquiryContent({ text, languageId: 'js', offset: 0 }, 'sel').truncated).toBe(false);
-  });
-
-  // Over the limit: fall back to a window of 24000 chars before the caret and 6000 after, marked
-  // with <CURSOR>, instead of overflowing the model context.
-  it('windows around the caret when over the limit', () => {
-    const text = 'a'.repeat(30000) + 'b'.repeat(10000); // 40000 > limit
-    const out = buildInquiryContent({ text, languageId: 'go', offset: 30000 }, 'do X');
-    expect(out.truncated).toBe(true);
-    expect(out.content).toContain('File excerpt around the selection:');
-    expect(out.content).toContain(`${'a'.repeat(24000)}<CURSOR>${'b'.repeat(6000)}`);
-    expect(out.content).toContain('The user selected these lines as an instruction:\ndo X');
   });
 });
 

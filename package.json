@@ -1,7 +1,7 @@
 {
   "name": "wisp",
   "displayName": "Wisp",
-  "description": "Wisp: AI inline completions and on-demand code generation, backed by the OpenCode Zen provider.",
+  "description": "Wisp: AI inline code edits (Inquire), backed by a catalog of OpenAI-compatible providers.",
   "version": "0.0.8",
   "publisher": "local",
   "private": true,
@@ -45,10 +45,6 @@
         "title": "Wisp: List / Choose Model"
       },
       {
-        "command": "wisp.toggle",
-        "title": "Wisp: Toggle Autocomplete"
-      },
-      {
         "command": "wisp.inquire",
         "title": "Wisp: Inquire"
       }
@@ -73,11 +69,6 @@
     "configuration": {
       "title": "Wisp",
       "properties": {
-        "wisp.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Master on/off switch for inline suggestions."
-        },
         "wisp.provider": {
           "type": "string",
           "scope": "machine",
@@ -107,11 +98,6 @@
           "default": "minimax-m3",
           "description": "Model id (bare, as served by /models — the endpoint rejects a provider-prefixed id). Run 'Wisp: List / Choose Model' to discover valid ids."
         },
-        "wisp.debounceMs": {
-          "type": "number",
-          "default": 300,
-          "description": "Quiet window (ms) after the last keystroke before calling the API."
-        },
         "wisp.maxTokens": {
           "type": "number",
           "default": 0,
@@ -120,17 +106,7 @@
         "wisp.temperature": {
           "type": "number",
           "default": 0.1,
-          "description": "Sampling temperature. Low keeps completions deterministic."
-        },
-        "wisp.maxPrefixChars": {
-          "type": "number",
-          "default": 2000,
-          "description": "Characters of code before the caret sent as context."
-        },
-        "wisp.maxSuffixChars": {
-          "type": "number",
-          "default": 1000,
-          "description": "Characters of code after the caret sent as context."
+          "description": "Sampling temperature. Low keeps edits deterministic."
         }
       }
     }
