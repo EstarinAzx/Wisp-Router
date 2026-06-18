@@ -8,14 +8,14 @@ Net effect: you can run Copilot's chat / agent / edit experience with models fro
 
 - **Version:** 1.1.0
 - **Requires:** VS Code 1.104+
-- **Repo:** [github.com/EstarinAzx/BYOK-IDE-Auto-Complete](https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete)
+- **Repo:** [github.com/EstarinAzx/Wisp](https://github.com/EstarinAzx/Wisp)
 - **Not on the Marketplace** — install from a `.vsix` release or from source (see [Install](#install)).
 
 ---
 
 ## Quickstart
 
-1. **Install the extension.** Download the latest `.vsix` from the [GitHub Releases](https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases) page, then in VS Code open **Extensions → ⋯ → Install from VSIX…** and select the file. (Full options, including building from source, are in [Install](#install).)
+1. **Install the extension.** Download the latest `.vsix` from the [GitHub Releases](https://github.com/EstarinAzx/Wisp/releases) page, then in VS Code open **Extensions → ⋯ → Install from VSIX…** and select the file. (Full options, including building from source, are in [Install](#install).)
 2. **Pick a provider.** Open the **Wisp side panel** from the activity-bar icon and choose your **Active Provider**, or run **`Wisp: Set API Key`** from the Command Palette to store a key for it.
    - The default provider is **OpenCode Go**.
    - For a key-based provider, paste your key — it goes straight to the OS keychain (see [Security](#security)).
@@ -155,7 +155,7 @@ Wisp is **not on the VS Code Marketplace**.
 
 ### From a release
 
-1. Download the `.vsix` from the [GitHub Releases](https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases) page.
+1. Download the `.vsix` from the [GitHub Releases](https://github.com/EstarinAzx/Wisp/releases) page.
 2. In VS Code: **Extensions → ⋯ → Install from VSIX…** and select the file.
 
 ### From source

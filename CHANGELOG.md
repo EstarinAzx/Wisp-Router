@@ -84,5 +84,5 @@ in VS Code's **native** chat.
 Early development: initial OpenCode-backed completion extension, side-panel activity
 indicator (`v0.0.3`), and the first manual whole-file suggestion (Inquire).
 
-[1.1.0]: https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases/tag/v1.1.0
-[1.0.0]: https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases/tag/v1.0.0
+[1.1.0]: https://github.com/EstarinAzx/Wisp/releases/tag/v1.1.0
+[1.0.0]: https://github.com/EstarinAzx/Wisp/releases/tag/v1.0.0
