@@ -1,14 +1,20 @@
 {
   "name": "wisp",
   "displayName": "Wisp",
-  "description": "Wisp: AI inline code edits (Inquire), backed by a catalog of OpenAI-compatible providers.",
-  "version": "1.0.0",
+  "description": "BYOK model router for VS Code's Copilot chat, agent, and Ctrl+I — bring your own API keys or ChatGPT (Codex) subscription. Plus Inquire inline edits.",
+  "version": "1.1.0",
   "publisher": "local",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete.git"
+  },
   "engines": {
     "vscode": "^1.104.0"
   },
   "categories": [
+    "AI",
+    "Chat",
     "Machine Learning",
     "Programming Languages"
   ],

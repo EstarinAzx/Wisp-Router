@@ -4,6 +4,36 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-19
+
+Wisp grows into a **model router for VS Code's Copilot chat harness**: bring your own
+backends — including your ChatGPT subscription — into native Chat, Agent mode, and
+`Ctrl+I`, with full tool calling.
+
+### Added
+
+- **Codex provider — your ChatGPT subscription as a model.** Sign in with a ChatGPT
+  account (OAuth) and run OpenAI's Codex models on your own subscription via the
+  Responses API, on both surfaces (native chat + Inquire). No API key. Imports an
+  existing Codex CLI login (`~/.codex/auth.json`); tokens live in the OS keychain.
+  (Issues #11, #13)
+- **Codex in native chat + agent mode.** Codex streams in the chat / `Ctrl+I` picker
+  with real context windows (gpt-5.x 400K, o-series 200K) and vision, and — as of this
+  release — **tool calling**, so Codex is first-class in Agent / Edit mode. (Issues #14, #15)
+- **OpenCode Go / OpenCode Zen split.** The two OpenCode endpoints are now distinct
+  providers (`/zen/go/v1` vs `/zen/v1`); they share one OpenCode key via `keyId`. The
+  catalog is 11 built-ins + Custom. (Issue #12)
+
+### Changed
+
+- **Repositioned as a router.** README and product framing now lead with routing your own
+  models into the Copilot chat harness; Inquire is the secondary inline-edit feature.
+
+### Security
+
+- Codex OAuth tokens are stored in SecretStorage; sign-out writes a tombstone so a Codex
+  CLI login is not silently re-imported.
+
 ## [1.0.0] — 2026-06-18
 
 First stable release. Wisp is now an inline-edit assistant (**Inquire**) backed by a
@@ -54,4 +84,5 @@ in VS Code's **native** chat.
 Early development: initial OpenCode-backed completion extension, side-panel activity
 indicator (`v0.0.3`), and the first manual whole-file suggestion (Inquire).
 
+[1.1.0]: https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases/tag/v1.1.0
 [1.0.0]: https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete/releases/tag/v1.0.0
