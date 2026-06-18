@@ -6,6 +6,8 @@ vite.config.ts
 tsconfig.json
 **/*.map
 .context/**
+.claude/**
+docs/**
 CLAUDE.md
 PRD.md
 CONTEXT.md
