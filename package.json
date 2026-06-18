@@ -7,7 +7,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/EstarinAzx/BYOK-IDE-Auto-Complete.git"
+    "url": "https://github.com/EstarinAzx/Wisp.git"
   },
   "engines": {
     "vscode": "^1.104.0"
