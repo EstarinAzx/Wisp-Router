@@ -278,6 +278,7 @@ export const buildChatModelInfos = (
     modelMap: Record<string, string>;
     customBaseUrl: string;
     caps?: (provider: Provider, model: string) => ModelCaps | undefined;
+    effort?: CodexEffort;
   },
 ): ChatModelInfo[] =>
   providers.flatMap((p) => {
@@ -294,9 +295,12 @@ export const buildChatModelInfos = (
     const outputBudget = dyn?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const maxOutputTokens = Math.min(outputBudget, Math.max(1, Math.floor(totalContext / 2)));
     const maxInputTokens = Math.max(totalContext - maxOutputTokens, 1);
+    // Codex reasoning rows mirror the active Effort in the picker label (· medium). Reuse codexReasoning's
+    // gate so an inert spark/gpt-4.x row never claims a depth; non-Codex rows never get a suffix.
+    const depth = isCodexProvider(p) && codexReasoning(model) ? ` · ${state.effort ?? DEFAULT_EFFORT}` : '';
     return [{
       id: p.id,
-      name: `${p.label} — ${model}`,
+      name: `${p.label} — ${model}${depth}`,
       family: p.id,
       version: '1',
       maxInputTokens,

@@ -117,6 +117,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       modelMap: deps.modelMap(),
       customBaseUrl: deps.customBaseUrl(),
       caps,
+      effort: deps.codexEffort(),
     });
   },
 

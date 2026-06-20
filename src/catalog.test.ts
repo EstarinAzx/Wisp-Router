@@ -315,6 +315,23 @@ describe('buildChatModelInfos', () => {
     expect(info.capabilities).toEqual({ toolCalling: true, imageInput: true });
   });
 
+  // The picker label mirrors the active Effort for a reasoning-capable Codex row, so the chosen depth is
+  // visible without opening the panel. Gated by codexReasoning — same predicate that decides whether the
+  // reasoning object is even sent.
+  it('appends the active Effort to a reasoning-capable codex row label', () => {
+    const codex = provider({ id: 'codex', label: 'Codex', defaultModel: 'gpt-5.3-codex', kind: 'codex' });
+    const [info] = buildChatModelInfos([codex], { keyed: { codex: true }, modelMap: {}, customBaseUrl: '', effort: 'high' });
+    expect(info.name).toBe('Codex — gpt-5.3-codex · high');
+  });
+
+  // An inert Codex variant (spark / gpt-4.x) takes no reasoning, so it must not claim a depth — the
+  // suffix is suppressed exactly where codexReasoning returns undefined.
+  it('omits the Effort suffix for a non-reasoning codex row', () => {
+    const codex = provider({ id: 'codex', label: 'Codex', defaultModel: 'gpt-5.3-codex-spark', kind: 'codex' });
+    const [info] = buildChatModelInfos([codex], { keyed: { codex: true }, modelMap: {}, customBaseUrl: '', effort: 'high' });
+    expect(info.name).toBe('Codex — gpt-5.3-codex-spark');
+  });
+
   // No dynamic caps (no catalogKey / offline) → the neutral default window, decomposed so input+output
   // total it. There is no per-model context guess table; an unknown model is honestly "neutral default".
   it('uses the neutral default window when there are no caps', () => {
