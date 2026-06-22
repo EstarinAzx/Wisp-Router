@@ -27,7 +27,7 @@ type State = {
   providerId?: string;
   providers: { id: string; label: string }[];
   isCustom: boolean;
-  kind?: 'openai-chat' | 'codex';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth';
   signedIn?: boolean;
   modelOptions?: string[];
   effort?: 'low' | 'medium' | 'high' | 'xhigh';
@@ -117,10 +117,20 @@ export const App = () => {
     if (value) vscode.postMessage({ type: 'setBaseUrl', value });
   };
 
-  // Codex has no live /models list — use the curated modelOptions; every other Provider uses the
+  // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
+  // live /models route. oauth gates both behaviours; the per-kind label/messages below distinguish them.
+  const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth';
+  const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : 'Codex Account';
+  const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : 'codexSignIn';
+  const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : 'codexSignOut';
+  const accountHint = state.kind === 'anthropic-oauth'
+    ? 'Subscription-backed Claude — sign in with your Claude.ai account; no API key.'
+    : 'Subscription-backed ChatGPT Codex — sign in with your ChatGPT account; no API key.';
+
+  // OAuth kinds have no live /models list — use the curated modelOptions; every other Provider uses the
   // fetched list. Either way, prepend the current model if it isn't already present so the select stays
-  // truthful (e.g. a stale gpt-5-codex pick still shows alongside the curated ids).
-  const baseOptions = state.kind === 'codex' ? (state.modelOptions ?? []) : models;
+  // truthful (e.g. a stale pick still shows alongside the curated ids).
+  const baseOptions = oauth ? (state.modelOptions ?? []) : models;
   const options = baseOptions.includes(state.model) ? baseOptions : [state.model, ...baseOptions];
 
   return (
@@ -181,29 +191,30 @@ export const App = () => {
         </section>
       )}
 
-      {/* --------------------- Credentials: Codex sign-in OR API key --------------------- */}
-      {/* Codex has no API key — it is "usable when signed in", so it swaps the key field for a
-          ChatGPT sign-in/out control. Every other Provider keeps the API-key field. */}
-      {state.kind === 'codex' ? (
+      {/* --------------------- Credentials: OAuth sign-in OR API key --------------------- */}
+      {/* The OAuth Providers (Codex, Anthropic) have no API key — each is "usable when signed in", so it
+          swaps the key field for an account sign-in/out control. Every other Provider keeps the API-key
+          field. One block serves both kinds; the label + messages are routed by kind. */}
+      {oauth ? (
         <section class="flex flex-col gap-1.5">
-          <h2 class="section-title">Codex Account</h2>
+          <h2 class="section-title">{accountLabel}</h2>
           <p class="text-[var(--vscode-descriptionForeground)]">
             {state.signedIn ? '● Signed in' : '○ Not signed in'}
           </p>
           <div class="flex gap-1.5">
-            <button class="btn" disabled={state.signedIn} onClick={() => vscode.postMessage({ type: 'codexSignIn' })}>
+            <button class="btn" disabled={state.signedIn} onClick={() => vscode.postMessage({ type: signInMsg })}>
               Sign in
             </button>
             <button
               class="btn btn-secondary"
               disabled={!state.signedIn}
-              onClick={() => vscode.postMessage({ type: 'codexSignOut' })}
+              onClick={() => vscode.postMessage({ type: signOutMsg })}
             >
               Sign out
             </button>
           </div>
           <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-            Subscription-backed ChatGPT Codex — sign in with your ChatGPT account; no API key.
+            {accountHint}
           </p>
         </section>
       ) : (
@@ -248,9 +259,9 @@ export const App = () => {
           >
             {options.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
-          {/* Codex has no /models route (it is not the OpenAI-chat client), so hide the live refresh —
-              the user types the Codex model id (e.g. gpt-5-codex) in the field below. */}
-          {state.kind !== 'codex' && (
+          {/* The OAuth kinds have no /models route (not the OpenAI-chat client), so hide the live refresh —
+              the user picks from the curated list or types a model id in the field below. */}
+          {!oauth && (
             <button
               class="btn btn-secondary shrink-0"
               title="Refresh model list from the endpoint"

@@ -1,15 +1,17 @@
 // ---------------- catalog.ts — Wisp: pure Provider-catalog data + resolvers ---------------- //
 
 /*
- * Depends on: nothing — this module is deliberately vscode-free so its logic is unit-testable
- *   without the Extension Development Host. extension.ts imports these and feeds them the values it
- *   reads from the VS Code config/state; the thin wrappers there stay behaviour-identical.
+ * Depends on: node crypto (PKCE/state generation only) — but deliberately vscode-free, so its logic
+ *   is unit-testable without the Extension Development Host. extension.ts imports these and feeds them
+ *   the values it reads from the VS Code config/state; the thin wrappers there stay behaviour-identical.
  *
  * Data shapes:
  *   - Provider: one OpenAI-chat-compatible backend = { id, label, baseUrl, defaultModel, apiKeyEnv }.
  *     id doubles as the SecretStorage key-slot and the per-Provider model-map suffix.
  *   - EditMessage: one chat message ({ role: 'system' | 'user', content }) in an Inquire edit request.
  */
+
+import { randomBytes, webcrypto, createHash } from 'crypto';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -26,10 +28,11 @@ export type Provider = {
   // sibling. Defaults to the row's own id. OpenCode Zen sets keyId='opencode-go' — both are the same
   // OpenCode account (one key, two endpoints), so Zen reuses Go's stored key rather than asking twice.
   keyId?: string;
-  // Provider kind: 'openai-chat' (the default — every OpenAI-compatible chat row) or 'codex' (the
-  // subscription-backed Codex Responses backend, reached by ChatGPT OAuth, not an API key). Absent ==
-  // 'openai-chat', so the ten existing rows need no edit; the Inquire/key/usability paths branch on it.
-  kind?: 'openai-chat' | 'codex';
+  // Provider kind: 'openai-chat' (the default — every OpenAI-compatible chat row), 'codex' (the
+  // subscription-backed Codex Responses backend, reached by ChatGPT OAuth), or 'anthropic-oauth' (the
+  // subscription-backed Claude Messages backend, reached by Claude.ai OAuth). Absent == 'openai-chat',
+  // so the ten existing rows need no edit; the Inquire/key/usability paths branch on it.
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth';
   // Note: context/vision carry no per-row hints — both come from the ACTIVE model via models.dev
   // (catalogKey), else context = neutral default and vision = the modelSupportsVision heuristic.
 };
@@ -769,3 +772,87 @@ export const parseCodexAuthJson = (json: unknown): CodexCreds | undefined => {
     ...(apiKey ? { apiKey } : {}),
   };
 };
+
+// ----------------------------- Anthropic OAuth Provider (pure cores) ----------------------------- //
+
+// The credential bundle for the Anthropic Provider. Like Codex it is OAuth-backed (no API key), but the
+// token carries no JWT exp — Anthropic returns expires_in, so the deadline is computed at exchange time
+// and stored as an absolute epoch-ms expiresAt. The impure anthropicAuth.ts owns the OAuth/IO; this
+// module only reasons about an already-parsed blob.
+export type AnthropicCreds = {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number; // epoch ms; absent when the token response carried no expires_in
+};
+
+// Whether a catalog row is the Anthropic backend. Absent kind == 'openai-chat', so this is false for the
+// ten OpenAI-compatible rows and the Codex row.
+export const isAnthropicProvider = (provider: Provider): boolean => provider.kind === 'anthropic-oauth';
+
+// Anthropic is "usable when signed in" — no API key, so usability is the presence of a bearer access
+// token. The `{}` sign-out tombstone and a refresh-only blob both read as signed-out.
+export const isAnthropicSignedIn = (creds: AnthropicCreds | undefined): boolean =>
+  !!creds && !!creds.accessToken;
+
+// Turn an Anthropic OAuth token response into AnthropicCreds. expires_in (seconds, relative) becomes an
+// absolute expiresAt against the injected clock — `now` is a parameter so this stays pure and testable.
+export const tokensToAnthropicCreds = (
+  payload: { access_token?: string; refresh_token?: string; expires_in?: number },
+  now: number,
+): AnthropicCreds => ({
+  ...(payload.access_token ? { accessToken: payload.access_token } : {}),
+  ...(payload.refresh_token ? { refreshToken: payload.refresh_token } : {}),
+  ...(typeof payload.expires_in === 'number' ? { expiresAt: now + payload.expires_in * 1000 } : {}),
+});
+
+// Refresh the access token 5 minutes BEFORE it expires, so an in-flight request can't have it die under
+// it (Anthropic's larger skew than Codex's 60s, per openclaude's isOAuthTokenExpired). No expiresAt →
+// false: we can't prove staleness, so don't force a refresh that might block a working token.
+const ANTHROPIC_TOKEN_REFRESH_SKEW_MS = 5 * 60_000;
+export const shouldRefreshAnthropicToken = (creds: { expiresAt?: number }, now: number): boolean =>
+  creds.expiresAt !== undefined && creds.expiresAt <= now + ANTHROPIC_TOKEN_REFRESH_SKEW_MS;
+
+// Parse a stored SecretStorage slot into AnthropicCreds. An absent/empty slot, or a corrupt one (bad
+// JSON), reads as undefined rather than throwing; the `{}` tombstone parses to an empty object (which
+// isAnthropicSignedIn then reads as signed-out).
+export const parseAnthropicCreds = (raw: string | undefined): AnthropicCreds | undefined => {
+  if (!raw) return undefined;
+  try { return JSON.parse(raw) as AnthropicCreds; } catch { return undefined; }
+};
+
+// Curated Claude model ids for the panel dropdown — the OAuth Messages path has no Wisp-side /models
+// listing, so this mirrors the current Claude lineup. The anthropic row's defaultModel must stay a member.
+export const ANTHROPIC_MODELS: string[] = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+
+// ----------------------------- Anthropic client attestation ----------------------------- //
+
+// The subscription Messages backend recomputes + validates a per-request fingerprint and rejects an
+// unrecognized client with a synthetic 429 (no rate-limit headers). The recipe (openclaude-verified):
+// sha256(salt + chars sampled from the first user message at indices 4/7/20 + version), first 3 hex.
+// Missing indices substitute '0'. Salt/indices are load-bearing — the server checks them, so this MUST
+// be derived from the exact first-user-message text that is sent.
+const ANTHROPIC_FP_SALT = '59cf53e54c78';
+export const anthropicFingerprint = (firstUserMessage: string, version: string): string => {
+  const sampled = [4, 7, 20].map((i) => firstUserMessage[i] ?? '0').join('');
+  return createHash('sha256').update(ANTHROPIC_FP_SALT + sampled + version).digest('hex').slice(0, 3);
+};
+
+// The attribution string Claude Code sends as the FIRST system block — the recognition signal that carries
+// the validated fingerprint. No cch (native attestation can't be reproduced from Node and is unenforced),
+// no cc_workload (interactive run). version must match the User-Agent's claude-cli/<version>.
+export const anthropicAttribution = (firstUserMessage: string, version: string): string =>
+  `x-anthropic-billing-header: cc_version=${version}.${anthropicFingerprint(firstUserMessage, version)}; cc_entrypoint=cli;`;
+
+// ----------------------------- PKCE + state (OAuth) ----------------------------- //
+
+// base64url without padding — the form OAuth PKCE + the authorize URL expect.
+export const base64url = (buf: Buffer): string =>
+  buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+// 32 random bytes as base64url (43 chars): the PKCE code_verifier and the CSRF state share this shape.
+export const codeVerifier = (): string => base64url(randomBytes(32));
+export const oauthState = (): string => base64url(randomBytes(32));
+
+// The PKCE S256 code_challenge for a verifier: base64url(SHA-256(verifier)).
+export const codeChallenge = async (verifier: string): Promise<string> =>
+  base64url(Buffer.from(await webcrypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));

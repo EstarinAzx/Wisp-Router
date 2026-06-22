@@ -32,9 +32,9 @@ export type PanelState = {
   providerId?: string; // Active Provider id (drives the dropdown's selected value)
   providers: { id: string; label: string }[]; // the catalog, for the dropdown
   isCustom: boolean; // active Provider is Custom → the panel reveals the editable base-URL field (Issue 7)
-  kind?: 'openai-chat' | 'codex'; // Codex swaps the API-key field for a sign-in/out control
-  signedIn?: boolean; // Codex only: whether a Codex token bundle is present
-  modelOptions?: string[]; // Codex only: curated model ids for the dropdown (no live /models route)
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth'; // the OAuth kinds swap the API-key field for sign-in/out
+  signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
+  modelOptions?: string[]; // OAuth kinds only: curated model ids for the dropdown (no live /models route)
   effort?: 'low' | 'medium' | 'high' | 'xhigh'; // Codex only: the reasoning-effort knob (governs every Codex call)
 };
 
@@ -52,6 +52,8 @@ export type PanelHost = {
   setBaseUrl: (url: string) => Promise<void>;
   codexSignIn: () => Promise<void>;
   codexSignOut: () => Promise<void>;
+  anthropicSignIn: () => Promise<void>;
+  anthropicSignOut: () => Promise<void>;
   setEffort: (effort: 'low' | 'medium' | 'high' | 'xhigh') => Promise<void>;
 };
 
@@ -142,6 +144,12 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'codexSignOut':
           await this.host.codexSignOut();
+          return;
+        case 'anthropicSignIn':
+          await this.host.anthropicSignIn();
+          return;
+        case 'anthropicSignOut':
+          await this.host.anthropicSignOut();
           return;
         case 'selectEffort':
           // Constrain to the valid depths so a malformed message can't write a junk value.

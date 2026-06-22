@@ -22,11 +22,14 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, CODEX_MODELS, DEFAULT_EFFORT,
-  type CodexCreds, type CodexEffort,
+  isAnthropicProvider, isAnthropicSignedIn, ANTHROPIC_MODELS,
+  type CodexCreds, type CodexEffort, type AnthropicCreds,
 } from './catalog';
 import { registerWispChatProvider } from './chatProvider';
 import { CodexAuth } from './codexAuth';
 import { codexInquire } from './codexClient';
+import { AnthropicAuth } from './anthropicAuth';
+import { anthropicInquire } from './anthropicClient';
 
 // ----------------------------- Constants ----------------------------- //
 
@@ -68,6 +71,12 @@ const PROVIDERS: Provider[] = [
   // No catalogKey (not in models.dev) and it is intentionally absent from the native chat picker until
   // the Responses tool-mapper lands (#15) — keyless rows are hidden there, which is correct for now.
   { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.3-codex', apiKeyEnv: '', kind: 'codex' },
+  // Anthropic = the subscription-backed Claude backend (Messages API, reached by Claude.ai OAuth, not an
+  // API key). kind:'anthropic-oauth' switches the Inquire/usability paths off the OpenAI-chat code, like
+  // Codex. No apiKeyEnv — "usable when signed in". Base URL is api.anthropic.com (the client appends
+  // /v1/messages); defaultModel is the latest Opus. No catalogKey (not in models.dev) and absent from the
+  // native chat picker until the Messages adapter lands (slice #29) — keyless rows are hidden there.
+  { id: 'anthropic', label: 'Claude', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-4-8', apiKeyEnv: '', kind: 'anthropic-oauth' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },
@@ -107,6 +116,9 @@ let panel: WispPanelProvider | undefined;
 // Codex OAuth/token lifecycle (sign-in, store, import, refresh). Set in activate once SecretStorage
 // exists; the Inquire codex branch + the sign-in/out commands + the panel state all go through it.
 let codexAuth: CodexAuth;
+
+// Anthropic (Claude.ai) OAuth/token lifecycle — same role as codexAuth for the kind:'anthropic-oauth' row.
+let anthropicAuth: AnthropicAuth;
 
 // B2 inline-diff state. While a preview is on screen the buffer holds old+new lines together
 // (decorated), and exactly one preview is live at a time. `range` covers the rendered preview text;
@@ -286,8 +298,10 @@ const getState = async (): Promise<PanelState> => {
   const p = activeProvider();
   const stored = (await secrets.get(keySlotFor(p)))?.trim();
   const keySource = stored ? 'stored' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env' : 'none';
-  // Codex has no API key — its panel shows sign-in state instead of the key field.
-  const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn() : false;
+  // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
+  const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
+    : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
+    : false;
   return {
     keyIsSet: keySource !== 'none',
     keySource,
@@ -299,8 +313,8 @@ const getState = async (): Promise<PanelState> => {
     isCustom: p.id === CUSTOM_ID,
     kind: p.kind ?? 'openai-chat',
     signedIn,
-    // Codex has no /models route — offer the curated list instead of a live fetch.
-    modelOptions: isCodexProvider(p) ? CODEX_MODELS : undefined,
+    // The OAuth Providers have no /models route — offer the curated list instead of a live fetch.
+    modelOptions: isCodexProvider(p) ? CODEX_MODELS : isAnthropicProvider(p) ? ANTHROPIC_MODELS : undefined,
     // Codex only: the reasoning-effort knob's current value (drives the panel's Effort select).
     effort: isCodexProvider(p) ? activeEffort() : undefined,
   };
@@ -482,6 +496,25 @@ const codexSignOut = async (): Promise<void> => {
   void panel?.postState();
 };
 
+// Anthropic sign-in: run the Claude.ai OAuth flow, store the tokens, refresh the panel.
+const anthropicSignIn = async (): Promise<void> => {
+  try {
+    await anthropicAuth.signIn();
+    vscode.window.showInformationMessage('Wisp: signed in to Claude.');
+    void panel?.postState();
+  } catch (err) {
+    output.appendLine(`[error] anthropic sign-in ${String(err)}`);
+    vscode.window.showErrorMessage(`Wisp: Claude sign-in failed — ${String(err)}`);
+  }
+};
+
+// Anthropic sign-out: clear the stored token bundle and refresh the panel.
+const anthropicSignOut = async (): Promise<void> => {
+  await anthropicAuth.signOut();
+  vscode.window.showInformationMessage('Wisp: signed out of Claude.');
+  void panel?.postState();
+};
+
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
@@ -523,22 +556,31 @@ const inquire = async (): Promise<void> => {
     return;
   }
 
-  // Two usability rules: Codex is usable when SIGNED IN (no API key); every other Provider when keyed.
+  // Two usability rules: the OAuth Providers (Codex, Anthropic) are usable when SIGNED IN (no API key);
+  // every other Provider when keyed.
   const provider = activeProvider();
   const codex = isCodexProvider(provider);
+  const anthropic = isAnthropicProvider(provider);
   let creds: CodexCreds | undefined;
+  let anthropicCreds: AnthropicCreds | undefined;
   if (codex) {
     creds = await codexAuth.current();
     if (!isCodexSignedIn(creds)) {
       vscode.window.showWarningMessage("Sign in to Codex first (command: 'Wisp: Sign in to Codex').");
       return;
     }
+  } else if (anthropic) {
+    anthropicCreds = await anthropicAuth.current();
+    if (!isAnthropicSignedIn(anthropicCreds)) {
+      vscode.window.showWarningMessage("Sign in to Claude first (command: 'Wisp: Sign in to Claude').");
+      return;
+    }
   } else if (!(await resolveApiKey())) {
     vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
     return;
   }
-  const client = codex ? undefined : await getClient();
-  if (!codex && !client) return;
+  const client = codex || anthropic ? undefined : await getClient();
+  if (!codex && !anthropic && !client) return;
 
   const model = activeModel();
   const original = document.getText();
@@ -554,9 +596,12 @@ const inquire = async (): Promise<void> => {
       { location: vscode.ProgressLocation.Notification, title: 'Wisp: editing…', cancellable: true },
       async (_progress, token) => {
         token.onCancellationRequested(() => controller.abort());
-        // Codex speaks the Responses API (its own client); every other Provider uses the OpenAI SDK.
+        // Codex speaks the Responses API and Anthropic the Messages API (each its own client); every
+        // other Provider uses the OpenAI SDK.
         if (codex) {
           reply = await codexInquire({ creds: creds!, baseUrl: activeBaseUrl(), model, messages, effort: activeEffort(), signal: controller.signal });
+        } else if (anthropic) {
+          reply = await anthropicInquire({ creds: anthropicCreds!, baseUrl: activeBaseUrl(), model, messages, signal: controller.signal });
         } else {
           const maxTokens = cfg().get<number>('maxTokens') ?? 0;
           const res = await client!.chat.completions.create(
@@ -631,6 +676,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
   globalState = context.globalState;
   // Codex token lifecycle — browser open goes through vscode.env.openExternal; logs to the Wisp channel.
   codexAuth = new CodexAuth(context.secrets, (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
+  // Anthropic (Claude.ai) token lifecycle — same injection as Codex.
+  anthropicAuth = new AnthropicAuth(context.secrets, (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
   // Go key in the zen slot. Both are idempotent on the go slot, so the pair is a no-op after the first.
@@ -660,6 +707,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     setBaseUrl,
     codexSignIn,
     codexSignOut,
+    anthropicSignIn,
+    anthropicSignOut,
     setEffort,
   });
 
@@ -672,6 +721,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     vscode.commands.registerCommand('wisp.inquire', inquire),
     vscode.commands.registerCommand('wisp.codexSignIn', codexSignIn),
     vscode.commands.registerCommand('wisp.codexSignOut', codexSignOut),
+    vscode.commands.registerCommand('wisp.anthropicSignIn', anthropicSignIn),
+    vscode.commands.registerCommand('wisp.anthropicSignOut', anthropicSignOut),
     // Internal — invoked by the inline-diff CodeLenses, not contributed to the palette.
     vscode.commands.registerCommand('wisp.acceptEdit', () => resolvePreview(true)),
     vscode.commands.registerCommand('wisp.rejectEdit', () => resolvePreview(false)),
