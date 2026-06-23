@@ -1,7 +1,7 @@
 ---
 type: api
 project: wisp
-updated: 2026-06-19
+updated: 2026-06-24
 tags: [context, api, vscode]
 ---
 
@@ -21,9 +21,10 @@ The project's surface is a VS Code extension: the Inquire command, other command
 | `wisp.inquire` | Wisp: Inquire | **Inline-chat edit (slice #4).** `showInputBox` instruction → target span = selection (or current line if none), whole file = context → `buildEditPrompt` → blocks/diff. **Branches on the Active Provider's `kind`:** `codex` → `codexClient.codexInquire` (Responses API, sign-in required); else → the OpenAI SDK chat-completions client. Cancellable `withProgress`. Keybinding **`Ctrl+Shift+I`**. In the `editor/context` menu + palette. |
 | `wisp.codexSignIn` | Wisp: Sign in to Codex | Run the ChatGPT-account OAuth flow (`CodexAuth.signIn`), store tokens in SecretStorage `wisp.codexAuth`, refresh the panel. |
 | `wisp.codexSignOut` | Wisp: Sign out of Codex | Tombstone the Codex token slot (empty `{}`, not delete — so `~/.codex/auth.json` isn't re-imported; see [[gotchas]]) + refresh the panel. |
+| `wisp.bridgeToggle` | Wisp: Toggle Bridge | **#37 Bridge driver.** Start the listener if stopped (toast: address + access secret), stop it if running. Calls `bridge.start()/stop()` on the `createBridgeServer` handle. Temporary until the panel switch (#38) drives the same start/stop. |
 
 ## Settings (`wisp.*`)
-`provider` (str, default `opencode-go`, **`scope: machine`** — the Active Provider id; selecting one selects where the bearer key is sent, so it must not be workspace-overridable; unknown → falls back to `opencode-go`), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — used **only** when the Active Provider is `custom`; built-ins ignore it and use their hardcoded catalog URL), `model` (str, default **bare** `minimax-m3` — the prefixed form is rejected, see [[gotchas]]; now a **mirror** of the Active Provider's model, sourced from globalState), `maxTokens` (0 = uncapped), `temperature` (0.1). No `apiKey` setting — key is SecretStorage/env only. **Completion-only settings (`enabled`/`debounceMs`/`maxPrefixChars`/`maxSuffixChars`) were removed in slice #5.** Panel and commands write to the scope that already defines the value (`targetFor()`), not blindly Global.
+`provider` (str, default `opencode-go`, **`scope: machine`** — the Active Provider id; selecting one selects where the bearer key is sent, so it must not be workspace-overridable; unknown → falls back to `opencode-go`), `baseUrl` (str, default `https://opencode.ai/zen/go/v1`, **`scope: machine`** — used **only** when the Active Provider is `custom`; built-ins ignore it and use their hardcoded catalog URL), `model` (str, default **bare** `minimax-m3` — the prefixed form is rejected, see [[gotchas]]; now a **mirror** of the Active Provider's model, sourced from globalState), `maxTokens` (0 = uncapped), `temperature` (0.1), `bridge.port` (number, default `41184`, **`scope: machine`** — the `127.0.0.1` port the Bridge listener binds; machine-scoped so a workspace can't move the listener). No `apiKey` setting — key is SecretStorage/env only. **Completion-only settings (`enabled`/`debounceMs`/`maxPrefixChars`/`maxSuffixChars`) were removed in slice #5.** Panel and commands write to the scope that already defines the value (`targetFor()`), not blindly Global.
 
 ### Provider catalog (multi-provider, Issues 4–7; Zen/Go split #12; Codex #13)
 - `PROVIDERS` is a code constant in `src/extension.ts`: 11 built-in rows `{id,label,baseUrl,defaultModel,apiKeyEnv,catalogKey?,keyId?,kind?}` (base URLs **hardcoded**, never from settings) + a `custom` row whose base URL is the user-supplied machine-scoped `wisp.baseUrl`. The **Active Provider** (`activeProvider()`) is the source of truth; an unknown `wisp.provider` falls back to row 0 (**`opencode-go`**, default). **OpenCode Go** (`/zen/go/v1`, budget) and **OpenCode Zen** (`/zen/v1`, premium Claude/GPT/Gemini) are two endpoints of one account.
@@ -33,6 +34,24 @@ The project's surface is a VS Code extension: the Inquire command, other command
 - **Client** (`getClient`) is built from the active row's resolved `{baseUrl, key}` (`activeBaseUrl()`) and rebuilt when the Active Provider, its key, or its model changes.
 - **Two silent one-time migrations, run in order on activate:** (1) `migrateZenToGo` — moves any key + remembered model from the old `opencode-zen` slot to **`opencode-go`** and **deletes** the old zen slot (it held a Go key; leaving it would 401 the new `/zen/v1` row); (2) `migrateLegacyKey` — pre-catalog `wisp.apiKey` → `wisp.apiKey.opencode-go` (+ `wisp.model` → Go's globalState record), then deletes the legacy slot. Both no-op once the go slot exists; zen→go runs first so the rare both-present case can't orphan a Go key. Pure planners `planZenToGoMigration`/`planLegacyMigration` in `catalog.ts`.
 - ⚠ `ollama`/`ollama-cloud`/`kilocode`/`cline` `defaultModel`s are **best-effort presets** — not yet verified against each `GET /models` (no keys at build); the panel model picker is the correction path.
+
+## The Bridge — outward OpenAI-compatible endpoint (PRD #34; listener #37)
+Wisp's first **inbound** network listener — the outward mirror of the LM Chat Provider. `src/bridgeServer.ts`
+(`createBridgeServer(deps)` → `{ start, stop, isRunning, dispose }`) is impure glue over the pure `src/bridge.ts`
+translator; node `http` stdlib, no web framework. OFF by default — started/stopped by `wisp.bridgeToggle` (panel
+switch is #38). Binds **`127.0.0.1`** on `wisp.bridge.port`. The deps seam mirrors `chatProvider.ts`'s
+`ChatProviderDeps` (providers + model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns secrets.
+- **Auth:** every request needs `Authorization: Bearer <access-secret>` (constant-time compare); mismatch → **401**.
+  The secret is a temp constant (`BRIDGE_ACCESS_SECRET`) until #38 generates + stores + displays it.
+- **`POST /v1/chat/completions`:** `parseOpenAiChatRequest` (untrusted body → **400** on bad JSON or no turns) →
+  resolve the `model` field as a **Provider id** → its `resolveModel` model → existing OpenAI SDK
+  `chat.completions.create` (`stream:true`, system re-prepended) → reply via `bridge.ts` SSE emitters, OR one
+  aggregated `chat.completion` object when the client sent `stream:false`. Tool calls assembled whole. **Keyed
+  Providers only** this slice — `codex`/`anthropic` → `400 not yet reachable` (#39/#40).
+- **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...))` — the usable **keyed** Provider ids
+  (`{id, object:'model', created:0, owned_by:'wisp'}`); Codex/Anthropic forced out until their send-paths land.
+- **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts`. See
+  [[decisions]] 2026-06-24 and the PowerShell test trap in [[gotchas]].
 
 ## External API consumed — OpenCode (`go` + `zen`)
 - Two endpoints of the same OpenCode account (one Bearer key): **Go** `https://opencode.ai/zen/go/v1` (budget) and **Zen** `https://opencode.ai/zen/v1` (premium). Both OpenAI-compatible.

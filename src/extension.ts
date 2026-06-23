@@ -26,6 +26,7 @@ import {
   type CodexCreds, type EffortLevel, type AnthropicCreds,
 } from './catalog';
 import { registerWispChatProvider } from './chatProvider';
+import { createBridgeServer } from './bridgeServer';
 import { CodexAuth } from './codexAuth';
 import { codexInquire } from './codexClient';
 import { AnthropicAuth } from './anthropicAuth';
@@ -37,6 +38,12 @@ const CONFIG_NS = 'wisp';
 // Legacy (pre-catalog) keychain slot. Per-Provider keys now live in `${SECRET_KEY}.<id>` slots;
 // this bare name is read once by migrateLegacyKey() then deleted. Not a literal key.
 const SECRET_KEY = 'wisp.apiKey';
+
+// Bridge access secret — required as the Bearer on every Bridge request. ponytail: a temporary constant for
+// the #37 walking skeleton; the auto-generated, SecretStorage-backed, panel-displayed secret is slice #38.
+const BRIDGE_ACCESS_SECRET = 'wisp-bridge-dev-secret';
+// Default Bridge port (overridable via wisp.bridge.port) — a fixed high port unlikely to clash.
+const DEFAULT_BRIDGE_PORT = 41184;
 
 // ----------------------------- Provider catalog ----------------------------- //
 
@@ -120,6 +127,10 @@ let codexAuth: CodexAuth;
 // Anthropic (Claude.ai) OAuth/token lifecycle — same role as codexAuth for the kind:'anthropic-oauth' row.
 let anthropicAuth: AnthropicAuth;
 
+// The Bridge listener handle — created in activate, started/stopped by the wisp.bridgeToggle command. OFF
+// until toggled on (PRD: no local port open until the user deliberately enables it).
+let bridge: ReturnType<typeof createBridgeServer>;
+
 // B2 inline-diff state. While a preview is on screen the buffer holds old+new lines together
 // (decorated), and exactly one preview is live at a time. `range` covers the rendered preview text;
 // Accept replaces it with `acceptText` (kept+added), Reject restores `originalText` (the span).
@@ -161,6 +172,9 @@ const activeEffort = (): EffortLevel => globalState.get<EffortLevel>(EFFORT_KEY)
 // Base URL for the Active Provider. Built-ins use their hardcoded catalog URL; only Custom reads the
 // user-supplied, machine-scoped wisp.baseUrl (every built-in ignores that setting entirely).
 const activeBaseUrl = (): string => resolveBaseUrl(activeProvider(), cfg().get<string>('baseUrl') ?? '');
+
+// The Bridge listen port — wisp.bridge.port, or the fixed default when unset.
+const bridgePort = (): number => cfg().get<number>('bridge.port') ?? DEFAULT_BRIDGE_PORT;
 
 // Key resolution for a given Provider: its (possibly borrowed, via keyId) SecretStorage slot first,
 // then the row's own env var (OPENCODE_API_KEY for OpenCode, GROQ_API_KEY for Groq, …). Never read from
@@ -520,6 +534,23 @@ const anthropicSignOut = async (): Promise<void> => {
   void panel?.postState();
 };
 
+// Toggle the Bridge listener on/off. ponytail: this command is the #37 driver — it shows the address + secret
+// in a toast so an F5/curl test can copy them; the panel switch + copy button + generated secret are slice #38.
+const bridgeToggle = async (): Promise<void> => {
+  if (bridge.isRunning()) {
+    bridge.stop();
+    vscode.window.showInformationMessage('Wisp: Bridge stopped.');
+    return;
+  }
+  try {
+    await bridge.start();
+    vscode.window.showInformationMessage(`Wisp: Bridge on http://127.0.0.1:${bridgePort()} — access secret: ${BRIDGE_ACCESS_SECRET}`);
+  } catch (err) {
+    output.appendLine(`[error] bridge start ${String(err)}`);
+    vscode.window.showErrorMessage(`Wisp: Bridge failed to start — ${String(err)}`);
+  }
+};
+
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
@@ -717,13 +748,28 @@ export const activate = (context: vscode.ExtensionContext): void => {
     setEffort,
   });
 
+  // The Bridge listener — the outward mirror of the LM Chat Provider. Reuses the same key/client resolvers
+  // and model memory; keyed Providers only this slice (Codex #39 / Anthropic #40 later). OFF until toggled.
+  bridge = createBridgeServer({
+    providers: PROVIDERS,
+    modelMap: () => globalState.get<Record<string, string>>(MODEL_MAP_KEY) ?? {},
+    customBaseUrl: () => cfg().get<string>('baseUrl') ?? '',
+    keyFor: keyForProvider,
+    clientFor: clientForProvider,
+    port: bridgePort,
+    accessSecret: () => BRIDGE_ACCESS_SECRET,
+    log: (m) => output.appendLine(m),
+  });
+
   context.subscriptions.push(
     output,
     statusBar,
+    bridge, // closes the listener on deactivate
     vscode.window.registerWebviewViewProvider(WispPanelProvider.viewId, panel),
     vscode.commands.registerCommand('wisp.setApiKey', setApiKey),
     vscode.commands.registerCommand('wisp.listModels', listModels),
     vscode.commands.registerCommand('wisp.inquire', inquire),
+    vscode.commands.registerCommand('wisp.bridgeToggle', bridgeToggle),
     vscode.commands.registerCommand('wisp.codexSignIn', codexSignIn),
     vscode.commands.registerCommand('wisp.codexSignOut', codexSignOut),
     vscode.commands.registerCommand('wisp.anthropicSignIn', anthropicSignIn),
