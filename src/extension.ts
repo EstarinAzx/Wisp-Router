@@ -561,11 +561,13 @@ const ensureBridgeSecret = async (): Promise<string> => {
 };
 
 // Point every future integrated terminal at the live Bridge (#35): the five Copilot CLI BYOK vars, read from
-// the process env at terminal creation. COPILOT_MODEL = the Active Provider id, so the panel's choice is the
-// single source of truth (story 8). Existing terminals need a relaunch to pick these up — hence the panel hint.
+// the process env at terminal creation. COPILOT_MODEL = the Active Provider's RESOLVED model (not its id), so
+// Copilot CLI's own UI shows the real model name; the Bridge routes that model name back to the active
+// Provider (#b). It is a launch-time snapshot (env is fixed at terminal creation) — existing terminals need a
+// relaunch to pick it up (the panel hint); the model actually used stays live (the Bridge re-resolves per request).
 const injectCopilotEnv = (): void => {
   envCollection.replace('COPILOT_PROVIDER_BASE_URL', `${bridgeAddress()}/v1`);
-  envCollection.replace('COPILOT_MODEL', activeProvider().id);
+  envCollection.replace('COPILOT_MODEL', activeModel());
   envCollection.replace('COPILOT_PROVIDER_API_KEY', bridgeSecret);
   envCollection.replace('COPILOT_PROVIDER_TYPE', 'openai');
   envCollection.replace('COPILOT_OFFLINE', 'true');
@@ -838,7 +840,12 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // returns the refreshed OAuth bundle, and the shared Effort knob drives its Responses reasoning.
     codexSignedIn: () => codexAuth.isSignedIn(),
     codexCreds: () => codexAuth.current(),
+    // Anthropic over the Bridge (#40): same shape — signed-in flag gates its row, current() returns the
+    // refreshed OAuth bundle for the Messages stream.
+    anthropicSignedIn: () => anthropicAuth.isSignedIn(),
+    anthropicCreds: () => anthropicAuth.current(),
     effort: () => activeEffort(),
+    activeProviderId: () => activeProvider().id,
     port: bridgePort,
     accessSecret: () => bridgeSecret,
     log: (m) => output.appendLine(m),
@@ -891,9 +898,9 @@ export const activate = (context: vscode.ExtensionContext): void => {
       if (e.affectsConfiguration('wisp.provider') || e.affectsConfiguration('wisp.baseUrl') || e.affectsConfiguration('wisp.model')) cachedClient = undefined;
       // A raw wisp.provider edit (no panel in Issue 4) must re-mirror wisp.model to the new Provider.
       if (e.affectsConfiguration('wisp.provider')) void mirrorActiveModel();
-      // COPILOT_MODEL = the Active Provider id; keep it true if the Provider switches mid-run so new
-      // terminals get the current choice. Only the model var — BASE_URL stays bound to the running port.
-      if (e.affectsConfiguration('wisp.provider') && bridge.isRunning()) envCollection.replace('COPILOT_MODEL', activeProvider().id);
+      // COPILOT_MODEL = the Active Provider's resolved model (#b); keep it true if the Provider OR its model
+      // switches mid-run so new terminals get the current choice. Only the model var — BASE_URL stays bound to the port.
+      if ((e.affectsConfiguration('wisp.provider') || e.affectsConfiguration('wisp.model')) && bridge.isRunning()) envCollection.replace('COPILOT_MODEL', activeModel());
       // Any of our settings may be on screen in the panel — mirror every change there.
       if (e.affectsConfiguration(CONFIG_NS)) void panel?.postState();
     }),

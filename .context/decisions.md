@@ -1120,6 +1120,52 @@ as #38): a real **Copilot CLI session** over the Bridge (acceptance #5 + the lon
 plus the signed-out-401 and tool-call edges live. **Unblocks #40** (Anthropic, the last send-path).
 **Reversibility:** easy/additive — edits to two files; revert to restore the codex `400`. No ADR.
 
+## 2026-06-24 — Anthropic over the Bridge (#40)
+
+**Decision:** Make `kind:'anthropic-oauth'` reachable on `POST /v1/chat/completions` by mirroring the #39
+Codex send-path exactly, swapping the Codex cores for the Anthropic ones: `handleAnthropicChat` drives
+`anthropicStream` (Messages SSE) on `anthropicAuth.current()` creds, **raw** `deps.effort()`, `toAnthropicTools`,
+with `parsed.system` re-attached as a leading `role:'system'` message. `/v1/models` and `handleChat` flip
+anthropic from the stub to live; `BridgeDeps` gains `anthropicSignedIn`/`anthropicCreds`, wired from the
+getters `registerWispChatProvider` already receives.
+
+**Why:** zero new auth/transport — reuse the exact cores the LM Chat Provider's Anthropic branch uses, so the
+only new code is the turn/stream mapping. Two details: effort is passed **raw** (Anthropic's body builder maps it
+via `anthropicThinkingEffort`; only Codex needs `standardEffortToCodex`), and **images are dropped** (matches
+`toAnthropicMessages`; Anthropic image support is a separate follow-up). The deferred shared-renderer refactor
+(flagged in the #39 entry as "take it with #40") was **declined** — a third near-identical block is cheap and the
+keyed/Codex paths are F5-verified; a renderer refactor now risks regression for no functional gain. `ponytail`.
+
+**Verification:** `tsc` clean, **234 tests green** (glue → not unit-tested per PRD), live `Invoke-RestMethod`
+`model:'anthropic'` → `finish_reason=stop` with real text through the Claude.ai subscription.
+**Reversibility:** easy/additive — revert to restore the anthropic `400`. No ADR.
+
+## 2026-06-24 — Copilot CLI shows the real model name, via active-Provider routing fallback (#b)
+
+**Decision:** Inject `COPILOT_MODEL` = the active Provider's **resolved model name** (`activeModel()`), not its
+Provider id, so Copilot CLI's UI shows the real model. To keep routing working, `handleChat` now routes a
+Provider **id** to that Provider (curl keeps explicit addressing) and **any other value** — notably the resolved
+model name Copilot sends — to the **active Provider** (`deps.activeProviderId()`, new `BridgeDeps` getter). The
+env label re-syncs on provider **or** model switch.
+
+**Why:** Copilot CLI renders `COPILOT_MODEL` **verbatim** as its model label and does not read the custom
+endpoint's `/v1/models`; the only lever for the label is that env var. Changing it to the model name forces the
+routing change. Chose the **loose** active-Provider fallback over a tight model-name match because the model name
+lives in the terminal env (fixed at launch) — a tight match would 404 after any mid-session model switch. The
+loose fallback keeps the model **used** live (`resolveModel` per request) while the **label** is a launch-time
+snapshot. Tradeoff accepted: (1) an unknown model no longer 404s — it serves the active Provider (fine for a
+local single-user endpoint); (2) running Copilot terminals now **follow the active Provider** (they send a model
+name, not an id) rather than being pinned to their launch Provider. curl addressing each Provider by id is
+preserved.
+
+**Verification:** `tsc` clean, **234 tests green**, full compile clean. Routing proven on the compiled
+`out/bridgeServer.js` via a node harness (3/3 HTTP cases) AND end-to-end with the **real `@github/copilot`
+v1.0.64 binary** — its JSON event stream reported `data.model:"minimax-m3"` (resolved name, not the id) and
+round-tripped through our Bridge (`apiCallId:chatcmpl-…`). The interactive `Current model:` banner is the human
+render of that same `data.model` field; the only step not run is a reload of the user's live Extension Host.
+**Reversibility:** easy — three small edits; revert `injectCopilotEnv` to `activeProvider().id` and drop the
+fallback to restore strict id-routing. No ADR.
+
 ## Related
 - [[overview]]
 - [[oauth-recon]]

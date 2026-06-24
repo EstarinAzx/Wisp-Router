@@ -27,10 +27,11 @@ import * as crypto from 'crypto';
 import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
-  assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type EffortLevel,
+  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type EffortLevel,
 } from './catalog';
 import { codexStream } from './codexClient';
+import { anthropicStream } from './anthropicClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
   type ChunkMeta, type FinishReason, type BridgeChatRequest,
@@ -50,7 +51,13 @@ export type BridgeDeps = {
   // flag gates the /v1/models row, current() returns the refreshed OAuth bundle for the Responses stream.
   codexSignedIn: () => Promise<boolean>;
   codexCreds: () => Promise<CodexCreds | undefined>;
+  // Anthropic is the same "usable when signed in" shape as Codex (no API key) — these feed the anthropic
+  // path (#40): the flag gates the /v1/models row, current() returns the refreshed OAuth bundle for the
+  // Messages stream.
+  anthropicSignedIn: () => Promise<boolean>;
+  anthropicCreds: () => Promise<AnthropicCreds | undefined>;
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
+  activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
@@ -116,13 +123,13 @@ const buildCompletion = (meta: ChunkMeta, text: string, calls: { id: string; nam
 export const createBridgeServer = (deps: BridgeDeps) => {
   let server: http.Server | undefined;
 
-  // GET /v1/models — the usable Provider ids. Keyed = has a key; Codex is usable when signed in (#39);
-  // Anthropic stays hidden until its send path lands (#40), so it is forced false here. caps is omitted: the
-  // list only needs ids, so the conservative default windows are fine (no models.dev fetch to stall on).
+  // GET /v1/models — the usable Provider ids. Keyed = has a key; the OAuth rows (Codex #39, Anthropic #40)
+  // are usable when signed in. caps is omitted: the list only needs ids, so the conservative default windows
+  // are fine (no models.dev fetch to stall on).
   const handleModels = async (res: http.ServerResponse): Promise<void> => {
     const keyedPairs = await Promise.all(deps.providers.map(async (p) =>
       [p.id, isCodexProvider(p) ? await deps.codexSignedIn()
-        : isAnthropicProvider(p) ? false : !!(await deps.keyFor(p))] as const));
+        : isAnthropicProvider(p) ? await deps.anthropicSignedIn() : !!(await deps.keyFor(p))] as const));
     const infos = buildChatModelInfos(deps.providers, {
       keyed: Object.fromEntries(keyedPairs),
       modelMap: deps.modelMap(),
@@ -183,6 +190,59 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     }
   };
 
+  // POST /v1/chat/completions for the `anthropic` Provider — the Messages SSE stream behind the Claude.ai
+  // sign-in, rendered back through the SAME bridge.ts SSE emitters the keyed/Codex paths use (identical wire
+  // shape). No API key: creds come from the OAuth seam (anthropicAuth via deps), so a signed-out state is a
+  // clean 401, and refresh failure mid-stream a 502. Mirrors handleCodexChat — only the cores differ.
+  const handleAnthropicChat = async (parsed: BridgeChatRequest, provider: Provider, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const creds = await deps.anthropicCreds();
+    if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
+
+    const modelId = resolveModel(deps.modelMap(), provider);
+    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+    // bridge.ts lifts system OUT of the turns; buildAnthropicMessagesBody lifts a role:'system' message back
+    // to the top-level `system`, so re-attach it as the leading system message. Images are dropped (the chat
+    // path's toAnthropicMessages drops them too — Anthropic image support is a separate follow-up).
+    const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+    const tools = toAnthropicTools(parsed.tools);
+
+    const controller = new AbortController();
+    req.on('close', () => controller.abort());
+
+    const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
+    // anthropicStream yields text fragments live and the assembled tool calls at stream end (whole) — same
+    // shape as codexStream, so the rendering is identical: collect the calls, emit each as one chunk.
+    const calls: AssembledToolCall[] = [];
+    try {
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools, toolChoice: 'auto', signal: controller.signal });
+      if (parsed.stream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+        for await (const ev of upstream) {
+          if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
+          else calls.push(ev.call);
+        }
+        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
+        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
+        res.write(SSE_DONE);
+        res.end();
+      } else {
+        // Non-streaming client: drain the same stream into one chat.completion object.
+        let text = '';
+        for await (const ev of upstream) {
+          if (ev.type === 'text') text += ev.value;
+          else calls.push(ev.call);
+        }
+        sendJson(res, 200, buildCompletion(meta, text, calls));
+      }
+    } catch (err) {
+      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      // A signed-out / refresh-failed Anthropic throws here — a clean 502 (or end if the SSE head is already out).
+      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
+    }
+  };
+
   // POST /v1/chat/completions — parse → route to a keyed Provider → send via the OpenAI SDK → render the reply
   // back through bridge.ts's SSE emitters (or one chat.completion object when stream:false).
   const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
@@ -194,11 +254,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // 400 here, not a crash — don't lean on try/catch for this control flow.
     if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
 
-    const provider = deps.providers.find((p) => p.id === parsed.model);
+    // A request naming a Provider id routes to it (curl can address any Provider explicitly). Anything else —
+    // notably the resolved model NAME Copilot CLI sends as COPILOT_MODEL (#b: so its UI shows the real model,
+    // not the Provider id) — falls back to the ACTIVE Provider. Trade: an unknown model no longer 404s, it
+    // serves the active Provider (fine for a local single-user endpoint); the model actually used stays live
+    // (resolveModel reads the panel per request), so a mid-session model switch is picked up without a relaunch.
+    const provider = deps.providers.find((p) => p.id === parsed.model)
+      ?? deps.providers.find((p) => p.id === deps.activeProviderId());
     if (!provider) return sendError(res, 404, `unknown provider '${parsed.model}'`);
-    // Codex routes through its Responses stream (#39); Anthropic still awaits its Messages stream (#40).
+    // The OAuth Providers route through their own streams (no API key): Codex → Responses (#39),
+    // Anthropic → Messages (#40).
     if (isCodexProvider(provider)) return handleCodexChat(parsed, provider, req, res);
-    if (isAnthropicProvider(provider)) return sendError(res, 400, `provider '${provider.id}' is not yet reachable over the Bridge`);
+    if (isAnthropicProvider(provider)) return handleAnthropicChat(parsed, provider, req, res);
     const client = await deps.clientFor(provider);
     if (!client) return sendError(res, 400, `provider '${provider.id}' has no API key configured`);
 

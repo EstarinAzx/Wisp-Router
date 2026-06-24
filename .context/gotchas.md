@@ -237,8 +237,23 @@ click Start keeps the old (empty) env and won't see the Bridge — open a **fres
 relaunch it (VS Code shows a stale-env warning icon on the tab). Two more: the collection is `.persistent` by
 default, so Wisp `clear()`s it **on activate** as well as on stop (else a reload re-applies last session's
 dead-port `BASE_URL` + stale secret while the Bridge is OFF) — don't drop that activate-time clear; and
-`COPILOT_MODEL` only re-syncs on a Provider switch while running, so an F5 Copilot-CLI test must use a **keyed**
-Provider (`codex`/`anthropic` still answer `400 not yet reachable` until #39/#40).
+`COPILOT_MODEL` re-syncs on a Provider **or** model switch while running (#b), so a **new** terminal picks up the
+current choice. All three Provider kinds (keyed/codex/anthropic) answer over the Bridge now.
+
+### The standalone GUI Copilot app does NOT route through the Bridge (#b)
+The `COPILOT_*` vars are injected into VS Code **integrated terminals** only. The standalone GitHub Copilot
+**desktop/GUI app** (launched from the Start menu) inherits no terminal env → it talks to GitHub, not the Bridge,
+and its model picker shows GitHub's own catalog (Auto/Haiku/GPT-5 mini/…), never Wisp Providers. Drive the Bridge
+with `copilot` in a terminal opened after Start. (An app launched *by a command typed in a Bridge-env terminal*
+would inherit it; from the Start menu it won't.)
+
+### Copilot CLI label is a launch snapshot; running terminals follow the ACTIVE Provider (#b)
+`COPILOT_MODEL` = the resolved **model name** (not the Provider id) so Copilot's UI shows the real model — but the
+env is fixed at terminal creation, so the **label** is a snapshot from launch. The model **used** stays live
+(Bridge re-resolves per request). Consequence of the loose routing fallback: a running Copilot terminal sends a
+model name (not an id), which routes to whatever the **active** Provider is *now* — so switching the panel Provider
+makes open terminals follow it, rather than staying pinned to their launch Provider. curl can still address a
+specific Provider by its **id** (`codex`/`anthropic`/`opencode-go`).
 
 ## Related
 - [[api]]

@@ -48,23 +48,31 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   running (`accessSecret: () => bridgeSecret`, `''` when stopped — the sync auth check can't `await` SecretStorage).
 - **Copilot CLI wiring (#35/#38):** while running, `injectCopilotEnv()` sets five `COPILOT_*` vars on
   `context.environmentVariableCollection` so any integrated terminal opened **after** Start points at the Bridge —
-  `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:<port>/v1`, `COPILOT_MODEL=`active-Provider-id (re-synced on a
-  mid-run Provider switch), `COPILOT_PROVIDER_API_KEY=`the access secret, `COPILOT_PROVIDER_TYPE=openai`,
+  `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:<port>/v1`, `COPILOT_MODEL=`the active Provider's **resolved model
+  name** (`activeModel()`, not its id — so Copilot CLI's UI shows the real model; #b), re-synced on a mid-run
+  Provider **or** model switch, `COPILOT_PROVIDER_API_KEY=`the access secret, `COPILOT_PROVIDER_TYPE=openai`,
   `COPILOT_OFFLINE=true`. Cleared on stop **and on activate** (the collection is `.persistent` by default, Bridge
-  starts OFF). Existing terminals stay stale until relaunched — see [[gotchas]].
+  starts OFF). Existing terminals stay stale until relaunched (the label is a launch-time snapshot) — see [[gotchas]].
 - **`POST /v1/chat/completions`:** `parseOpenAiChatRequest` (untrusted body → **400** on bad JSON or no turns) →
-  resolve the `model` field as a **Provider id** → its `resolveModel` model → send. Routing by Provider kind:
+  route the `model` field. **Routing (#b):** a Provider **id** routes to it (curl can address any Provider); any
+  other value — notably the resolved model **name** Copilot sends as `COPILOT_MODEL` — falls back to the
+  **active Provider** (`deps.activeProviderId()`). Trade: an unknown model no longer 404s, it serves the active
+  Provider; fine for a local single-user endpoint. The model actually sent is always `resolveModel` (live per
+  request), so a mid-session model switch needs no relaunch. Then by Provider kind:
   - **keyed** (openai-chat) → OpenAI SDK `chat.completions.create` (`stream:true`, system re-prepended).
   - **`codex`** (#39) → `handleCodexChat`: `codexStream` (Responses SSE) on `codexAuth.current()` creds +
     `standardEffortToCodex(effort)` + `toCodexResponsesTools`, `parsed.system` re-attached as a leading
     `role:'system'` message (→ `instructions`). No creds → **401**; stream throw → **502**.
-  - **`anthropic`** → still `400 not yet reachable` (#40).
-  Either path renders back through `bridge.ts`'s SSE emitters, OR one aggregated `chat.completion` object when
-  the client sent `stream:false`. Tool calls assembled whole. The Codex send-path reuses the **same wire shape**
+  - **`anthropic`** (#40) → `handleAnthropicChat`: `anthropicStream` (Messages SSE) on `anthropicAuth.current()`
+    creds + **raw** `effort` (the body builder maps it via `anthropicThinkingEffort`) + `toAnthropicTools`,
+    `parsed.system` re-attached as a leading `role:'system'` message (body builder lifts it to top-level
+    `system`); images dropped. No creds → **401**; stream throw → **502**.
+  Every path renders back through `bridge.ts`'s SSE emitters, OR one aggregated `chat.completion` object when
+  the client sent `stream:false`. Tool calls assembled whole. Codex + Anthropic reuse the **same wire shape**
   (`textChunk`/`toolCallChunk`/`finalChunk`) as the keyed path, not a second renderer.
 - **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...))` — the usable Provider ids
   (`{id, object:'model', created:0, owned_by:'wisp'}`): keyed = has a key, **`codex` = signed in** (#39),
-  `anthropic` forced out until #40.
+  **`anthropic` = signed in** (#40).
 - **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts` +
   `codexStream`. See [[decisions]] 2026-06-24 (#39 Codex send-path) and the PowerShell test trap in [[gotchas]].
 

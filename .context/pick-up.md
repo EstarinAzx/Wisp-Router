@@ -5,47 +5,35 @@ updated: 2026-06-24
 tags: [context, pick-up]
 ---
 
-# Pick up
+# Pick up here
 
-Start: read `.context/overview.md` + `.context/active-work.md` (rehydrate the project, then the Bridge build state).
+**Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
-**Last session (2026-06-24, branch `feat/bridge`):** Bridge slice **#39** — Codex over the Bridge.
-- **#39 — BUILT + SMOKE-VERIFIED.** Edits to `src/bridgeServer.ts` + `src/extension.ts` (no `package.json`
-  change). Pure reuse of the LM Chat Provider's Codex path: `handleCodexChat` drives `codexStream` on
-  `codexAuth.current()` creds + `standardEffortToCodex(effort)` + `toCodexResponsesTools`; `parsed.system`
-  re-attached as a leading `role:'system'` message (→ `instructions`); renders back through bridge.ts's
-  `textChunk`/`toolCallChunk`/`finalChunk` (same wire shape as keyed). `/v1/models` shows `codex` when
-  signed in. No creds → 401, stream throw → 502. `tsc` clean, **234 tests green**, **live F5 smoke** (real
-  `chat.completion` from `codex` Provider through the ChatGPT sub via `Invoke-RestMethod`, port 41184).
-  Rationale in [[decisions]] (2026-06-24, #39).
+## What just finished (this session, branch `feat/bridge`, committed local — not pushed)
+- **#40 — Anthropic over the Bridge.** `handleAnthropicChat` (Messages SSE, `anthropicAuth` creds, raw effort,
+  `toAnthropicTools`). Live-verified: `model:'anthropic'` → `finish_reason=stop`.
+- **(b) — Copilot CLI shows the real model name.** `COPILOT_MODEL` = resolved model name; `handleChat` routes a
+  non-id model → the **active Provider** (`activeProviderId`). Verified end-to-end with the real `@github/copilot`
+  binary (`data.model:"minimax-m3"`).
+- The **Bridge is feature-complete** — keyed + codex + anthropic all reachable; Copilot-CLI happy path proven.
+- `tsc` clean, 234 tests green, full compile clean.
 
-**Next task — #40 (unblocked): Anthropic over the Bridge.**
-`/preset scope 40`. Make the `kind:'anthropic'` Provider reachable on `POST /v1/chat/completions` instead of
-the current `400 not yet reachable`.
-1. In `src/bridgeServer.ts` `handleChat`, the `if (isAnthropicProvider(provider)) return sendError(... 400 ...)`
-   is the only remaining gate. Branch it into a new `handleAnthropicChat`, exactly mirroring `handleCodexChat`.
-2. **Copy #39's shape, swap the cores:** `anthropicStream` (Messages SSE) + `anthropicAuth.current()` (sign-in
-   + refresh) + `toAnthropicTools` + `anthropicThinkingEffort`/`deps.effort()` — the same way `chatProvider.ts`'s
-   Anthropic branch already does it. Anthropic also consumes `system` separately (top-level `system` block), so
-   pass `parsed.system` through however `buildAnthropicMessagesBody` wants it (check the chatProvider path).
-3. Add `anthropicCreds`/`anthropicSignedIn` to `BridgeDeps`; wire them from `extension.ts` (the getters already
-   exist — `registerWispChatProvider` gets `anthropicAuth.isSignedIn`/`anthropicAuth.current`). Flip `/v1/models`
-   to show anthropic when signed in. Render back through the same bridge.ts SSE emitters.
-After #40 the Bridge is feature-complete → release (and take the shared-renderer refactor #39 deferred — three
-duplicate send-paths is the trigger).
+## Next task → **Ship + release**
+1. `/preset ship` — push `feat/bridge`, open the PR (commit is local only). PR body covers #40 + (b).
+2. **Release the Bridge** (closes PRD **#34**, the only other open issue): bump version (1.3.0 → ~1.4.0),
+   update `CHANGELOG.md` + `README.md` (Bridge + Copilot-CLI BYOK setup), package the vsix.
+3. **Optional follow-up** (small, same `injectCopilotEnv` touch point): inject
+   `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` / `COPILOT_PROVIDER_MAX_OUTPUT_TOKENS` from real model caps to kill
+   Copilot's `not in the built-in catalog` token-window warning.
 
-**Landmines / things to know:**
-- **The live Copilot-CLI confirm is STILL PENDING** — pending since #35, and it IS #39's acceptance #5. The
-  `Invoke-RestMethod` smoke proved listener + secret + **Codex routing**, but a real **Copilot CLI session**
-  in a VS Code terminal reaching the Bridge through the ChatGPT sub was NOT run. Do it on the next F5: panel
-  Provider=Codex (or Anthropic after #40), Start, open a **NEW** terminal, run the Copilot CLI on a small task.
-- **Codex edges not run live:** signed-out → 401, and a tool-call round-trip. The Copilot-CLI run above
-  exercises both at once.
-- The `model` field is a **Provider id** (`codex`/`anthropic`), not a model name. `resolveModel` picks the model.
-- **Testing from PowerShell:** `curl.exe` mangles inline JSON → use `Invoke-RestMethod`. PS prints nested
-  objects as `message=;` (display collapse, not empty) — read `.choices[0].message.content` to confirm text.
-  See [[gotchas]].
-- **Before any F5:** uninstall `local.wisp` (stale-panel collision); open a NEW terminal after Start. See [[gotchas]].
+## Landmines
+- **Provider switch needs a NEW terminal; model/effort are live.** Copilot label = launch snapshot; model used is
+  live. Running terminals now follow the **active** Provider (loose routing fallback). See [[gotchas]].
+- **Standalone GUI Copilot app does NOT use the Bridge** — terminal env only. Use `copilot` in a new terminal.
+- **PowerShell:** `Invoke-RestMethod`, not `curl.exe`; `message=;` is display collapse — read
+  `.choices[0].message.content`.
+- **Anthropic streaming + tool-calls not explicitly live-run** (only non-stream text). Low risk; confirm if paranoid.
+- `.context/flows.md` is untracked and **not mine** — left out of this commit.
 
-Full state in [[active-work]]; the #39 design rationale in [[decisions]] (2026-06-24); traps in [[gotchas]]; the
-command/secret-slot/endpoints/panel-messages in [[api]].
+## Related
+- [[active-work]] · [[api]] · [[decisions]] · [[gotchas]]
