@@ -8,13 +8,18 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-06-24 by Opus 4.8 (auto)._
-_At commit: `4834ecc` on `main` (vision fix + provider rename landed; v1.4.1 bump staged this wrap-up)._
+_At commit: `c3b603c` on `main` (v1.4.1 released; this session was investigation-only, no code change)._
 
 ## Current focus
-Post-Bridge polish on `main`. The Bridge merged (PR #41, `f80a50c`). This session fixed a
-user-reported bug — **Claude couldn't see images in native chat** — and a naming nit, then bumped
-to **v1.4.1**. Clean stopping point; next is either **ship** (push `main`) or the optional release
-follow-ups below.
+**Vision is confirmed working — there was no bug.** A user reported Anthropic native chat
+"inconsistently" not seeing images. Investigated with a temporary boundary probe (added then
+removed; net zero code change). The v1.4.1 fix (`7dfa8b0`) is correct end-to-end: every request
+carries the `image` block with real base64 bytes, and Claude reads it (confirmed live, F5, real
+PNGs). The "can't see image" cases were **Copilot agent mode** — when the chat runs tools first
+(workspace search / MCP), the model answers off the tool results and claims "empty" even though the
+image is in context. That's chat/model behavior, not a Wisp wire drop. Some early failures were also
+plain Copilot chat, not the Wisp provider. **v1.4.1 is fully shipped** (pushed, released as Latest,
+`wisp-1.4.1.vsix` attached).
 
 ## State
 - **Done this session (all on `main`):**
@@ -35,7 +40,7 @@ follow-ups below.
 - **Blocked:** nothing.
 
 ## Pick up here
-**Ship** (`/preset ship`) — push `main` to `origin`. Then, optional, in rough priority:
+Nothing forced — vision is resolved, v1.4.1 is out. Optional follow-ups, rough priority:
 1. **Bridge image follow-up.** `handleAnthropicChat` in `src/bridgeServer.ts` still drops images —
    same shape as the native fix, now that `buildAnthropicMessagesBody` accepts `images`. Just thread
    them through the Bridge's message mapping. Low priority (Copilot CLI rarely sends images).
@@ -43,15 +48,15 @@ follow-ups below.
 3. **Copilot CLI catalog warning** (`injectCopilotEnv`): inject
    `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` / `_MAX_OUTPUT_TOKENS` from real model caps to kill the
    `not in the built-in catalog` token-window warning. Cosmetic.
-4. **Package the vsix** for release if cutting one: `npx @vscode/vsce package --allow-missing-repository --skip-license`.
 
 ## Skills for next session
 - /preset ship — push `main`, open a PR if you want review (commits are local).
 - /preset pick-up — resume from this note.
 
 ## Open questions
-- **Live vision round-trip not yet F5-proven.** Unit tests lock the wire shape (image block, ordering),
-  but no F5 + real-PNG-drag confirmed Claude actually reads it end-to-end. Confirm on next F5.
+- ~~Live vision round-trip not yet F5-proven.~~ **RESOLVED 2026-06-24** — F5 + real-PNG drag confirmed:
+  the outgoing body carries `image(<n>b64)` and Claude reads it (Python logo, etc.). Works single-turn,
+  multi-turn, and multi-image. The only non-working shape is agent-mode tool loops (model behavior).
 
 ## Recent context
 - **Vision is advertised per `VISION_FAMILIES`** ([catalog.ts:226](../src/catalog.ts#L226)) — Claude

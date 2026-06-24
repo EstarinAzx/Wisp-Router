@@ -9,25 +9,29 @@ tags: [context, pick-up]
 
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
-## What just finished (this session, all on `main`, committed)
-- **Anthropic native-chat vision — FIXED (`7dfa8b0`).** Images were advertised but silently dropped;
-  now forwarded as Messages `image` blocks (mirrors the Codex path). +3 unit tests.
-  Files: `src/catalog.ts`, `src/chatProvider.ts`, `src/anthropic.test.ts`.
-- **Provider label `Claude` → `Anthropic` (`4834ecc`).** One line at `src/extension.ts:87`. `id` stays `'anthropic'`.
-- **v1.4.1 bump** — `package.json` + `CHANGELOG.md`, committed with this `.context/` update.
-- `tsc` clean, full compile clean, **237 tests green**.
+## What just finished (this session — investigation only, NO code change)
+- **Anthropic native-chat vision: confirmed working, no bug.** A user reported "inconsistent" image
+  blindness. Added a temporary boundary probe in `chatProvider.ts`, watched the live output: every
+  request carries the `image` block with real base64 bytes and Claude reads it (F5, real PNGs —
+  single-turn, multi-turn, multi-image). The v1.4.1 fix (`7dfa8b0`) was already correct.
+- **The "can't see image" cases were Copilot agent mode** — when the chat runs tools first (workspace
+  search / MCP "AI Research Assistant"), the model answers off tool results and claims "empty" though
+  the image is in context. Chat/model behavior, not a Wisp wire drop. Some early failures were also
+  plain Copilot chat, not the Wisp provider.
+- **Probe fully removed** — `git diff src/chatProvider.ts` is empty (== HEAD). 237 tests green, compile clean.
+- **Uninstalled the stale local extension** `local.opencode-autocomplete@0.0.4` (the F5 dup trap; the
+  real id, not the `local.wisp` earlier notes guessed — gotchas corrected).
+- **Only `.context/` docs changed this session** (this update). v1.4.1 is fully shipped: pushed,
+  released as Latest, `wisp-1.4.1.vsix` attached.
 
-## Next task → **Ship**
-1. `/preset ship` — push `main` to `origin` (commits are local). Open a PR only if you want review.
-2. **Optional follow-ups** (see active-work for detail):
-   - **Bridge image follow-up** — `handleAnthropicChat` in `src/bridgeServer.ts` still drops images;
-     same shape as the native fix now that `buildAnthropicMessagesBody` accepts `images`.
-   - Close PRD **#34** if still open; Copilot catalog token-window warning; package the vsix.
+## Next task → nothing forced
+No release pending — v1.4.1 already out and code is unchanged since. Optional follow-ups in
+`active-work.md` (Bridge image follow-up, close PRD #34, Copilot catalog token-window warning).
 
 ## Landmines
-- **Live vision not F5-proven.** Unit tests lock the wire shape; no real-PNG drag confirmed end-to-end.
-  F5 + drag a PNG into native chat with the Anthropic model to verify Claude actually reads it.
-- **Before any F5:** uninstall `local.wisp` (stale-panel dup trap); open a NEW terminal after Start. See [[gotchas]].
+- **Don't cut a 1.4.2 expecting a vision fix** — nothing functional changed; it'd be byte-identical to 1.4.1.
+- **Before any F5:** uninstall the stale local extension (`code --list-extensions | grep -E 'wisp|opencode'`,
+  then uninstall) and open a NEW terminal after Start. See [[gotchas]].
 - `.context/flows.md` is untracked and **not mine** — leave it out of commits.
 
 ## Related

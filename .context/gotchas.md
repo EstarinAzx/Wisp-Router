@@ -176,13 +176,16 @@ round-trip id — that is what `function_call_output.call_id` must match. See [[
 
 ### Two Wisp extensions at once → "already registered" warnings + a stale panel (F5 vs installed VSIX)
 F5 launches the dev build (`EsarinAzx.wisp` — current `package.json` publisher) while an **old installed
-VSIX** (`local.wisp@1.1.0`, from before the publisher rename) is still enabled. Different extension ids but
-the **same `wisp.model` / `wisp.baseUrl` / `wisp.provider` setting keys**, so VS Code logs **"Cannot
-register 'wisp.X' — this property is already registered"** (blamed on whichever loads second), and the
-side panel you see may be the **stale installed build** — none of the new UI (e.g. the Effort knob) shows.
-Not a code bug, a dev-environment dup. Fix: **uninstall/disable the installed Wisp before F5** —
-`code --uninstall-extension local.wisp` — then stop the debug session and F5 again. Disappears once a single
-published extension id exists. (`wisp.effort` is globalState, not a contributed setting, so it never collides.)
+VSIX** is still enabled. The actual stale id was **`local.opencode-autocomplete@0.0.4`** ("OpenCode Zen
+Autocomplete" — this project from BEFORE the Wisp rename), **not** `local.wisp` (that was never installed;
+earlier notes guessed wrong). Confirmed + uninstalled 2026-06-24 via `code --list-extensions`. Different
+extension ids but the **same `wisp.model` / `wisp.baseUrl` / `wisp.provider` setting keys**, so VS Code logs
+**"Cannot register 'wisp.X' — this property is already registered"** (blamed on whichever loads second), and
+the side panel you see may be the **stale installed build** — none of the new UI (e.g. the Effort knob) shows.
+Not a code bug, a dev-environment dup. Fix: list installed extensions and **uninstall the stale local one
+before F5** — `code --list-extensions | grep -E 'wisp|opencode'` then `code --uninstall-extension <id>` —
+then stop the debug session and F5 again. Disappears once a single published extension id exists.
+(`wisp.effort` is globalState, not a contributed setting, so it never collides.)
 
 ### Anthropic OAuth: a valid token still 429s without the Claude Code client fingerprint
 The subscription Messages backend (`https://api.anthropic.com/v1/messages` via Claude.ai OAuth) **gates on a
