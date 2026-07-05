@@ -8,7 +8,7 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-06 by Opus 4.8._
-_On branch `fix/codex-stream-cutoff` off `main` (v1.4.1); this session fixed the Codex streaming cutoff and bumped to v1.4.2. PR open, not merged._
+_On `main` at `f552995` (v1.4.2). Codex streaming cutoff fixed, PR #42 squash-merged, user-confirmed working._
 
 ## Current focus
 **Codex streaming replies cut off / don't complete — FIXED (diagnosability + safe truncation handling).**
@@ -39,8 +39,8 @@ write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`.
   - **v1.4.2 bump:** `package.json` 1.4.1 → 1.4.2, `CHANGELOG.md` 1.4.2 entry, `CODEX-STREAM-CUTOFF-FINDINGS.md`.
   - **Checks:** `tsc` clean, full `npm run compile` clean, **244 tests green** (was 237; +2 helper, +5
     first-ever `codexStream` fetch-mock IO tests). vsix built (`wisp-1.4.2.vsix`).
-- **In flight:** PR open on `fix/codex-stream-cutoff`, not merged.
-- **Blocked:** nothing. **NOT runtime-verified** against the live Codex OAuth backend (needs user F5).
+- **In flight:** nothing — PR #42 squash-merged to `main` (`f552995`); branch deleted.
+- **Blocked:** nothing. **User-confirmed working** (eyeballed on 2026-07-06). `wisp-1.4.2.vsix` built, not yet released.
 
 ## Prior session (2026-06-24, v1.4.1)
 Anthropic native-chat vision fixed (`7dfa8b0`), provider label `Claude`→`Anthropic` (`4834ecc`). Wire proven
