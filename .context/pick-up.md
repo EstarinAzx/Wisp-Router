@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-06-24
+updated: 2026-07-06
 tags: [context, pick-up]
 ---
 
@@ -9,34 +9,31 @@ tags: [context, pick-up]
 
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
-## What this session established (investigation only — NO code change landed)
-- **Vision wire is correct.** v1.4.1 fix (`7dfa8b0`) verified end-to-end with a temporary probe: every
-  captured request carried the `image` block with real base64; Claude read it (F5, real PNGs;
-  single/multi-turn/multi-image). Confirmed the **shipped `wisp-1.4.1.vsix` bytes** contain the fix — the
-  artifact is NOT stale. v1.4.1 stays shipped (pushed, released Latest, vsix attached). No rollback.
-- **OPEN: agent-mode vision is intermittent.** Same image/model/build, Copilot agent mode sometimes says
-  "attachment empty" — but also succeeds in agent mode sometimes (so NOT a clean Ask-vs-Agent split).
-  Earlier "resolved / just model behavior" was an over-claim, corrected.
-- **The probe was reverted** — `git diff src/chatProvider.ts` is empty (== HEAD). Tests green, compile clean.
+## What this session finished
+**Codex streaming cutoff — FIXED & shipped as v1.4.2** (branch `fix/codex-stream-cutoff`, PR open, NOT merged).
+Intermittent blank/cut-off Codex replies on `gpt-5.5 · high` were the stream *ending badly, silently*.
+`codexStream` now guards the stream end (empty drop → throw; partial → keep + soft marker; `response.incomplete`
+→ visible truncation marker), logs cancels, and documents why `max_output_tokens` stays omitted. 244 tests green,
+build clean, `wisp-1.4.2.vsix` built. Full write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`. Files:
+`src/codexClient.ts`, `src/catalog.ts`, `src/chatProvider.ts`, `src/codex.test.ts`.
 
-## Next task → pin the agent-mode flake (only if pursuing it)
-The decisive datum was never captured (every probe log caught was a *success* turn). To resolve:
-1. Re-add the two probes in `chatProvider.ts` `provideLanguageModelChatResponse` (see [[active-work]]
-   Open questions for the exact shape: incoming `turns/images/last` line + `OUT` body-shape line).
-2. Uninstall any installed Wisp first (dup trap), F5, agent mode, Anthropic model.
-3. Reproduce until the model answers "empty"; read the pair for THAT turn:
-   - `images=0` → VS Code dropped the image on that turn (host bug, not ours).
-   - `images≥1` + no `image(...)` in `OUT` → our builder dropped it → **our bug, fix it**.
-   - `images≥1` + `OUT` has `image(…b64)` → sent correct, model ignored it (model/host behavior).
-4. Remove the probe again when done.
+## Next task (only if pursuing it)
+**Runtime-confirm the fix on the live backend** — it was NOT F5-verified (needs a ChatGPT sub). Reproduce a
+cut-off on `gpt-5.5 · high` in native chat; the next repro self-diagnoses (see FINDINGS §7):
+- thrown "stream ended before completion" → D3 hard drop (working as intended, retryable).
+- `_[Response truncated: <reason>]_` → D1 backend truncation.
+- `[cancel] … aborted mid-stream` in the Wisp output channel → a supersede/stop, not a bug.
+- **still blank, no marker, no throw** → the deferred **hang** case → graduate the idle-timeout watchdog
+  (FINDINGS §6) from optional to a real fix (mirror the Codex CLI: `stream_idle_timeout_ms` + bounded retry).
 
-Not pursuing it is fine — Ask mode reads images reliably; only agent mode is flaky.
+Then merge the PR and, if wanted, cut a GitHub release with `wisp-1.4.2.vsix` attached.
 
 ## Landmines
-- **Don't re-release / bump for "the vision fix"** — nothing functional changed; 1.4.1 is already correct & out.
-- **Before any F5:** uninstall the installed Wisp (`code --list-extensions | grep -E 'wisp|opencode'`, then
-  uninstall) — the dup trap serves a stale panel. New terminal after Start. See [[gotchas]].
+- **Never send `max_output_tokens` for Codex.** gpt-5.x/o-series reject it (400 'not permitted'); it would
+  break every gpt-5.5 turn. The Anthropic sibling's `max_tokens` is a false-analogy trap. Comment guards it.
+- **Before any F5:** uninstall the installed Wisp (dup trap serves a stale panel). New terminal after Start.
 - `.context/flows.md` is untracked and **not mine** — leave it out of commits.
+- Agent-mode **vision** intermittency is still OPEN from the prior session (unrelated to this fix).
 
 ## Related
 - [[active-work]] · [[overview]] · [[gotchas]]

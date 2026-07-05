@@ -7,42 +7,45 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-06-24 by Opus 4.8 (auto)._
-_At commit: `c3b603c` on `main` (v1.4.1 released; this session was investigation-only, no code change)._
+_Last updated: 2026-07-06 by Opus 4.8._
+_On branch `fix/codex-stream-cutoff` off `main` (v1.4.1); this session fixed the Codex streaming cutoff and bumped to v1.4.2. PR open, not merged._
 
 ## Current focus
-**Vision wire is correct; agent-mode reliability is an OPEN question.** A user reported Anthropic
-native chat "inconsistently" not seeing images. Investigated with a temporary boundary probe (added,
-used, removed — net zero code change). Proven: the v1.4.1 fix (`7dfa8b0`) is correct on the wire —
-every captured request carried the `image` block with real base64 bytes, and Claude read it (F5 +
-real PNGs, single/multi-turn/multi-image). Verified the **shipped `wisp-1.4.1.vsix` bytes** contain
-the fix (`catalog.js` image block, `chatProvider.js` forwards `images`) — the artifact is NOT stale.
+**Codex streaming replies cut off / don't complete — FIXED (diagnosability + safe truncation handling).**
+A user hit intermittent blank/cut-off Codex replies in native chat on `gpt-5.5 · high` (a reasoning model).
+Root-caused with a 13-agent research + adversarial-verify workflow. The Codex path relayed a *bad stream
+ending silently* — good turns were always fine, the bug was invisibility.
 
-**Unresolved:** images are **intermittent in Copilot agent mode** — same image/model/build, the model
-sometimes answers "attachment empty." NOT cleanly Ask-vs-Agent (a success was confirmed in agent mode
-too). Root cause NOT pinned: could be VS Code dropping the image on tool-planning turns, or the model
-not attending mid-tool-loop. **The decisive datum was never captured** — every probe log caught was a
-*success* turn; need a log at the exact "empty" moment (see Pick up here). Earlier "it's resolved /
-just model behavior" was an over-claim — corrected. **Ask mode is reliable; v1.4.1 stays shipped, no
-rollback.**
+Ranked causes: **D3** (top) — no terminal-event guard: a long high-effort reasoning window emits no text,
+the idle socket drops before any terminal frame, and `codexStream` returned yielding nothing (= the blank
+turn). **D1** — `response.incomplete` swallowed, `incomplete_details.reason` discarded (= silent mid-sentence
+cut). Plus swallowed `error` frames and invisible cancellations. **D2 REFUTED**: the missing
+`max_output_tokens` was a red herring — gpt-5.x *rejects* it (400); adding it would break gpt-5.5. Full
+write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`.
 
 ## State
-- **Done this session (all on `main`):**
-  - **Anthropic native-chat vision — FIXED (`7dfa8b0`).** The provider advertised vision but
-    silently dropped attached images (Claude saw an empty message). Root cause: `normalizeTurn`
-    collected images, but `toAnthropicMessages` omitted them and `buildAnthropicMessagesBody` had no
-    image block. Mirrored the working Codex path: `AnthropicMessage` gained `images?`; the body
-    builder emits `{type:'image',source:{type:'base64',media_type,data}}` user blocks
-    (order: tool_result → image → text); `toAnthropicMessages` forwards `t.images`. +3 unit tests.
-    Files: `src/catalog.ts`, `src/chatProvider.ts`, `src/anthropic.test.ts`.
-  - **Provider label `Claude` → `Anthropic` (`4834ecc`).** It's a provider name, not a model.
-    One-line change at [extension.ts:87](../src/extension.ts#L87) (`label`). `id` stays `'anthropic'`;
-    the Claude.ai account/sign-in copy in the webview is unchanged (refers to the real account).
-  - **v1.4.1 bump (this wrap-up):** `package.json` 1.4.0 → 1.4.1, `CHANGELOG.md` 1.4.1 entry
-    (Fixed: vision; Changed: label). Committed with the `.context/` update.
-  - **Checks:** `tsc` clean, full `npm run compile` clean, **237 tests green** (was 234, +3 image).
-- **In flight:** nothing — clean stopping point.
-- **Blocked:** nothing.
+- **Done this session (branch `fix/codex-stream-cutoff`):**
+  - **Codex stream end-state reworked (`src/codexClient.ts`).** Track `sawTerminal`; after the read loop:
+    truly-empty drop → **throw** a retryable error; content delivered but no terminal → keep it + soft
+    marker (never throw — preserves near-complete agent turns, no false-alarm on lost tail frame); a bare
+    `error` frame is captured for the throw message. Skeptics refuted the naive "always throw" — the shipped
+    guard only throws on the empty drop.
+  - **`responsesIncompleteReason` pure helper + D1 marker (`src/catalog.ts`, `src/codexClient.ts`).** A
+    `response.incomplete` now yields a visible `_[Response truncated: <reason>]_` part (covers both wire
+    shapes). Marker lives in `codexStream` only — Inquire edit replies are never polluted.
+  - **Cancel log (`src/chatProvider.ts`)** — abort path logs `[cancel] …` instead of a bare return.
+  - **D2 guard comment (`src/catalog.ts`)** at `buildCodexResponsesBody` — records why `max_output_tokens`
+    is deliberately omitted, so nobody re-adds it.
+  - **v1.4.2 bump:** `package.json` 1.4.1 → 1.4.2, `CHANGELOG.md` 1.4.2 entry, `CODEX-STREAM-CUTOFF-FINDINGS.md`.
+  - **Checks:** `tsc` clean, full `npm run compile` clean, **244 tests green** (was 237; +2 helper, +5
+    first-ever `codexStream` fetch-mock IO tests). vsix built (`wisp-1.4.2.vsix`).
+- **In flight:** PR open on `fix/codex-stream-cutoff`, not merged.
+- **Blocked:** nothing. **NOT runtime-verified** against the live Codex OAuth backend (needs user F5).
+
+## Prior session (2026-06-24, v1.4.1)
+Anthropic native-chat vision fixed (`7dfa8b0`), provider label `Claude`→`Anthropic` (`4834ecc`). Wire proven
+correct; **agent-mode vision intermittency stays OPEN** (decisive "empty" datum never captured). Ask mode
+reliable, v1.4.1 shipped, no rollback.
 
 ## Pick up here
 Nothing forced — vision is resolved, v1.4.1 is out. Optional follow-ups, rough priority:
