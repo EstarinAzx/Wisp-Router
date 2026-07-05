@@ -169,7 +169,9 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
           progress.report(new vscode.LanguageModelToolCallPart(ev.call.id, ev.call.name, input));
         }
       } catch (err) {
-        if (controller.signal.aborted) return; // user cancelled — normal, not a failure
+        // Log the cancel too: a superseded/regenerated agent turn aborts mid-stream and otherwise vanishes,
+        // making an intermittent "cut off" report impossible to distinguish from a real drop in the logs.
+        if (controller.signal.aborted) { deps.log(`[cancel] chat ${provider.id} aborted mid-stream`); return; }
         deps.log(`[error] chat ${provider.id} ${String(err)}`);
         throw err;
       }

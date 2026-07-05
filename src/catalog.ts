@@ -579,6 +579,10 @@ export const buildCodexResponsesBody = (args: {
       if (content.length) input.push({ type: 'message', role: 'user', content });
     }
   }
+  // NOTE: no max_output_tokens, by design. gpt-5.x / o-series reasoning models REJECT it on the Responses
+  // API (400 'not permitted'), and the real Codex CLI omits it too — omitting already grants the model-max
+  // output budget. codexModelCaps.maxOutput is picker-display metadata ONLY; do not thread it into the body
+  // (the Anthropic sibling's max_tokens is a false-analogy trap). Length is governed by reasoning.effort.
   return {
     model: args.model, instructions, input,
     ...(args.reasoning ? { reasoning: args.reasoning } : {}),
@@ -654,6 +658,15 @@ export const extractResponsesText = (response: any): string => {
     }
   }
   return text;
+};
+
+// The truncation reason off a *terminal* Responses object, or undefined when the reply completed normally.
+// The backend stamps incomplete_details.reason (e.g. 'max_output_tokens', 'content_filter') on a cut-short
+// reply — and for a reasoning model the budget can be spent before any visible output_text, so the streamed
+// deltas alone can't reveal that the answer was truncated. undefined for a clean completion or a non-string.
+export const responsesIncompleteReason = (response: any): string | undefined => {
+  const reason = response?.incomplete_details?.reason;
+  return typeof reason === 'string' ? reason : undefined;
 };
 
 // Reassemble streamed Responses function-call events into whole tool calls — the Responses analogue of

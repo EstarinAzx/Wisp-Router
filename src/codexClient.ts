@@ -16,7 +16,7 @@
  *     picker streams text and agent mode invokes the tools).
  */
 
-import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall } from './catalog';
+import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, responsesIncompleteReason, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall } from './catalog';
 
 // A conversation message for the Codex backend: Inquire sends system+user, native chat sends user/assistant
 // — optionally with images and, in agent mode, the tool calls it made / the tool results it carries.
@@ -108,11 +108,23 @@ export async function* sseBlocks(body: ReadableStream<Uint8Array>): AsyncGenerat
 // emit that text once so the answer is never silently dropped. Function-call events stream interleaved with
 // text but can't be emitted until whole (their arguments arrive as fragments), so they are collected and
 // folded by reduceResponsesToolCalls at end — mirroring the chat-completions assemble-at-end pattern.
+//
+// The stream can also end BADLY, and both modes were previously silent (a truncated/blank turn that looked
+// like a Wisp bug and couldn't be diagnosed):
+//   - Backend truncation (response.incomplete / status incomplete): the deltas just stop; we surface a marker
+//     carrying incomplete_details.reason so a max_output_tokens / content_filter cut is visible, not mystery.
+//   - No terminal frame at all: a long HIGH-effort reasoning turn emits no text for a while, so an idle
+//     socket/proxy drops the connection before response.completed. If NOTHING was delivered we throw (VS Code
+//     shows and can retry a real failure); if some text/tool calls DID stream we keep them and only flag the
+//     abrupt end — never discard delivered content or false-alarm a good turn whose tail frame was just lost.
 export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<CodexStreamEvent> {
   const res = await codexResponsesRequest(args);
   if (!res.body) return;
   let sawDelta = false;
+  let sawTerminal = false;                    // a response.completed/incomplete frame actually closed the stream
   let completed = '';
+  let incompleteReason: string | undefined;   // set when the backend truncated the reply (budget / content filter)
+  let streamError: string | undefined;        // a bare `error` SSE frame emitted after the 200 OK
   const toolEvents: CodexResponsesEvent[] = [];
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
@@ -125,10 +137,24 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
     } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta') {
       toolEvents.push(ev);
     } else if (ev.event === 'response.completed' || ev.event === 'response.incomplete') {
+      sawTerminal = true;
       const text = extractResponsesText(ev.data?.response);
       if (text) completed = text;
+      // Covers both wire shapes: response.incomplete, and response.completed carrying incomplete_details.reason.
+      incompleteReason = responsesIncompleteReason(ev.data?.response) ?? incompleteReason;
+    } else if (ev.event === 'error') {
+      streamError = ev.data?.message ?? ev.data?.error?.message ?? streamError;
     }
   }
   if (!sawDelta && completed) yield { type: 'text', value: completed };
-  for (const call of reduceResponsesToolCalls(toolEvents)) yield { type: 'toolCall', call };
+  if (incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
+  const toolCalls = reduceResponsesToolCalls(toolEvents);
+  for (const call of toolCalls) yield { type: 'toolCall', call };
+  if (!sawTerminal) {
+    // Truly-empty drop → fail so the turn is retryable; anything delivered → keep it and only flag the end.
+    if (!sawDelta && !completed && toolCalls.length === 0) {
+      throw new Error(streamError ?? 'Codex stream ended before completion — the connection dropped or timed out before any reply. Try again.');
+    }
+    yield { type: 'text', value: '\n\n_[Stream ended before completion — the reply may be incomplete.]_' };
+  }
 }

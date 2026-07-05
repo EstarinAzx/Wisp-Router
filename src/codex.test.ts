@@ -1,14 +1,16 @@
 // ---------------- codex.test.ts — pure Codex Provider helpers ---------------- //
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isCodexProvider, isCodexSignedIn,
   buildCodexResponsesBody, reduceResponsesTextEvents, extractResponsesText, parseSseBlock,
+  responsesIncompleteReason,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
   parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS,
   toCodexResponsesTools, reduceResponsesToolCalls,
   type Provider, type EditMessage, type CodexResponsesEvent,
 } from './catalog';
+import { codexStream } from './codexClient';
 
 // A JWT is header.payload.signature; only the payload (base64url JSON) is read. Build one so the
 // parse/expiry/account-id helpers have a realistic token without a crypto signature.
@@ -560,5 +562,85 @@ describe('parseCodexAuthJson', () => {
     expect(parseCodexAuthJson(null)).toBeUndefined();
     expect(parseCodexAuthJson('nope')).toBeUndefined();
     expect(parseCodexAuthJson({ OPENAI_API_KEY: null, tokens: {} })).toBeUndefined();
+  });
+});
+
+describe('responsesIncompleteReason', () => {
+  // A truncated terminal payload carries incomplete_details.reason — the only signal that a reply was cut short.
+  it('returns the reason from a truncated terminal payload', () => {
+    expect(responsesIncompleteReason({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } })).toBe('max_output_tokens');
+  });
+
+  // A clean completion, a missing block, or a non-string reason all mean "not truncated" → undefined (no marker).
+  it('returns undefined for a clean completion or a missing / non-string reason', () => {
+    expect(responsesIncompleteReason({ status: 'completed', output: [] })).toBeUndefined();
+    expect(responsesIncompleteReason({})).toBeUndefined();
+    expect(responsesIncompleteReason(undefined)).toBeUndefined();
+    expect(responsesIncompleteReason({ incomplete_details: { reason: 5 } })).toBeUndefined();
+  });
+});
+
+// The repo's first codexStream IO test: stub global.fetch to hand back a Response streaming SSE bytes, so the
+// stream's END-state handling (clean, truncated, or dropped) is exercised without a live Codex backend.
+describe('codexStream (streaming IO)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const sseResponse = (blocks: string[]): Response => {
+    const text = blocks.map((b) => `${b}\n\n`).join('');
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } });
+    return new Response(body, { status: 200 });
+  };
+  const stub = (blocks: string[]) => vi.stubGlobal('fetch', async () => sseResponse(blocks));
+  const args = { creds: { accessToken: 'at', accountId: 'acc' }, baseUrl: 'https://x/codex', model: 'gpt-5.5', messages: [{ role: 'user' as const, content: 'hi' }] };
+  const collect = async (gen: AsyncGenerator<any>): Promise<any[]> => { const out: any[] = []; for await (const ev of gen) out.push(ev); return out; };
+
+  // Happy path: deltas render live; a trailing response.completed neither re-emits them nor adds a marker.
+  it('yields text deltas live and adds no marker on a clean completion', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"Hel"}',
+      'event: response.output_text.delta\ndata: {"delta":"lo"}',
+      'event: response.completed\ndata: {"response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}]}}',
+    ]);
+    expect(await collect(codexStream(args))).toEqual([
+      { type: 'text', value: 'Hel' },
+      { type: 'text', value: 'lo' },
+    ]);
+  });
+
+  // D3 (the #1 cause): a HIGH-effort reasoning turn drops before any text and with no terminal frame — throw a
+  // diagnosable error (was a silent blank turn) so the turn is retryable.
+  it('throws when the stream ends before completion with nothing delivered', async () => {
+    stub(['event: response.created\ndata: {"response":{}}']);
+    await expect(collect(codexStream(args))).rejects.toThrow(/before completion/);
+  });
+
+  // D3: text DID stream but the terminal frame was lost — keep the text and only flag the abrupt end, never throw.
+  it('keeps streamed text and appends a soft marker when the terminal frame is missing', async () => {
+    stub(['event: response.output_text.delta\ndata: {"delta":"partial answer"}']);
+    const out = await collect(codexStream(args));
+    expect(out[0]).toEqual({ type: 'text', value: 'partial answer' });
+    expect(out.at(-1).value).toMatch(/ended before completion/);
+  });
+
+  // D3: assembled tool calls count as "delivered" — a no-terminal drop must not throw them away (skeptic scenario A).
+  it('preserves tool calls on a no-terminal drop instead of throwing', async () => {
+    stub([
+      'event: response.output_item.added\ndata: {"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"readFile"}}',
+      'event: response.function_call_arguments.delta\ndata: {"item_id":"fc_1","delta":"{}"}',
+    ]);
+    const out = await collect(codexStream(args));
+    expect(out.some((e) => e.type === 'toolCall' && e.call.name === 'readFile')).toBe(true);
+    expect(out.some((e) => e.type === 'text' && /ended before completion/.test(e.value))).toBe(true);
+  });
+
+  // D1: a response.incomplete carrying incomplete_details.reason appends a visible truncation marker after the text.
+  it('appends a truncation marker with the incomplete reason', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"cut here"}',
+      'event: response.incomplete\ndata: {"response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}}',
+    ]);
+    const out = await collect(codexStream(args));
+    expect(out[0]).toEqual({ type: 'text', value: 'cut here' });
+    expect(out.at(-1)).toEqual({ type: 'text', value: '\n\n_[Response truncated: max_output_tokens]_' });
   });
 });
