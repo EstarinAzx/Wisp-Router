@@ -1,83 +1,68 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-06-24
+updated: 2026-07-06
 tags: [context, active-work]
 ---
 
 # Active Work
 
 _Last updated: 2026-07-06 by Opus 4.8._
-_On `main` at `f552995` (v1.4.2). Codex streaming cutoff fixed, PR #42 squash-merged, user-confirmed working._
+_On `main` at `3df4d52` (v1.4.3). DeepSeek agent-mode tool-schema 400 fixed, released, user-confirmed working._
 
 ## Current focus
-**Codex streaming replies cut off / don't complete — FIXED (diagnosability + safe truncation handling).**
-A user hit intermittent blank/cut-off Codex replies in native chat on `gpt-5.5 · high` (a reasoning model).
-Root-caused with a 13-agent research + adversarial-verify workflow. The Codex path relayed a *bad stream
-ending silently* — good turns were always fine, the bug was invisibility.
+**DeepSeek (opencode-go / deepseek-v4-pro) agent mode 400'd every turn — FIXED (v1.4.3).**
+Real upstream error (the opencode gateway masks it as a doubled "Console Go: Upstream request failed"):
+`Invalid schema for function 'terminal_last_command': schema must be a JSON Schema of 'type: "object"', got 'type: null'`.
 
-Ranked causes: **D3** (top) — no terminal-event guard: a long high-effort reasoning window emits no text,
-the idle socket drops before any terminal frame, and `codexStream` returned yielding nothing (= the blank
-turn). **D1** — `response.incomplete` swallowed, `incomplete_details.reason` discarded (= silent mid-sentence
-cut). Plus swallowed `error` frames and invisible cancellations. **D2 REFUTED**: the missing
-`max_output_tokens` was a red herring — gpt-5.x *rejects* it (400); adding it would break gpt-5.5. Full
-write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`.
+Root cause: VS Code no-arg agent tools arrive with no `inputSchema`; `toOpenAiTools` defaulted that to bare
+`{}` — a schema with no `type`. Lenient backends (kimi-k2.7, OpenAI, the user's other opengo harnesses)
+accept it; **DeepSeek is strict** and rejects it. Same empty-schema tool never broke Codex/Anthropic because
+those two tool builders already defaulted to `{ type:'object', properties:{} }` — `toOpenAiTools` was the
+lone hole.
 
 ## State
-- **Done this session (branch `fix/codex-stream-cutoff`):**
-  - **Codex stream end-state reworked (`src/codexClient.ts`).** Track `sawTerminal`; after the read loop:
-    truly-empty drop → **throw** a retryable error; content delivered but no terminal → keep it + soft
-    marker (never throw — preserves near-complete agent turns, no false-alarm on lost tail frame); a bare
-    `error` frame is captured for the throw message. Skeptics refuted the naive "always throw" — the shipped
-    guard only throws on the empty drop.
-  - **`responsesIncompleteReason` pure helper + D1 marker (`src/catalog.ts`, `src/codexClient.ts`).** A
-    `response.incomplete` now yields a visible `_[Response truncated: <reason>]_` part (covers both wire
-    shapes). Marker lives in `codexStream` only — Inquire edit replies are never polluted.
-  - **Cancel log (`src/chatProvider.ts`)** — abort path logs `[cancel] …` instead of a bare return.
-  - **D2 guard comment (`src/catalog.ts`)** at `buildCodexResponsesBody` — records why `max_output_tokens`
-    is deliberately omitted, so nobody re-adds it.
-  - **v1.4.2 bump:** `package.json` 1.4.1 → 1.4.2, `CHANGELOG.md` 1.4.2 entry, `CODEX-STREAM-CUTOFF-FINDINGS.md`.
-  - **Checks:** `tsc` clean, full `npm run compile` clean, **244 tests green** (was 237; +2 helper, +5
-    first-ever `codexStream` fetch-mock IO tests). vsix built (`wisp-1.4.2.vsix`).
-- **In flight:** nothing — PR #42 squash-merged to `main` (`f552995`); branch deleted.
-- **Blocked:** nothing. **User-confirmed working** (eyeballed on 2026-07-06). `wisp-1.4.2.vsix` built, not yet released.
+- **Done this session (direct to `main`):**
+  - **`toOpenAiTools` (`src/catalog.ts`)** now defaults a missing schema to `{ type:'object', properties:{} }`,
+    mirroring `toCodexResponsesTools` / `toAnthropicTools`. One-line fix, inline-commented.
+  - **`src/catalog.test.ts`** — the test that encoded the old `{}` behavior is flipped to assert the object schema.
+  - **v1.4.2 → 1.4.3** (`package.json`). `tsc`/compile clean, **244 tests green**, `wisp-1.4.3.vsix` built.
+  - **Released:** GitHub release `v1.4.3` created with the vsix attached.
+- **In flight:** nothing.
+- **Blocked:** nothing. **User-confirmed working** — deepseek-v4-pro agent mode ("who are you") replies clean, eyeballed 2026-07-06.
 
-## Prior session (2026-06-24, v1.4.1)
-Anthropic native-chat vision fixed (`7dfa8b0`), provider label `Claude`→`Anthropic` (`4834ecc`). Wire proven
-correct; **agent-mode vision intermittency stays OPEN** (decisive "empty" datum never captured). Ask mode
-reliable, v1.4.1 shipped, no rollback.
+## Prior session (2026-07-06, v1.4.2)
+Codex streaming cutoff fixed (`f552995`, PR #42) — bad stream endings surfaced (empty drop → throw; partial →
+soft marker; `response.incomplete` → visible truncation). Write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`. Still
+built-but-unreleased as of that session; superseded here by v1.4.3.
 
 ## Pick up here
-Nothing forced — vision is resolved, v1.4.1 is out. Optional follow-ups, rough priority:
-1. **Bridge image follow-up.** `handleAnthropicChat` in `src/bridgeServer.ts` still drops images —
-   same shape as the native fix, now that `buildAnthropicMessagesBody` accepts `images`. Just thread
-   them through the Bridge's message mapping. Low priority (Copilot CLI rarely sends images).
-2. **Close PRD #34** (the Bridge parent) if still open.
-3. **Copilot CLI catalog warning** (`injectCopilotEnv`): inject
-   `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` / `_MAX_OUTPUT_TOKENS` from real model caps to kill the
-   `not in the built-in catalog` token-window warning. Cosmetic.
+Nothing forced. Optional follow-ups, rough priority:
+1. **Agent-mode vision intermittency — still OPEN** (from the v1.4.1 session, unrelated to this fix). See Open questions.
+2. **Bridge image follow-up.** `handleAnthropicChat` in `src/bridgeServer.ts` still drops images — thread them
+   through the Bridge's message mapping now that `buildAnthropicMessagesBody` accepts `images`. Low priority.
+3. **Copilot CLI catalog warning** (`injectCopilotEnv`): inject `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` /
+   `_MAX_OUTPUT_TOKENS` from real caps to kill the `not in the built-in catalog` warning. Cosmetic.
 
 ## Skills for next session
-- /preset ship — push `main`, open a PR if you want review (commits are local).
 - /preset pick-up — resume from this note.
+- /preset ship — only if you want a PR; this fix already landed on `main`.
 
 ## Open questions
-- **Agent-mode vision is intermittent — root cause NOT pinned (OPEN).** Plain/Ask mode reads images
-  reliably; agent mode sometimes answers "attachment empty" (same image/model/build, confirmed both a
-  success AND a failure in agent mode). To resolve: re-add the probe (incoming `images=` count + last-turn
-  part kinds + `OUT` body shape — both blocks were in `chatProvider.ts` `provideLanguageModelChatResponse`),
-  F5, reproduce a FAILURE, read the pair at the "empty" turn. `images=0` → VS Code dropped it on that turn
-  (host, not ours). `images≥1` + no `image(...)` in `OUT` → our builder dropped it (our bug → fix).
-  `images≥1` + `OUT` shows `image(…b64)` → sent correct, model ignored it (model/host behavior).
-- ~~Live vision round-trip not F5-proven.~~ RESOLVED — wire confirmed (image block leaves with real bytes,
-  Claude reads it) for non-agent turns.
+- **Agent-mode vision is intermittent — root cause NOT pinned (OPEN).** Plain/Ask mode reads images reliably;
+  agent mode sometimes answers "attachment empty" (same image/model/build, confirmed both success AND failure
+  in agent mode). To resolve: re-add the probe (incoming `images=` count + last-turn part kinds + `OUT` body
+  shape in `chatProvider.ts` `provideLanguageModelChatResponse`), F5, reproduce a FAILURE, read the pair.
+  `images=0` → VS Code dropped it (host). `images≥1` + no `image(...)` in `OUT` → our builder dropped it (our bug).
+  `images≥1` + `OUT` shows `image(…b64)` → sent correct, model ignored it.
 
 ## Recent context
-- **Vision is advertised per `VISION_FAMILIES`** ([catalog.ts:226](../src/catalog.ts#L226)) — Claude
-  rows light up `imageInput:true`, so VS Code *attaches* the image and sends it. The drop was purely on
-  Wisp's send side. The Codex path was already correct; Anthropic was the lone gap.
-- **Anthropic image block shape:** `{type:'image', source:{type:'base64', media_type, data}}`, images
-  before text (Anthropic's recommended vision ordering).
+- **Strict vs lenient tool-schema backends:** DeepSeek (via opencode-go) enforces `type:"object"` on every
+  function's `parameters`; kimi/OpenAI don't. The three tool builders in `catalog.ts` must all default a
+  missing schema to `{ type:'object', properties:{} }` — now they do.
+- **opencode gateway masks upstream errors** as a doubled "400 Error from provider (Console Go): Upstream
+  request failed". To see the real reason, hit `https://opencode.ai/zen/go/v1/chat/completions` directly
+  (repro pattern: no-tools vs minimal-tool vs vscode-style-tool).
 
 ## Related
 - [[overview]]
