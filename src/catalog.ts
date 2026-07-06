@@ -325,12 +325,13 @@ export const buildChatModelInfos = (
 export type ToolSpec = { name: string; description: string; inputSchema?: object };
 export type OAToolDef = { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } };
 
-// Map VS Code tool defs to OpenAI function tools — inputSchema becomes the function parameters
-// (empty object when a tool takes no input, which the OpenAI API still requires as a present field).
+// Map VS Code tool defs to OpenAI function tools — inputSchema becomes the function parameters.
+// A no-arg tool gets a valid object schema, not bare {}: strict backends (DeepSeek via opencode-go)
+// 400 on a typeless schema ("must be type object, got type null"). Mirrors the Codex/Anthropic builders.
 export const toOpenAiTools = (tools: ToolSpec[]): OAToolDef[] =>
   tools.map((t) => ({
     type: 'function',
-    function: { name: t.name, description: t.description, parameters: (t.inputSchema as Record<string, unknown>) ?? {} },
+    function: { name: t.name, description: t.description, parameters: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} } },
   }));
 
 // One chat turn flattened to plain data: its text, any tool calls it made (assistant turns), any tool

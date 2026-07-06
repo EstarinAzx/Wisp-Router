@@ -525,10 +525,11 @@ describe('toOpenAiTools', () => {
       .toEqual([{ type: 'function', function: { name: 'readFile', description: 'read a file', parameters: { type: 'object' } } }]);
   });
 
-  // A tool with no schema still maps — parameters default to an empty object.
-  it('defaults missing inputSchema to an empty object', () => {
+  // A no-arg tool defaults to a valid object schema, not bare {} — DeepSeek (strict) rejects a
+  // typeless schema with 400 "schema must be a JSON Schema of type object, got type null".
+  it('defaults missing inputSchema to an object schema', () => {
     expect(toOpenAiTools([{ name: 'noArgs', description: 'd' }]))
-      .toEqual([{ type: 'function', function: { name: 'noArgs', description: 'd', parameters: {} } }]);
+      .toEqual([{ type: 'function', function: { name: 'noArgs', description: 'd', parameters: { type: 'object', properties: {} } } }]);
   });
 });
 
