@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+*Universal template — the canonical copy lives at `~/.claude/template/IN USE/CLAUDE.md` (ecosystem-kb page: getclaude). Improve it there and refresh project copies with `getclaude -Force`; edits made only to a project copy get lost.*
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
@@ -79,29 +81,13 @@ Query with `/llm-kb query <question>` or read the vault directly. If the ecosyst
 
 ## 6. Session Handoff via .context/
 
-**If `.context/` exists in this repo, it is the cross-session handoff state. Use it.**
+**If `.context/` exists in this repo, it is the cross-session handoff state. Use it through the preset loop.**
 
-- At session start: read `.context/active-work.md` (current state) and skim `.context/overview.md` before diving in.
-- At session end, or before forking to a new line of work: run `/context-update` to refresh active-work.md and append any decisions made.
+- Session start: if `.context/pick-up.md` exists → run `/preset pick-up` (resumes the exact next task). `.context/` exists but no note → run `/preset catch-up`, then skim `.context/overview.md`.
+- Session end, or before forking to a new line of work: run `/preset wrap-up` — it gates the finish, runs `/context-update`, and writes the pick-up note. Don't run bare `/context-update` as the session-close move; wrap-up wraps it.
 - If the project has no `.context/` yet and work will span multiple sessions, suggest `/context-init` once — don't create it unasked.
 
-## 7. Explanation Style for /trace
-
-**When /trace is invoked, answer in beginner-friendly simplified style.**
-
-Structure the user-facing answer as:
-
-- A handful of short numbered steps in plain everyday English.
-- One analogy if it helps the concept land.
-- File paths only at the end ("the two files that do it").
-- Close with a one-line rule of thumb worth remembering.
-- No jargon unless defined in passing.
-
-Still do the full trace and persist file:line detail to `.context/flows.md` —
-that's the record. The reply leads with the simple version; offer the detailed
-data-journey/failure/gaps breakdown only if asked.
-
-## 8. Plain Language When Discussing
+## 7. Plain Language When Discussing
 
 **Talk in plain English. Reach shared understanding, not a jargon dump.**
 
@@ -115,12 +101,17 @@ When explaining, grilling, planning, or walking through a design with the user
 - Acronyms, API names, and file:line detail come **last**, only when they earn
   their place — not as the opening move.
 
+For `/trace` answers specifically: a handful of short numbered steps, one
+analogy if it helps, file paths only at the end, close with a one-line rule of
+thumb. Still do the full trace and persist file:line detail to
+`.context/flows.md` — that's the record; offer the detailed
+data-journey/failure/gaps breakdown only if asked.
+
 The test: could someone who doesn't know the codebase follow it? If a sentence
 needs a glossary to parse, rewrite it. Code, commits, and PRs stay precise/normal
-— this governs how we *talk through* things, the way the grilling session ran
-after the "too much jargon" correction.
+— this governs how we *talk through* things.
 
-## 9. User Preference
+## 8. JavaScript Style
 
 **JavaScript: prefer arrow functions.**
 

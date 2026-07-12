@@ -136,12 +136,15 @@ delete lines), using the **whole file** as context.
 ### Reaching Wisp from outside — the Bridge
 
 **Bridge**:
-A local OpenAI-compatible endpoint Wisp can expose so tools **outside** VS Code
-(e.g. the GitHub Copilot CLI) reach the **Provider catalog** as if it were one
-ordinary OpenAI backend. It faces **outward** — the mirror of the **LM Chat
+A local endpoint Wisp can expose so tools **outside** VS Code reach the
+**Provider catalog** as if it were one ordinary backend. It speaks two
+dialects — **OpenAI** (`/v1/chat/completions`, e.g. the GitHub Copilot CLI) and
+**Anthropic Messages** (`/v1/messages`, e.g. Claude Code) — through the same
+listener and secret. It faces **outward** — the mirror of the **LM Chat
 Provider**, which surfaces Wisp's models *inward* into VS Code's own chat. An
 external tool names a **Provider**; Wisp answers with that Provider's selected
-model, routing the request through the same path every other surface uses. The
+model, routing the request through the same path every other surface uses; a
+model name matching no Provider falls back to the **Active Provider**. The
 Bridge holds no credentials of its own: it carries a single local access secret
 so only an authorised local tool may use it, while the real **Provider** auth
 (API key or sign-in) is supplied by Wisp and **never leaves it** — to a backend

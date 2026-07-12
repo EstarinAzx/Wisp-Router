@@ -1,72 +1,65 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-06
+updated: 2026-07-13
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-06 by Opus 4.8._
-_On `main` at `3df4d52` (v1.4.3). DeepSeek agent-mode tool-schema 400 fixed, released, user-confirmed working._
+_Last updated: 2026-07-13 by Fable 5._
+_On `main` at `bb4667f` (v1.4.3 released). No code this session — design funnel only._
 
 ## Current focus
-**DeepSeek (opencode-go / deepseek-v4-pro) agent mode 400'd every turn — FIXED (v1.4.3).**
-Real upstream error (the opencode gateway masks it as a doubled "Console Go: Upstream request failed"):
-`Invalid schema for function 'terminal_last_command': schema must be a JSON Schema of 'type: "object"', got 'type: null'`.
-
-Root cause: VS Code no-arg agent tools arrive with no `inputSchema`; `toOpenAiTools` defaulted that to bare
-`{}` — a schema with no `type`. Lenient backends (kimi-k2.7, OpenAI, the user's other opengo harnesses)
-accept it; **DeepSeek is strict** and rejects it. Same empty-schema tool never broke Codex/Anthropic because
-those two tool builders already defaulted to `{ type:'object', properties:{} }` — `toOpenAiTools` was the
-lone hole.
+**Bridge Anthropic door — route Claude Code through Wisp providers. PRD #43, slices #44–#47 published, none started.**
+The Bridge grows a second front door speaking Anthropic's Messages protocol so Claude Code (pointed at it
+via `ANTHROPIC_BASE_URL` + Bridge secret) sees Wisp providers in its own `/model` picker and runs coding
+tasks through any of them — headline: Claude Code on the ChatGPT-subscription Codex provider.
 
 ## State
-- **Done this session (direct to `main`):**
-  - **`toOpenAiTools` (`src/catalog.ts`)** now defaults a missing schema to `{ type:'object', properties:{} }`,
-    mirroring `toCodexResponsesTools` / `toAnthropicTools`. One-line fix, inline-commented.
-  - **`src/catalog.test.ts`** — the test that encoded the old `{}` behavior is flipped to assert the object schema.
-  - **v1.4.2 → 1.4.3** (`package.json`). `tsc`/compile clean, **244 tests green**, `wisp-1.4.3.vsix` built.
-  - **Released:** GitHub release `v1.4.3` created with the vsix attached.
+- **Done this session (design only, no code):**
+  - Full `/preset init` funnel: grill → MVD → PRD → tickets. Decisions in [[decisions]] (2026-07-13 entry).
+  - **PRD #43** published (`ready-for-agent`), embeds the golden path from [[happy-path]].
+  - **Slices #44 → #47** published, linear chain: #44 gate (real Claude Code vs canned door — answers
+    picker-filter + wire-shape unknowns) → #45 pure translator pair + Vitest → #46 door live end-to-end
+    (Codex demo) → #47 side-panel copy-paste snippet section.
+  - **#34 closed** as shipped (its six slices #35–#40 all landed earlier).
+  - `CONTEXT.md` **Bridge** entry broadened: two dialects (OpenAI + Anthropic Messages), Active-Provider fallback.
+  - Repo renamed **`EstarinAzx/Wisp-Router`** (old `Wisp` URLs redirect).
 - **In flight:** nothing.
-- **Blocked:** nothing. **User-confirmed working** — deepseek-v4-pro agent mode ("who are you") replies clean, eyeballed 2026-07-06.
-
-## Prior session (2026-07-06, v1.4.2)
-Codex streaming cutoff fixed (`f552995`, PR #42) — bad stream endings surfaced (empty drop → throw; partial →
-soft marker; `response.incomplete` → visible truncation). Write-up: `CODEX-STREAM-CUTOFF-FINDINGS.md`. Still
-built-but-unreleased as of that session; superseded here by v1.4.3.
+- **Blocked:** nothing.
 
 ## Pick up here
-Nothing forced. Optional follow-ups, rough priority:
-1. **Agent-mode vision intermittency — still OPEN** (from the v1.4.1 session, unrelated to this fix). See Open questions.
-2. **Bridge image follow-up.** `handleAnthropicChat` in `src/bridgeServer.ts` still drops images — thread them
-   through the Bridge's message mapping now that `buildAnthropicMessagesBody` accepts `images`. Low priority.
-3. **Copilot CLI catalog warning** (`injectCopilotEnv`): inject `COPILOT_PROVIDER_MAX_PROMPT_TOKENS` /
-   `_MAX_OUTPUT_TOKENS` from real caps to kill the `not in the built-in catalog` warning. Cosmetic.
+1. **Slice #44 (the gate)** — only unblocked ticket. Canned `/v1/models` (mixed plain + `claude-wisp-*` ids)
+   + echo `/v1/messages` on the running Bridge; point a real Claude Code at it; record picker-filter verdict,
+   auth header, system-array shape, tier model strings as an issue comment. `/preset scope 44`.
+2. Older optional follow-ups (unchanged, lower priority): agent-mode vision flake (see Open questions),
+   Bridge outbound image threading (`handleAnthropicChat` drops images), Copilot catalog-warning env vars.
 
 ## Skills for next session
-- /preset pick-up — resume from this note.
-- /preset ship — only if you want a PR; this fix already landed on `main`.
+- /preset pick-up — resume from the note.
+- /preset scope 44 — enter the work loop on the gate slice.
 
 ## Open questions
-- **Agent-mode vision is intermittent — root cause NOT pinned (OPEN).** Plain/Ask mode reads images reliably;
-  agent mode sometimes answers "attachment empty" (same image/model/build, confirmed both success AND failure
-  in agent mode). To resolve: re-add the probe (incoming `images=` count + last-turn part kinds + `OUT` body
-  shape in `chatProvider.ts` `provideLanguageModelChatResponse`), F5, reproduce a FAILURE, read the pair.
-  `images=0` → VS Code dropped it (host). `images≥1` + no `image(...)` in `OUT` → our builder dropped it (our bug).
-  `images≥1` + `OUT` shows `image(…b64)` → sent correct, model ignored it.
+- **Does Claude Code's `/model` picker filter non-`claude-*` ids from discovery?** Gate slice #44 answers;
+  fallback plan (alias + inbound strip) already in PRD #43.
+- **Agent-mode vision is intermittent — root cause NOT pinned (OPEN, pre-existing).** Plain/Ask mode reads
+  images reliably; agent mode sometimes answers "attachment empty". To resolve: re-add the probe (incoming
+  `images=` count + last-turn part kinds + `OUT` body shape in `chatProvider.ts`
+  `provideLanguageModelChatResponse`), F5, reproduce a FAILURE, read the pair.
 
 ## Recent context
-- **Strict vs lenient tool-schema backends:** DeepSeek (via opencode-go) enforces `type:"object"` on every
-  function's `parameters`; kimi/OpenAI don't. The three tool builders in `catalog.ts` must all default a
-  missing schema to `{ type:'object', properties:{} }` — now they do.
-- **opencode gateway masks upstream errors** as a doubled "400 Error from provider (Console Go): Upstream
-  request failed". To see the real reason, hit `https://opencode.ai/zen/go/v1/chat/completions` directly
-  (repro pattern: no-tools vs minimal-tool vs vscode-style-tool).
+- **Active-Provider fallback already live on the Bridge** (prior session, verified against the real
+  `@github/copilot` binary): unknown model names serve the active Provider instead of 404. The Anthropic
+  door's routing rule reuses this exact behavior — no new routing machinery in #46.
+- Claude Code gateway contract (verified 2026-07-13 from docs): `POST /v1/messages` must stream SSE;
+  `GET /v1/models` only read when `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`; auth arrives as
+  `x-api-key` (from `ANTHROPIC_API_KEY`) or `Bearer` (from `ANTHROPIC_AUTH_TOKEN`); env read at startup only;
+  `count_tokens` optional (local estimate fallback).
 
 ## Related
 - [[overview]]
-- [[happy-path]] — the Bridge golden-path MVD
+- [[happy-path]] — both Bridge golden paths (Copilot door + Anthropic door)
 - [[api]] — Bridge endpoints, `COPILOT_*` env, `wisp.bridge.secret` slot
-- [[decisions]] — Bridge + side-panel forks
+- [[decisions]] — Bridge forks + 2026-07-13 Anthropic-door entry
 - [[gotchas]] — PowerShell curl trap, F5 dup trap, new-terminal env trap, GUI-app-no-Bridge trap
