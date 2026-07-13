@@ -1,7 +1,7 @@
 ---
 type: happy-path
 project: wisp
-updated: 2026-07-13
+updated: 2026-07-14
 tags: [happy-path, mvd]
 ---
 # Happy Paths (MVD)
@@ -58,3 +58,23 @@ flowchart LR
 **Note (lookup order, behind the spine):** Provider id → Alias → Family route →
 Active Provider; an Alias may not shadow a Provider id (panel refuses), and a
 row whose Target is unusable fails loud with the Provider's real error.
+
+## Wisp TUI — install to bridged Claude Code, no VS Code anywhere
+- **Idea:** the **Wisp TUI** (ASCII splash + slash-command palette) becomes the face and only config surface of Wisp — a fresh user goes from `npm i -g` to Claude Code answering through their chosen Target without ever opening VS Code; `wisp serve` hosts the Bridge headless, `claude-wisp` launches Claude Code pre-wired.  **Mode:** ux+beat  **Actor:** fresh Wisp user (developer in a terminal)  **Goal:** bridged Claude Code answers through the routed Target on a subscription sign-in — no API key, no VS Code.
+- **Updated:** 2026-07-14
+
+```mermaid
+flowchart LR
+  install([Terminal]) -->|npm i -g wisp-router · platform binary lands, bins wisp + claude-wisp| onpath[wisp on PATH]
+  onpath -->|wisp · reads ~/.wisp| splash[Splash — ASCII brand + slash palette]
+  splash -->|/signin anthropic · browser OAuth, tokens → auth.json| signed[Provider usable — signed in]
+  signed -->|/routing Sonnet → Provider + pinned model · map saved to config| mapped[Routing map live]
+  mapped -->|wisp serve · same process, no UI, both doors up| serving[Bridge listening — address + secret shown]
+  serving -->|claude-wisp --flags · env set on child only, args passed through| cc[Claude Code session on the Bridge]
+  cc -->|coding task · POST /v1/messages → routing map → Target| done([Answer streams through the chosen Target — subscription, no key])
+```
+
+**Note (two-surface rule, behind the spine):** the VS Code extension is absent
+from this spine on purpose — after the shrink it only reads the same `~/.wisp/`
+store to serve VS Code's native picker; a user who also has it installed gets
+identical Providers there with zero extra setup.

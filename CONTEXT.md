@@ -49,12 +49,14 @@ endpoint not in the catalog. _Avoid_: exposing a built-in's base URL as
 user-editable — it is fixed on purpose (a security property; see `gotchas.md`).
 
 **Provider kind**:
-The two shapes a Provider can take. An **API-key Provider** (every catalog entry
-but one) reaches an OpenAI-compatible chat endpoint with a Bearer API key. A
+The three shapes a Provider can take. An **API-key Provider** (most catalog
+entries) reaches an OpenAI-compatible chat endpoint with a Bearer API key. A
 **Codex Provider** is reached by **signing in** with a ChatGPT account instead of
-a key, and runs OpenAI's Codex models against that account's subscription. _Avoid_:
-treating a Codex Provider as just another keyed row — it authenticates by sign-in,
-not a key, and its endpoint is not OpenAI chat-completions (see `gotchas.md`).
+a key, and runs OpenAI's Codex models against that account's subscription. An
+**Anthropic Provider** is likewise reached by signing in — with a Claude.ai
+account. _Avoid_: treating an OAuth Provider as just another keyed row — it
+authenticates by sign-in, not a key, and its endpoint is not OpenAI
+chat-completions (see `gotchas.md`).
 
 **Codex Provider**:
 The Provider reached by **signing in to Codex** (a ChatGPT-account OAuth flow)
@@ -63,6 +65,14 @@ own ChatGPT subscription. It is **built-in** (its endpoint is fixed in code) but
 credentialed by sign-in, not a key. Whether the user is **signed in** (not
 whether a key is set) is what makes it usable. _Avoid_: calling it an API-key
 Provider, or implying it uses Wisp's own account — it is the user's subscription.
+
+**Anthropic Provider**:
+The Provider reached by **signing in to Claude** (a Claude.ai-account OAuth flow)
+rather than supplying an API key — it runs Anthropic models on the user's own
+Claude subscription through the Messages API. Like the **Codex Provider** it is
+**built-in** but credentialed by sign-in; whether the user is **signed in** is
+what makes it usable. _Avoid_: calling it an API-key Provider, or implying it
+uses Wisp's own account — it is the user's subscription.
 
 **Effort** (reasoning effort):
 How hard a **Codex Provider** model thinks — `low` / `medium` / `high` / `xhigh`,
@@ -188,6 +198,35 @@ that row — so two names can run two different models of the same Provider at
 once. A Target whose Provider is unusable (no key / signed out) fails loud with
 the Provider's real error; it never silently falls back. _Avoid_: a Target with
 an unpinned model — the pin is the point.
+
+### The TUI face — planned (decisions settled, not yet built)
+
+**Wisp TUI**:
+The terminal app that becomes the face of Wisp and its **only** config surface —
+an ASCII brand splash over a slash-command palette (`/providers`, `/signin`,
+`/routing`, `/test`, …). It replaces the **side panel**; **Inquire** retires with
+it, and the extension keeps only VS Code chat routing. _Avoid_: calling the TUI a
+chat or an agent — plain text is not sent to a model (the `/test` command is the
+one deliberate exception).
+
+**Wisp home**:
+The per-user shared store (`~/.wisp/`) both faces read: settings, catalog state,
+and the **Routing map** in a config file; API keys and OAuth tokens in
+`auth.json`. Replaces VS Code SecretStorage as the home of secrets. _Avoid_:
+implying the extension and the TUI each keep their own state — one store, two
+readers.
+
+**wisp serve**:
+The headless way to run the **Bridge** — the same Wisp process with no screen
+drawn. After the split the Bridge (both dialects) lives with the TUI side, never
+the extension. _Avoid_: calling it a daemon — nothing detaches, auto-starts, or
+manages pids; it is just Wisp running without its face.
+
+**claude-wisp**:
+The launcher command that starts Claude Code pre-wired to the **Bridge**: it sets
+the connection environment on the child process only and passes every argument
+through verbatim. _Avoid_: implying it configures anything — it launches; the
+Bridge must already be up (it fails friendly, never auto-starts one).
 
 ## Relationships
 
