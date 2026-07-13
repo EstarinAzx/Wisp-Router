@@ -28,6 +28,7 @@ import {
 } from './catalog';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer } from './bridgeServer';
+import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from './bridgeAnthropic';
 import { CodexAuth } from './codexAuth';
 import { codexInquire } from './codexClient';
 import { AnthropicAuth } from './anthropicAuth';
@@ -349,6 +350,9 @@ const getState = async (): Promise<PanelState> => {
     bridgeRunning: bridge.isRunning(),
     bridgeAddress: bridgeAddress(),
     bridgeSecret: bridge.isRunning() ? bridgeSecret : undefined,
+    // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
+    // they cross the boundary only while running, like bridgeSecret.
+    claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
   };
 };
 
@@ -622,6 +626,14 @@ const copyBridgeAddress = async (): Promise<void> => {
   vscode.window.showInformationMessage('Wisp: Bridge address copied.');
 };
 
+// Copy one Claude Code setup snippet (#47). Rebuilt host-side from the values the host owns — the webview
+// only names the variant, it never sends snippet text back. No-op while stopped (no secret to embed).
+const copyClaudeSnippet = async (variant: keyof ClaudeCodeSnippets): Promise<void> => {
+  if (!bridge.isRunning() || !bridgeSecret) return;
+  await vscode.env.clipboard.writeText(buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret)[variant]);
+  vscode.window.showInformationMessage('Wisp: Claude Code snippet copied — open a new terminal (or restart claude) to pick it up.');
+};
+
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
@@ -826,6 +838,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,
+    copyClaudeSnippet,
   });
 
   // The Bridge listener — the outward mirror of the LM Chat Provider. Reuses the same key/client resolvers

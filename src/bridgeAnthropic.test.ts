@@ -6,6 +6,7 @@ import {
   buildAnthropicSse,
   buildAnthropicModelsList,
   anthropicErrorFrame,
+  buildClaudeCodeSnippets,
 } from './bridgeAnthropic';
 import type { ChatModelInfo } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
@@ -154,6 +155,14 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parseAnthropicMessagesRequest({ model: 'm', messages: [] } as any).temperature).toBeUndefined();
   });
 
+  // Claude Code's /effort rides output_config.effort — a ladder value carries through so #46 can thread it
+  // to the backend; absent or junk yields undefined (the door falls back to the panel effort).
+  it('carries a valid output_config.effort, undefined when absent or junk', () => {
+    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: 'xhigh' } } as any).effort).toBe('xhigh');
+    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [] } as any).effort).toBeUndefined();
+    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: 'turbo' } } as any).effort).toBeUndefined();
+  });
+
   // Discovery lists claude-wisp-<provider> aliases (slice-1 decision); the door strips the prefix inbound so
   // the model is the bare Provider id the send-builders name.
   it('strips the claude-wisp- alias prefix from the model', () => {
@@ -166,11 +175,12 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parseAnthropicMessagesRequest({ model: 'claude-haiku-4-5-20251001', messages: [] }).model).toBe('claude-haiku-4-5-20251001');
   });
 
-  // Unknown beta fields (thinking, context_management, output_config, metadata, cache_control) are IGNORED,
-  // never rejected — the door must not 400 on Claude Code's evolving beta surface.
+  // Unknown beta fields (thinking, context_management, metadata, cache_control) are IGNORED, never
+  // rejected — the door must not 400 on Claude Code's evolving beta surface. (output_config.effort is the
+  // one beta field the door reads — covered above.)
   it('ignores unknown beta fields without crashing', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }],
-      thinking: { type: 'adaptive' }, context_management: { edits: [] }, output_config: { effort: 'xhigh' },
+      thinking: { type: 'adaptive' }, context_management: { edits: [] },
       metadata: { user_id: 'x' }, cache_control: { type: 'ephemeral' } } as any);
     expect(parsed.turns).toEqual([{ role: 'user', text: 'hi', toolCalls: [], toolResults: [] }]);
     expect(parsed).not.toHaveProperty('thinking');
@@ -280,5 +290,39 @@ describe('buildAnthropicModelsList', () => {
   // No usable Providers → an empty but well-formed list with null first/last ids.
   it('returns an empty list when there are no providers', () => {
     expect(buildAnthropicModelsList([])).toEqual({ data: [], has_more: false, first_id: null, last_id: null });
+  });
+});
+
+describe('buildClaudeCodeSnippets', () => {
+  const snips = buildClaudeCodeSnippets('http://127.0.0.1:8971', 's3cret_x');
+
+  // Per-session PowerShell lines: $env: form, quoted values, all three vars, bare origin (no /v1).
+  it('builds the PowerShell per-session lines', () => {
+    expect(snips.powershell).toBe(
+      '$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8971"\n' +
+      '$env:ANTHROPIC_API_KEY = "s3cret_x"\n' +
+      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"',
+    );
+  });
+
+  // Per-session bash lines: export form, same three vars.
+  it('builds the bash per-session lines', () => {
+    expect(snips.bash).toBe(
+      'export ANTHROPIC_BASE_URL=http://127.0.0.1:8971\n' +
+      'export ANTHROPIC_API_KEY=s3cret_x\n' +
+      'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1',
+    );
+  });
+
+  // The persistent variant is a valid project .claude/settings.json env block — parseable JSON carrying
+  // exactly the three vars. The global ~/.claude form must never be produced (PRD #43 ban).
+  it('builds a parseable project settings.json env block', () => {
+    expect(JSON.parse(snips.settingsJson)).toEqual({
+      env: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
+        ANTHROPIC_API_KEY: 's3cret_x',
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      },
+    });
   });
 });

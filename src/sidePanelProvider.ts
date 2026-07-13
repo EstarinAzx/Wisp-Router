@@ -14,7 +14,7 @@
  *     model ids, set model/provider/baseUrl, read state + Activity) — avoids a circular import.
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
  *     | selectProvider{value} | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut
- *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress.
+ *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}.
  *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
  */
 
@@ -40,6 +40,7 @@ export type PanelState = {
   bridgeRunning: boolean; // Bridge listener state → the panel's running/stopped indicator + Start/Stop label
   bridgeAddress: string; // http://127.0.0.1:<port> — shown so the user knows what to point the CLI at
   bridgeSecret?: string; // the access secret, sent only while running (meant to be copied into the CLI)
+  claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), sent only while running
 };
 
 // Shared with extension.ts so the no-key failure is recognizable as webview-safe text.
@@ -62,6 +63,7 @@ export type PanelHost = {
   toggleBridge: () => Promise<void>; // start/stop the Bridge — the same lifecycle the command drives
   copyBridgeSecret: () => Promise<void>; // copy the access secret to the clipboard (host-side, webview can't)
   copyBridgeAddress: () => Promise<void>;
+  copyClaudeSnippet: (variant: 'powershell' | 'bash' | 'settingsJson') => Promise<void>; // copy one Claude Code setup snippet (#47)
 };
 
 // ----------------------------- Error sanitizing ----------------------------- //
@@ -171,6 +173,10 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'copyBridgeAddress':
           await this.host.copyBridgeAddress();
+          return;
+        case 'copyClaudeSnippet':
+          // The webview only names the variant; the host rebuilds and copies its own values.
+          if (msg.value === 'powershell' || msg.value === 'bash' || msg.value === 'settingsJson') await this.host.copyClaudeSnippet(msg.value);
           return;
       }
     } catch (err) {

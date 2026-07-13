@@ -13,7 +13,7 @@
  * send-builders — no second normalized shape.
  */
 
-import type { NormalizedTurn, ToolSpec, ChatModelInfo } from './catalog';
+import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
 // ----------------------------- Inbound: Anthropic Messages request -> Wisp ----------------------------- //
@@ -37,6 +37,7 @@ export type AnthropicMessagesRequest = {
   tool_choice?: AntToolChoice;
   temperature?: number;
   stream?: boolean;
+  output_config?: { effort?: string }; // Claude Code's /effort rides here (effort beta) — the one beta field the door reads
 };
 
 // The normalized tool_choice the door carries downstream. A bare string for auto/any/none; { name } for a
@@ -44,12 +45,18 @@ export type AnthropicMessagesRequest = {
 // door (which hardcodes 'auto') this survives the round-trip.
 export type NormalizedToolChoice = 'auto' | 'any' | 'none' | { name: string };
 
-// The Anthropic door's normalized request: the shared BridgeChatRequest plus the two fields the Anthropic
-// wire adds. Both optional — a request may carry neither. #46 reads them when forwarding to the active Provider.
+// The Anthropic door's normalized request: the shared BridgeChatRequest plus the fields the Anthropic
+// wire adds. All optional — a request may carry none. #46 reads them when forwarding to the active Provider.
 export type BridgeAnthropicRequest = BridgeChatRequest & {
   toolChoice?: NormalizedToolChoice;
   temperature?: number;
+  effort?: EffortLevel; // Claude Code's /effort (output_config.effort) — overrides the panel effort when present
 };
+
+// Validate an inbound output_config.effort against Wisp's ladder — the body is untrusted, so an unknown
+// string yields undefined (the door then falls back to the panel effort) rather than a junk wire value.
+const normalizeEffort = (v: string | undefined): EffortLevel | undefined =>
+  v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max' ? v : undefined;
 
 // The joined text of a string-or-text-block field. A bare string is itself; a block array joins its text
 // blocks with `sep`. System uses '\n\n' (each block is a separate directive — billing marker, then prompt);
@@ -95,8 +102,9 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
 // ponytail: mid-conversation system loses its position among turns — the normalized seam has one top-level
 // system slot; fine for the translator, #46 revisits if positioned system ever matters.
 // The claude-wisp- discovery alias is stripped from `model` (slice-1 decision); a stock claude-* id (the
-// background tier's haiku) has no such prefix and passes verbatim. Beta fields (thinking, context_management,
-// output_config, metadata, cache_control) are simply never read — ignored, never rejected.
+// background tier's haiku) has no such prefix and passes verbatim. output_config.effort is read (Claude
+// Code's /effort — #47 threads it to the backend); the other beta fields (thinking, context_management,
+// metadata, cache_control) are simply never read — ignored, never rejected.
 export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): BridgeAnthropicRequest => {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const systemParts: string[] = [];
@@ -132,6 +140,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
   }));
 
   const toolChoice = normalizeToolChoice(body.tool_choice);
+  const effort = normalizeEffort(body.output_config?.effort);
   return {
     model: (body.model ?? '').replace(/^claude-wisp-/, ''),
     stream: body.stream ?? false,
@@ -141,6 +150,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
     // Only attach the extras when present, so a plain request stays byte-identical to a bare BridgeChatRequest.
     ...(toolChoice !== undefined ? { toolChoice } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
+    ...(effort !== undefined ? { effort } : {}),
   };
 };
 
@@ -255,3 +265,39 @@ export const buildAnthropicModelsList = (infos: ChatModelInfo[]): AntModelsList 
     last_id: data[data.length - 1]?.id ?? null,
   };
 };
+
+// ----------------------------- Setup snippets: the side-panel Claude Code section ----------------------------- //
+
+// The three copy-paste setup variants the panel offers (slice #47): per-session shell lines (PowerShell and
+// bash) and the persistent project-scoped .claude/settings.json env block. The global ~/.claude/settings.json
+// form is deliberately absent — it has the highest precedence and would silently reroute every Claude Code
+// session on the machine (PRD #43).
+export type ClaudeCodeSnippets = { powershell: string; bash: string; settingsJson: string };
+
+// Build all three variants from the live Bridge address + access secret. ANTHROPIC_BASE_URL is the bare
+// origin (no /v1 — Claude Code appends /v1/messages itself); the discovery flag makes /model list the
+// claude-wisp-* aliases. Env is read at Claude Code startup only, so every variant implies a fresh terminal.
+export const buildClaudeCodeSnippets = (address: string, secret: string): ClaudeCodeSnippets => ({
+  powershell: [
+    `$env:ANTHROPIC_BASE_URL = "${address}"`,
+    `$env:ANTHROPIC_API_KEY = "${secret}"`,
+    `$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"`,
+  ].join('\n'),
+  bash: [
+    `export ANTHROPIC_BASE_URL=${address}`,
+    `export ANTHROPIC_API_KEY=${secret}`,
+    `export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
+  ].join('\n'),
+  // JSON.stringify keeps the block valid even if the secret ever carries a quotable character.
+  settingsJson: JSON.stringify(
+    {
+      env: {
+        ANTHROPIC_BASE_URL: address,
+        ANTHROPIC_API_KEY: secret,
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      },
+    },
+    null,
+    2,
+  ),
+});
