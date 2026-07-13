@@ -40,6 +40,7 @@ import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, anthropicErrorFrame,
   type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
+import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -62,6 +63,7 @@ export type BridgeDeps = {
   anthropicCreds: () => Promise<AnthropicCreds | undefined>;
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
+  routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
@@ -145,6 +147,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     });
   };
 
+  // Resolve a requested model name through the Routing map (#51): Provider id → Alias exact → Family
+  // fuzzy → Active fallback. One log line per routed request names the matched row kind + Target (the
+  // observable the acceptance criteria demand); undefined (dangling Target / no Active) → the caller 404s.
+  const routeFor = (requestedModel: string): RouteMatch | undefined => {
+    const route = resolveRoute(deps.routingMap(), deps.providers, deps.activeProviderId(), requestedModel);
+    if (route) deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}`);
+    return route;
+  };
+
   // GET /v1/models — the OpenAI-door discovery list (one entry per usable Provider id).
   const handleModels = async (res: http.ServerResponse): Promise<void> =>
     sendJson(res, 200, buildModelsList(await computeModelInfos()));
@@ -158,11 +169,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // rendered back through the SAME bridge.ts SSE emitters the keyed path uses (so the wire shape is identical).
   // No API key: creds come from the OAuth seam (codexAuth via deps), so a signed-out state is a clean 401, not
   // a crash. Mirrors chatProvider.ts's Codex branch — only the in/out edges differ (HTTP body, not vscode parts).
-  const handleCodexChat = async (parsed: BridgeChatRequest, provider: Provider, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+  const handleCodexChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     const creds = await deps.codexCreds();
     if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
 
-    const modelId = resolveModel(deps.modelMap(), provider);
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
     // bridge.ts lifts system OUT of the turns; Codex consumes it as `instructions`, so re-attach it as the
     // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
@@ -210,11 +222,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // sign-in, rendered back through the SAME bridge.ts SSE emitters the keyed/Codex paths use (identical wire
   // shape). No API key: creds come from the OAuth seam (anthropicAuth via deps), so a signed-out state is a
   // clean 401, and refresh failure mid-stream a 502. Mirrors handleCodexChat — only the cores differ.
-  const handleAnthropicChat = async (parsed: BridgeChatRequest, provider: Provider, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+  const handleAnthropicChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     const creds = await deps.anthropicCreds();
     if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
 
-    const modelId = resolveModel(deps.modelMap(), provider);
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
     // bridge.ts lifts system OUT of the turns; buildAnthropicMessagesBody lifts a role:'system' message back
     // to the top-level `system`, so re-attach it as the leading system message. Images are dropped (the chat
@@ -270,22 +283,22 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // 400 here, not a crash — don't lean on try/catch for this control flow.
     if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
 
-    // A request naming a Provider id routes to it (curl can address any Provider explicitly). Anything else —
-    // notably the resolved model NAME Copilot CLI sends as COPILOT_MODEL (#b: so its UI shows the real model,
-    // not the Provider id) — falls back to the ACTIVE Provider. Trade: an unknown model no longer 404s, it
-    // serves the active Provider (fine for a local single-user endpoint); the model actually used stays live
-    // (resolveModel reads the panel per request), so a mid-session model switch is picked up without a relaunch.
-    const provider = deps.providers.find((p) => p.id === parsed.model)
-      ?? deps.providers.find((p) => p.id === deps.activeProviderId());
-    if (!provider) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    // The Routing map (#51) picks the answering Provider: a Provider id routes to it (curl can address any
+    // Provider explicitly), an Alias/Family hit routes to its Target, and anything else — notably the
+    // resolved model NAME Copilot CLI sends as COPILOT_MODEL (#b) — keeps the ACTIVE Provider fallback.
+    // The map + panel model are read live per request, so a mid-session edit applies without a relaunch.
+    const route = routeFor(parsed.model);
+    if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    const { provider, pinnedModel } = route;
     // The OAuth Providers route through their own streams (no API key): Codex → Responses (#39),
     // Anthropic → Messages (#40).
-    if (isCodexProvider(provider)) return handleCodexChat(parsed, provider, req, res);
-    if (isAnthropicProvider(provider)) return handleAnthropicChat(parsed, provider, req, res);
+    if (isCodexProvider(provider)) return handleCodexChat(parsed, provider, pinnedModel, req, res);
+    if (isAnthropicProvider(provider)) return handleAnthropicChat(parsed, provider, pinnedModel, req, res);
     const client = await deps.clientFor(provider);
     if (!client) return sendError(res, 400, `provider '${provider.id}' has no API key configured`);
 
-    const modelId = resolveModel(deps.modelMap(), provider);
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     // bridge.ts keeps system OUT of the turns; the OpenAI path re-prepends it as the leading system message.
     const base = buildOpenAiChatMessages(parsed.turns);
     const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
@@ -380,9 +393,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
   const startProviderStream = async (
-    parsed: BridgeAnthropicRequest, provider: Provider, controller: AbortController,
+    parsed: BridgeAnthropicRequest, provider: Provider, pinnedModel: string | undefined, controller: AbortController,
   ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent> }> => {
-    const modelId = resolveModel(deps.modelMap(), provider);
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
     // Claude Code's /effort (output_config.effort, #47) wins over the panel effort when present — the badge
     // Claude Code shows next to the model then matches what the backend actually runs.
@@ -400,7 +414,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (isAnthropicProvider(provider)) {
       const creds = await deps.anthropicCreds();
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
-      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      // images must ride along (the Codex + keyed paths already forward them) — omitting them here was the
+      // door's vision hole: inline attaches never reached the Anthropic backend.
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
@@ -428,15 +444,17 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const parsed = parseAnthropicMessagesRequest(body as Parameters<typeof parseAnthropicMessagesRequest>[0]);
     if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
 
-    // A model naming a Provider id routes to it; anything else (the background tier's raw claude-* id) falls
-    // back to the Active Provider — so a mid-session background call never 404s.
-    const provider = deps.providers.find((p) => p.id === parsed.model)
-      ?? deps.providers.find((p) => p.id === deps.activeProviderId());
-    if (!provider) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    // The Routing map (#51) picks the answering Provider: Provider id → Alias → Family fuzzy (the
+    // background tier's raw claude-* ids land here when their family row is set) → Active fallback.
+    const route = routeFor(parsed.model);
+    if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    const provider = route.provider;
 
-    // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's.
-    // The observable for #47's effort threading; without it a quick reply proves nothing.
-    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'})`);
+    // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's
+    // — plus how many images the request carried (the vision observable: 0 here means the client never sent
+    // pixels; >0 means any blindness is downstream of the door).
+    const imageCount = parsed.turns.reduce((n, t) => n + (t.images?.length ?? 0), 0);
+    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'}) images=${imageCount}`);
 
     const controller = new AbortController();
     req.on('close', () => controller.abort());
@@ -445,7 +463,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const meta: AnthropicSseMeta = { id: `msg_${crypto.randomBytes(12).toString('hex')}`, model: typeof requested === 'string' ? requested : parsed.model };
 
     try {
-      const result = await startProviderStream(parsed, provider, controller);
+      const result = await startProviderStream(parsed, provider, route.pinnedModel, controller);
       if (!result.ok) return sendError(res, result.status, result.message);
 
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });

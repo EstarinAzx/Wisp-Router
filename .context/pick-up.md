@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-13
+updated: 2026-07-14
 tags: [context, pick-up]
 ---
 
@@ -10,27 +10,31 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**Bridge Routing map fully planned — zero code yet.** `/preset init` funnel ran end-to-end:
-grilled design → glossary terms (Routing map / Family route / Alias / Target in `CONTEXT.md`) →
-MVD (`.context/happy-path.md`, "Bridge Routing map" section) → **PRD issue #50** → tickets
-**#51 → #52 → #53** (linear chain, all `ready-for-agent`). Design core: name resolves
-Provider id → Alias → Family route → Active; Target = Provider + pinned model; both doors;
-fail-loud; aliases in `GET /v1/models`; no wildcards.
+**Anthropic-door vision bugfix — found, TDD'd, live-verified.** Two commits on
+`feat/routing-map-family-routes` (still local, NOT pushed): `ab21c18` fixes both image drops
+(inline attach omitted on the Anthropic provider path in `bridgeServer.ts` `startProviderStream`;
+Read-on-image `tool_result` images dropped for ALL providers in `bridgeAnthropic.ts`
+`splitUserBlocks` — now hoisted into the turn's `images[]`), `8d6be05` adds the `images=N`
+per-request log observable. Suite 297/297. User verified live: Anthropic-bound model reads inline
+attach; codex path proven never-broken (`images=1` logged — GPT calling Read anyway is model habit,
+see [[gotchas]] 2026-07-14 entry).
 
 ## Next task
-1. **`/preset scope 51`** — "Family routes end to end", first unblocked slice. Fresh `feat/`
-   branch off main. Resolver is built COMPLETE in this slice (incl. alias logic + full decision-table
-   tests); panel rows use free-text model fields (dropdowns are #53).
-2. Then #52 (Aliases + models list), #53 (per-row dropdowns) — or `/loop /preset ticket-loop`.
-3. After the routing map ships: **TUI PRD for Wisp** via `/preset init` (user-stated order).
+1. **`/preset ship`** — push the branch, open ONE PR covering #51 (Routing map slice 1, `f9c0519`)
+   + the vision fixes, merge it.
+2. **`/preset scope 52`** — "Aliases + models list": panel add/remove Alias rows (name + Target;
+   refuse an Alias shadowing a Provider id) + advertise aliases in both doors' `GET /v1/models`
+   (`buildModelsList` in `bridge.ts`, `buildAnthropicModelsList` in `bridgeAnthropic.ts`). Resolver
+   unchanged — alias lookup already shipped + tested.
+3. Then #53 (per-row dropdowns), then TUI PRD via `/preset init`.
 
 ## Landmines
 - **`Ctrl+R` in the Extension Dev Host runs the STALE build** — `npm run compile` first, or stop→F5.
 - **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap).
-- Panel model lists currently serve the **Active Provider only** — per-row lists are deliberately
-  deferred to #53; don't pull that plumbing into #51/#52.
-- Three global skills (grill-with-docs, to-spec, to-tickets) had `disable-model-invocation` flipped
-  to `false` this session — sync the ecosystem-kb vault before any template push (`/preset health`).
+- "Model can't see image" reports: check the door log's `images=N` BEFORE touching code —
+  `0` = client never sent pixels, `>0` = look downstream. Full trap in [[gotchas]].
+- Routing-map Targets store raw provider ids with no rename migration (deliberate skip) — if a
+  Provider id ever gets renamed, add the map to the migration pass or the family 404s.
 - **v1.5.0 is still a pre-release**; v1.5.1 packaging remains undone by choice.
 
 ## Related

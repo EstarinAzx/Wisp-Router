@@ -23,7 +23,7 @@ import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 // message-only. cache_control and other beta annotations ride along and are simply never read.
 type AntTextBlock = { type: 'text'; text: string };
 type AntToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
-type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntTextBlock[] };
+type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[] };
 type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock;
 type AntMessage = { role: 'user' | 'assistant' | 'system'; content: string | AntContentBlock[] };
@@ -87,10 +87,17 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
   let text = '';
   const toolResults: { callId: string; content: string }[] = [];
   const images: { mimeType: string; dataBase64: string }[] = [];
+  // An image block, wherever it sits, joins the turn's images[] — the normalized shape has no per-result slot.
+  const takeImage = (b: AntContentBlock | undefined): void => {
+    if (b?.type === 'image' && b.source?.data) images.push({ mimeType: b.source.media_type ?? '', dataBase64: b.source.data });
+  };
   for (const b of blocks) {
     if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
-    else if (b?.type === 'tool_result') toolResults.push({ callId: b.tool_use_id, content: blockText(b.content) });
-    else if (b?.type === 'image' && b.source?.data) images.push({ mimeType: b.source.media_type ?? '', dataBase64: b.source.data });
+    else if (b?.type === 'tool_result') {
+      toolResults.push({ callId: b.tool_use_id, content: blockText(b.content) });
+      // Claude Code's Read-on-image puts the pixels INSIDE tool_result content — hoist them, don't drop them.
+      if (Array.isArray(b.content)) for (const inner of b.content) takeImage(inner);
+    } else takeImage(b);
     // Unknown / partial blocks are skipped, never dereferenced blindly — the body is untrusted.
   }
   return { text, toolResults, images };

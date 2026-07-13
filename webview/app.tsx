@@ -12,7 +12,8 @@
  *     the extension sends. activity carries the live Thinking/Idle state, separate from state.
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
  *     | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut | selectEffort{value}
- *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}.
+ *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
+ *     | setFamilyRoute{value:{family,providerId,model}}.
  */
 
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -37,7 +38,12 @@ type State = {
   bridgeAddress: string;
   bridgeSecret?: string; // present only while running — the secret to paste into the Copilot CLI
   claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), present only while running
+  routingFamilies?: Partial<Record<FamilyKey, { providerId: string; model: string }>>; // the Routing map's four Family rows (#51)
 };
+
+// The Routing map's four fixed Family routes (#51) — rendered as always-visible rows, in this order.
+type FamilyKey = 'opus' | 'sonnet' | 'haiku' | 'fable';
+const FAMILY_KEYS: FamilyKey[] = ['opus', 'sonnet', 'haiku', 'fable'];
 
 type InMsg =
   | { type: 'state'; state: State }
@@ -57,6 +63,10 @@ export const App = () => {
   const [modelsError, setModelsError] = useState('');
   const [keyDraft, setKeyDraft] = useState('');
   const [modelDraft, setModelDraft] = useState('');
+  // Routing map row drafts (#51): seeded ONCE from the first state push, then owned locally — a state
+  // push after a partial commit (provider picked, model still empty → row stored unmapped) must not
+  // wipe what the user is mid-typing.
+  const [routeDrafts, setRouteDrafts] = useState<Record<FamilyKey, { providerId: string; model: string }> | undefined>(undefined);
   // Where the current models list came from — used to drop it when Provider/endpoint/credentials
   // change. Keyed on providerId too so a switch refetches even if two rows shared a base URL.
   const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean } | undefined>(undefined);
@@ -78,6 +88,12 @@ export const App = () => {
         const newOrigin = !prev || prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl || prev.keyIsSet !== msg.state.keyIsSet;
         modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet };
         setState(msg.state);
+        // Seed the Routing map drafts from the FIRST state only (functional update — the [] effect
+        // closure never sees fresh routeDrafts); later pushes leave in-progress row edits alone.
+        setRouteDrafts((cur) => cur ?? Object.fromEntries(FAMILY_KEYS.map((k) => {
+          const t = msg.state.routingFamilies?.[k];
+          return [k, { providerId: t?.providerId ?? '', model: t?.model ?? '' }];
+        })) as Record<FamilyKey, { providerId: string; model: string }>);
         if (newOrigin && msg.state.keyIsSet) {
           setModelsError('');
           vscode.postMessage({ type: 'refreshModels' });
@@ -121,6 +137,13 @@ export const App = () => {
   const commitBaseUrl = (raw: string) => {
     const value = raw.trim();
     if (value) vscode.postMessage({ type: 'setBaseUrl', value });
+  };
+
+  // Commit one Routing map Family row (#51): sync the local draft, then send the whole row — the host
+  // stores a Target when both halves are present, else the row goes explicitly unmapped.
+  const commitFamilyRoute = (family: FamilyKey, draft: { providerId: string; model: string }) => {
+    setRouteDrafts((cur) => cur && { ...cur, [family]: draft });
+    vscode.postMessage({ type: 'setFamilyRoute', value: { family, providerId: draft.providerId, model: draft.model } });
   };
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
@@ -346,6 +369,44 @@ export const App = () => {
             </p>
           </div>
         )}
+
+        {/* --------------------- Routing map (#51) --------------------- */}
+        {/* The four fixed Family routes: a bridged claude-* id of a family answers with that row's
+            Target — the picked Provider plus the pinned model typed here — instead of the Active
+            Provider. Provider "Unmapped" (or an empty model) keeps the row explicitly unmapped. */}
+        <h3 class="section-title mt-2">Routing map</h3>
+        {routeDrafts && FAMILY_KEYS.map((family) => {
+          const d = routeDrafts[family];
+          const mapped = !!state.routingFamilies?.[family];
+          return (
+            <div key={family} class="flex items-center gap-1.5">
+              <span class={`w-12 shrink-0 text-xs capitalize ${mapped ? '' : 'text-[var(--vscode-descriptionForeground)]'}`}>{family}</span>
+              <select
+                class="input min-w-0 flex-1"
+                value={d.providerId}
+                onChange={(e) => commitFamilyRoute(family, { ...d, providerId: e.currentTarget.value })}
+              >
+                <option value="">Unmapped</option>
+                {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              <input
+                class="input min-w-0 flex-1"
+                type="text"
+                placeholder="model id"
+                value={d.model}
+                onInput={(e) => {
+                  const model = e.currentTarget.value;
+                  setRouteDrafts((cur) => cur && { ...cur, [family]: { ...cur[family], model } });
+                }}
+                onBlur={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value }); }}
+              />
+            </div>
+          );
+        })}
+        <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+          Bridged claude-opus / sonnet / haiku / fable names answer with their Target (Provider + pinned model). Unmapped rows use the Active Provider.
+        </p>
 
         {/* --------------------- Claude Code setup (#47) --------------------- */}
         {/* Ready-to-copy env snippets pointing Claude Code at the live door. Per-session shell lines are the

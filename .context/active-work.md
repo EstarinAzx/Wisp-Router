@@ -1,64 +1,70 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-13
+updated: 2026-07-14
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-13 by Fable 5 (auto)._
-_At commit: b9286ed on `main` (clean before this session's docs-only changes)._
+_Last updated: 2026-07-14 by Fable 5 (auto)._
+_At commit: 8d6be05 on `feat/routing-map-family-routes` (#51 + vision bugfix committed, NOT yet pushed/PR'd)._
 
 ## Current focus
-**Bridge Routing map — planned, not yet built.** The `/preset init` funnel ran end-to-end this session:
-grill → glossary → MVD → PRD → tickets. Every bare Claude name (and any user-invented alias) will route
-to its own Provider + pinned model instead of collapsing onto the Active Provider.
+**Ship the branch.** It now carries #51 (Routing map slice 1, `f9c0519`) PLUS a live-verified Anthropic-door
+vision bugfix (`ab21c18`, `8d6be05`). All demo-verified; `/preset ship` is the next mechanical step, then #52.
 
 ## State
-- **Done this session (docs/planning only — zero code):**
-  - Design grilled + settled: 4 fixed **Family routes** (Opus/Sonnet/Haiku/Fable, fuzzy `claude-*`
-    match) + exact-name **Aliases** → **Target** = Provider + pinned model; lookup order Provider id →
-    Alias → Family → Active Provider; both Bridge doors, one map; fail-loud on unusable Target;
-    aliases advertised in `GET /v1/models`; no wildcards.
-  - Glossary: **Routing map / Family route / Alias / Target** added to `CONTEXT.md` (Bridge section).
-  - MVD: "Bridge Routing map" section appended to [[happy-path]].
-  - **PRD: GitHub issue #50** (`ready-for-agent`).
-  - **Tickets: #51 → #52 → #53** (linear chain, blocking edges in bodies):
-    #51 Family routes end-to-end (resolver built COMPLETE incl. alias logic + tests; panel rows with
-    free-text model field) · #52 Aliases + models-list advertising · #53 per-row model dropdowns.
-- **In flight:** nothing.
+- **Done this session (vision bugfix, commits ab21c18 + 8d6be05):**
+  - **Bug 1 — inline attach dead on the Anthropic provider path only:** `startProviderStream` in
+    `bridgeServer.ts` forwarded `images` on the Codex + keyed paths but omitted them on the Anthropic
+    path. One-word fix (`images: t.images`). Codex/keyed inline attach was never broken.
+  - **Bug 2 — Read-on-image dead on ALL door paths:** `splitUserBlocks` in `bridgeAnthropic.ts`
+    flattened `tool_result` content to text, dropping the image block Claude Code's Read tool returns.
+    Fix: hoist tool_result images into the turn's `images[]` (normalized shape has no per-result slot).
+    TDD'd (`bridgeAnthropic.test.ts` hoist test). Suite 297/297.
+  - **Observable added:** the door's per-request log line now ends `images=N` — 0 means the client never
+    sent pixels, >0 means any blindness is downstream of the door.
+  - **Live-verified by user:** Anthropic-bound model reads inline attach; codex path proven clean
+    (`images=1` on the attach turn, `images=2` after Read). GPT calling Read despite inline pixels is
+    model habit, NOT a Wisp bug — the source-path text Claude Code sends with every attach baits it.
+- **Done earlier on this branch (#51, commit f9c0519):** pure resolver `src/routing.ts` (id → alias →
+  family → active) + 14-test decision table; both doors route via `routeFor` with pinned-model override;
+  map in globalState `wisp.routingMap`; panel Family rows.
+- **In flight:** branch committed locally, not pushed.
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **`/preset scope 51`** — first unblocked slice. Fresh `feat/` branch off main.
-2. Then #52, #53 in order (or `/loop /preset ticket-loop` — all three are `ready-for-agent`).
-3. After the routing map ships: **TUI PRD for Wisp** via `/preset init` (user-stated order).
+1. **`/preset ship`** — push the branch, open the PR (covers #51 + the vision fix), merge.
+2. **#52 Aliases + models list** — panel add/remove Alias rows (name + Target; panel must refuse an
+   Alias shadowing a Provider id) + advertise aliases in both doors' `GET /v1/models`. Resolver needs
+   NO changes — alias lookup already built + tested in `routing.ts`.
+3. Then #53 (per-row model dropdowns), then **TUI PRD for Wisp** via `/preset init` (user-stated order).
 
 ## Skills for next session
 - /preset pick-up — resume from the note.
-- /preset scope 51 — enter the work loop on the first slice.
+- /preset ship — if the PR still isn't open.
 
 ## Open questions
-- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded; agent-mode
-  vision flake root cause open; OpenAI-door Codex strict-tools limit.
+- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded; OpenAI-door
+  Codex strict-tools limit. (The old "agent-mode vision flake" open question is likely EXPLAINED by
+  bug 1/2 above — retest before reopening it.)
 
 ## Recent context
-- Resolver seam: both doors currently route at `bridgeServer.ts` (~:278 OpenAI, ~:433 Anthropic) via
-  `deps.providers.find(id) ?? Active`; model always `resolveModel(deps.modelMap(), provider)` — the
-  pinned-model override must thread through those call sites.
-- Panel model lists today serve the **Active Provider only** (webview `refreshModels` → live `/models`;
-  OAuth kinds via models.dev in `getState`). Per-row lists for arbitrary Providers = new fetch path —
-  deliberately deferred to #53; #51/#52 use free-text model fields (the decided offline fallback).
-- Claude Code cannot show aliases in its own model menu (hardcoded picker; no list endpoint on the
-  Anthropic dialect) — aliases are typed via `/model sol`, then stick. OpenAI-door tools that read
-  `GET /v1/models` DO see them.
-- Session also flipped `disable-model-invocation: true → false` on three global skills
-  (grill-with-docs, to-spec, to-tickets) at the user's request — ecosystem change, outside this repo.
+- Vision seam now: inline attach → `splitUserBlocks` images; Read-on-image → tool_result hoist into the
+  same `images[]`; all three `startProviderStream` paths forward them; send-builders emit
+  `image` (Anthropic) / `input_image` (Codex) / `image_url` (keyed) blocks.
+- Debugging a "model can't see image" report: check the Wisp output channel `images=N` first — see
+  [[gotchas]] (2026-07-14 entry).
+- #52's models-list surface: OpenAI door `buildModelsList`, Anthropic door `buildAnthropicModelsList`
+  (`bridgeAnthropic.ts`) — aliases must appear in both; Claude Code's own /model picker can't list
+  them (hardcoded), users type `/model <alias>`.
+- Panel model lists still Active-Provider-only — per-row dropdowns deliberately deferred to #53;
+  don't pull that plumbing into #52.
 
 ## Related
 - [[overview]]
-- [[api]] — Bridge doors (routing map lands there once built)
-- [[decisions]] — 2026-07-13 Routing-map entry (rejected paths: wildcards, silent fallback)
-- [[gotchas]] — stale-build + dup-panel traps (still the F5 landmines)
+- [[api]] — Bridge doors + Routing map (live, documented)
+- [[decisions]] — 2026-07-13 Routing-map entry · 2026-07-14 tool_result-image-hoist entry
+- [[gotchas]] — stale-build + dup-panel traps · images=N vision-debug entry
 - [[happy-path]] — "Bridge Routing map" MVD
