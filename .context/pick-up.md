@@ -17,10 +17,12 @@ fallback (refreshed with the 5.6 family + claude-sonnet-5). 282 tests green, dem
 `docs/superpowers/`.
 
 ## Next task
-1. **If the PR is still open:** merge it (branch: `feat/live-oauth-model-lists` → main). Consider a
-   v1.5.1 release tag if the user wants it installable.
-2. **Then the user's stated next thing: TUI PRD for Wisp** — run `/preset init` on it.
-3. Queued idea from this session (file as issue/PRD before building): **claude-name routing map** —
+_PR #49 MERGED to main (f531082); feature branch deleted. v1.5.1 release/packaging not done — tag only
+when the user wants it installable._
+1. **User-stated order: the claude-name routing map FIRST, then the TUI PRD.** Start the routing map as
+   a fresh `feat/` branch off main, PRD/issue first via `/preset init`.
+2. **Then the TUI PRD for Wisp** — `/preset init`, own branch.
+3. The routing map, spelled out (from this session's discussion): **claude-name routing map** —
    panel-configurable per-family aliases so bare `claude-*` ids from bridged Claude Code (Opus/Sonnet/
    Haiku/Fable picks, /advisor, background haiku calls) route to a chosen Provider+model each, instead
    of all collapsing to the Active Provider. Payoff: advisor = real Opus while main = Codex; haiku

@@ -28,7 +28,7 @@ COMPLETE, demo-verified; wrap-up + ship running.
     regex tables → gpt-5.6's real ~1M window in the picker.
   - 282 tests green, tsc+vite clean, live models.dev round-trip smoke passed, user demo-verified
     (Terra/Luna + Sonnet-5/Fable-5 visible, messaging works).
-- **In flight:** wrap-up + ship (push branch, PR to main).
+- **In flight:** nothing — PR #49 merged to main (f531082), feature branch deleted.
 - **Blocked:** nothing.
 
 ## Pick up here
