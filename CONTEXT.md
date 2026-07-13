@@ -153,6 +153,42 @@ the user turns it on. _Avoid_: calling the Bridge a **Provider** (a Provider is 
 backend Wisp talks *out* to; the Bridge is the door *in*), or implying an
 external tool ever sees your keys or sign-in tokens — they never do.
 
+**Routing map**:
+The **Bridge**'s user-configured table deciding which **Provider** (and which of
+its models) answers a request whose model name is not a Provider id. Consulted
+after the Provider-id match and before the **Active Provider** fallback; both
+Bridge dialects share the one map. Holds two kinds of rows — four fixed **Family
+routes** and any number of user-added **Aliases** — each pointing at a
+**Target**. A name matching no row falls back to the **Active Provider**,
+exactly as before the map existed. _Avoid_: wildcard/pattern language — rows
+match a family or an exact name, never a user-written pattern.
+
+**Family route**:
+One of the four fixed **Routing map** rows — **Opus**, **Sonnet**, **Haiku**,
+**Fable** — catching every `claude-*` model id of that family, whatever its
+version or date suffix (e.g. `claude-opus-4-8` and a dated haiku snapshot both
+land on their family's row). An unset Family route routes nothing — its traffic
+falls through to the **Active Provider**. _Avoid_: treating a Family route as an
+**Alias** — it matches a whole family fuzzily, not one exact name.
+
+**Alias**:
+A user-invented exact model name (e.g. `sol`, `gpt`) added to the **Routing
+map** and routed to its **Target**. Matched exactly — a more specific Alias
+(a full `claude-*` id) therefore beats the **Family route** that would otherwise
+catch it. Advertised as a selectable model on the Bridge's OpenAI-dialect model
+list; an external tool typing the Alias gets the Target, no panel visit needed.
+An Alias may not collide with a Provider id. _Avoid_: expecting an Alias to
+appear inside Claude Code's own model menu — that menu is Claude Code's; the
+Alias is typed, then sticks.
+
+**Target**:
+What a **Routing map** row points at: a **Provider** plus a pinned model. The
+pinned model overrides that Provider's panel-selected model for requests through
+that row — so two names can run two different models of the same Provider at
+once. A Target whose Provider is unusable (no key / signed out) fails loud with
+the Provider's real error; it never silently falls back. _Avoid_: a Target with
+an unpinned model — the pin is the point.
+
 ## Relationships
 
 - **Activity** has exactly two values: **Thinking** | **Idle**.

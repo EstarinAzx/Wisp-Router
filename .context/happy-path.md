@@ -41,3 +41,20 @@ flowchart LR
 **Note (routing rule, behind the spine):** a `model` naming a Provider id routes
 to that provider; an unrecognized `claude-*` string falls back to the **Active
 Provider** — the spine never 404s on Claude Code's background-tier calls.
+
+## Bridge Routing map — every Claude name gets its own brain
+- **Idea:** a panel-configured **Routing map** (4 fixed Family routes + user-named Aliases, each → a Provider + pinned model) so bridged Claude Code's bare `claude-*` ids and invented names stop collapsing onto the Active Provider — the session runs one model while its subagents and haiku chores run others, simultaneously.  **Mode:** ux+beat  **Actor:** Wisp user (developer running bridged Claude Code)  **Goal:** `/model sol` answers with the pinned Codex model while background haiku calls run the cheap one — in the same session, panel untouched.
+- **Updated:** 2026-07-13
+
+```mermaid
+flowchart LR
+  panel([Wisp side panel — Bridge section]) -->|set Haiku family row · pick Provider + pinned model| family[Haiku → OpenCode Go / cheap model]
+  family -->|add Alias 'sol' · pick Codex + gpt-5.6-sol · map saved| mapped[Routing map live]
+  mapped -->|in bridged Claude Code type /model sol| named[Session model = 'sol']
+  named -->|type a coding task · POST /v1/messages model:'sol'| routed[Bridge: Provider id? no → Alias 'sol' hit → Codex + pinned sol]
+  routed -->|meanwhile background call model:'claude-haiku-…' · Family row hit → cheap model| done([Main task on Sol, chores on the cheap pot — one session, two brains])
+```
+
+**Note (lookup order, behind the spine):** Provider id → Alias → Family route →
+Active Provider; an Alias may not shadow a Provider id (panel refuses), and a
+row whose Target is unusable fails loud with the Provider's real error.

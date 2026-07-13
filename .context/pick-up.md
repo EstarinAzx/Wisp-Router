@@ -10,30 +10,28 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**Live OAuth model lists SHIPPED to PR.** Branch `feat/live-oauth-model-lists`: Codex + Anthropic panel
-dropdowns and picker caps now read models.dev live (newest-first), curated lists demoted to offline
-fallback (refreshed with the 5.6 family + claude-sonnet-5). 282 tests green, demo-verified (Terra/Luna
-+ Sonnet-5/Fable-5 in the dropdowns, messaging works, real ~1M window for 5.6). Spec + plan in
-`docs/superpowers/`.
+**Bridge Routing map fully planned — zero code yet.** `/preset init` funnel ran end-to-end:
+grilled design → glossary terms (Routing map / Family route / Alias / Target in `CONTEXT.md`) →
+MVD (`.context/happy-path.md`, "Bridge Routing map" section) → **PRD issue #50** → tickets
+**#51 → #52 → #53** (linear chain, all `ready-for-agent`). Design core: name resolves
+Provider id → Alias → Family route → Active; Target = Provider + pinned model; both doors;
+fail-loud; aliases in `GET /v1/models`; no wildcards.
 
 ## Next task
-_PR #49 MERGED to main (f531082); feature branch deleted. v1.5.1 release/packaging not done — tag only
-when the user wants it installable._
-1. **User-stated order: the claude-name routing map FIRST, then the TUI PRD.** Start the routing map as
-   a fresh `feat/` branch off main, PRD/issue first via `/preset init`.
-2. **Then the TUI PRD for Wisp** — `/preset init`, own branch.
-3. The routing map, spelled out (from this session's discussion): **claude-name routing map** —
-   panel-configurable per-family aliases so bare `claude-*` ids from bridged Claude Code (Opus/Sonnet/
-   Haiku/Fable picks, /advisor, background haiku calls) route to a chosen Provider+model each, instead
-   of all collapsing to the Active Provider. Payoff: advisor = real Opus while main = Codex; haiku
-   chores = cheap model.
+1. **`/preset scope 51`** — "Family routes end to end", first unblocked slice. Fresh `feat/`
+   branch off main. Resolver is built COMPLETE in this slice (incl. alias logic + full decision-table
+   tests); panel rows use free-text model fields (dropdowns are #53).
+2. Then #52 (Aliases + models list), #53 (per-row dropdowns) — or `/loop /preset ticket-loop`.
+3. After the routing map ships: **TUI PRD for Wisp** via `/preset init` (user-stated order).
 
 ## Landmines
 - **`Ctrl+R` in the Extension Dev Host runs the STALE build** — `npm run compile` first, or stop→F5.
 - **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap).
-- **Local `main` carries the spec/plan docs commits** (made before branching) — after the PR merges,
-  a plain `git pull` on main reconciles; don't force anything.
-- **v1.5.0 is still a pre-release** — promote after soak, or fold into v1.5.1 with this feature.
+- Panel model lists currently serve the **Active Provider only** — per-row lists are deliberately
+  deferred to #53; don't pull that plumbing into #51/#52.
+- Three global skills (grill-with-docs, to-spec, to-tickets) had `disable-model-invocation` flipped
+  to `false` this session — sync the ecosystem-kb vault before any template push (`/preset health`).
+- **v1.5.0 is still a pre-release**; v1.5.1 packaging remains undone by choice.
 
 ## Related
-- [[active-work]] · [[overview]] · [[api]] · [[decisions]] · [[gotchas]]
+- [[active-work]] · [[overview]] · [[api]] · [[decisions]] · [[gotchas]] · [[happy-path]]
