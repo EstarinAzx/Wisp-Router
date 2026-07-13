@@ -884,9 +884,18 @@ export const parseAnthropicCreds = (raw: string | undefined): AnthropicCreds | u
   try { return JSON.parse(raw) as AnthropicCreds; } catch { return undefined; }
 };
 
-// Curated Claude model ids for the panel dropdown — the OAuth Messages path has no Wisp-side /models
-// listing, so this mirrors the current Claude lineup. The anthropic row's defaultModel must stay a member.
-export const ANTHROPIC_MODELS: string[] = ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+// Curated Claude model ids — the OFFLINE FALLBACK for anthropicModelsFrom (the live models.dev list is
+// the primary source). The anthropic row's defaultModel must stay a member.
+export const ANTHROPIC_MODELS: string[] = ['claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+
+// Live Claude dropdown ids from models.dev — undated aliases only (dated -YYYYMMDD snapshots duplicate
+// them). Deliberately NO family whitelist: a brand-new family name must appear, never be filtered out.
+export const anthropicModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
+  const models = catalog?.anthropic?.models;
+  if (!models) return ANTHROPIC_MODELS;
+  const ids = Object.keys(models).filter((id) => !/-\d{8}$/.test(id));
+  return ids.length ? sortByReleaseDesc(models, ids) : ANTHROPIC_MODELS;
+};
 
 // ----------------------------- Anthropic client attestation ----------------------------- //
 
