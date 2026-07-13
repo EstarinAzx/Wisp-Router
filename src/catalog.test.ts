@@ -7,6 +7,7 @@ import {
   buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
   modelSupportsVision,
   parseModelsDevEntry, lookupModelsDevCaps,
+  oauthModelOptions, CODEX_MODELS, ANTHROPIC_MODELS,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -595,5 +596,27 @@ describe('diffLines', () => {
       { type: 'keep', text: 'b' },
       { type: 'keep', text: 'c' },
     ]);
+  });
+});
+
+describe('oauthModelOptions', () => {
+  // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider
+  // panel state and the per-row Routing-map lists (#53).
+  it('returns the Codex list for the codex kind (curated fallback without a catalog)', () => {
+    expect(oauthModelOptions(provider({ kind: 'codex' }), undefined)).toEqual(CODEX_MODELS);
+  });
+
+  it('returns the Claude list for the anthropic-oauth kind (curated fallback without a catalog)', () => {
+    expect(oauthModelOptions(provider({ kind: 'anthropic-oauth' }), undefined)).toEqual(ANTHROPIC_MODELS);
+  });
+
+  it('reads the models.dev catalog when present — same source as the main picker', () => {
+    const catalog = { anthropic: { models: { 'claude-sonnet-5': { release_date: '2025-09-29' } } } };
+    expect(oauthModelOptions(provider({ kind: 'anthropic-oauth' }), catalog)).toEqual(['claude-sonnet-5']);
+  });
+
+  // Keyed kinds answer undefined — they have a live /models route, not a curated list.
+  it('is undefined for keyed kinds', () => {
+    expect(oauthModelOptions(provider(), undefined)).toBeUndefined();
   });
 });

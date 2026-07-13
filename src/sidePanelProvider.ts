@@ -13,11 +13,13 @@
  *   - PanelHost: the shared action helpers injected from extension.ts (store/clear key, fetch
  *     model ids, set model/provider/baseUrl, read state + Activity) — avoids a circular import.
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
- *     | selectProvider{value} | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut
+ *     | selectProvider{value} | setBaseUrl{value} | refreshModels | fetchProviderModels{value: providerId}
+ *     | codexSignIn | codexSignOut
  *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
  *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
- *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
+ *   - Ext → webview messages: state{state} | models{ids} | modelsError{message}
+ *     | providerModels{providerId, ids} | activity{thinking}.
  */
 
 import * as vscode from 'vscode';
@@ -58,6 +60,7 @@ export type PanelHost = {
   storeApiKey: (value: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   fetchModelIds: () => Promise<string[]>;
+  fetchProviderModelIds: (providerId: string) => Promise<string[]>; // Routing-map row dropdowns (#53): any Provider, [] on failure
   setModel: (id: string) => Promise<void>;
   setProvider: (id: string) => Promise<void>;
   setBaseUrl: (url: string) => Promise<void>;
@@ -155,6 +158,14 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
         case 'refreshModels': {
           const ids = await this.host.fetchModelIds();
           void this.view?.webview.postMessage({ type: 'models', ids });
+          return;
+        }
+        case 'fetchProviderModels': {
+          // A Routing-map row's list (#53). Failures answer empty ids, never an error message —
+          // the row silently falls back to free text (AC: no error spam).
+          if (typeof msg.value !== 'string' || !msg.value) return;
+          const ids = await this.host.fetchProviderModelIds(msg.value).catch(() => []);
+          void this.view?.webview.postMessage({ type: 'providerModels', providerId: msg.value, ids });
           return;
         }
         case 'codexSignIn':
