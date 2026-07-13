@@ -27,6 +27,7 @@ import {
   type CodexCreds, type EffortLevel, type AnthropicCreds,
 } from './catalog';
 import { getModelsDevCatalog } from './modelsDev';
+import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from './routing';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer } from './bridgeServer';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from './bridgeAnthropic';
@@ -105,6 +106,8 @@ const PROVIDERS: Provider[] = [
 const MODEL_MAP_KEY = 'wisp.models';
 // globalState key for the Codex reasoning Effort — one global value (not per-model), same store as models.
 const EFFORT_KEY = 'wisp.effort';
+// globalState key for the Bridge Routing map (#51): { families, aliases } — read live per Bridge request.
+const ROUTING_MAP_KEY = 'wisp.routingMap';
 
 // ----------------------------- Module state ----------------------------- //
 
@@ -177,6 +180,9 @@ const activeModel = (): string =>
 // unchanged. Shared by Codex + Anthropic; ignored by every keyed Provider. Stored as the wider EffortLevel
 // (#32 'max'); each send site normalizes (standardEffortToCodex for Codex, the clamp for Anthropic).
 const activeEffort = (): EffortLevel => globalState.get<EffortLevel>(EFFORT_KEY) ?? DEFAULT_EFFORT;
+
+// The Bridge Routing map (globalState) — empty (everything → Active Provider) until the panel sets rows.
+const activeRoutingMap = (): RoutingMap => globalState.get<RoutingMap>(ROUTING_MAP_KEY) ?? EMPTY_ROUTING_MAP;
 
 // Base URL for the Active Provider. Built-ins use their hardcoded catalog URL; only Custom reads the
 // user-supplied, machine-scoped wisp.baseUrl (every built-in ignores that setting entirely).
@@ -295,6 +301,17 @@ const setEffort = async (effort: EffortLevel): Promise<void> => {
   void panel?.postState();
 };
 
+// Set or clear one Family route (#51). Same globalState-write pattern as setEffort: no config event
+// fires, so re-push the panel state explicitly. The Bridge reads the map live per request — the next
+// call picks the change up with no restart.
+const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Promise<void> => {
+  // Only catalog Providers may be a Target — a malformed webview message can't persist a dangling id.
+  if (target && !PROVIDERS.some((p) => p.id === target.providerId)) return;
+  const map = activeRoutingMap();
+  await globalState.update(ROUTING_MAP_KEY, { ...map, families: { ...map.families, [family]: target } });
+  void panel?.postState();
+};
+
 // Keep wisp.model honestly reflecting the Active Provider's model after a raw wisp.provider edit
 // (the panel has no part in Issue 4). Guarded against a write-loop: writes only when stale.
 const mirrorActiveModel = async (): Promise<void> => {
@@ -360,6 +377,8 @@ const getState = async (): Promise<PanelState> => {
     bridgeRunning: bridge.isRunning(),
     bridgeAddress: bridgeAddress(),
     bridgeSecret: bridge.isRunning() ? bridgeSecret : undefined,
+    // The Routing map's four Family rows (#51) — drives the panel's Bridge routing section.
+    routingFamilies: activeRoutingMap().families,
     // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
     // they cross the boundary only while running, like bridgeSecret.
     claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
@@ -845,6 +864,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     anthropicSignIn,
     anthropicSignOut,
     setEffort,
+    setFamilyRoute, // Routing map Family rows (#51) — set/clear one row
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,
@@ -869,6 +889,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     anthropicCreds: () => anthropicAuth.current(),
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
+    routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
     port: bridgePort,
     accessSecret: () => bridgeSecret,
     log: (m) => output.appendLine(m),

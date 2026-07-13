@@ -14,12 +14,14 @@
  *     model ids, set model/provider/baseUrl, read state + Activity) — avoids a circular import.
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
  *     | selectProvider{value} | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut
- *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}.
+ *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
+ *     | setFamilyRoute{value:{family,providerId,model}}.
  *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
  */
 
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
+import type { FamilyKey, Target } from './routing';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -41,6 +43,7 @@ export type PanelState = {
   bridgeAddress: string; // http://127.0.0.1:<port> — shown so the user knows what to point the CLI at
   bridgeSecret?: string; // the access secret, sent only while running (meant to be copied into the CLI)
   claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), sent only while running
+  routingFamilies?: { [K in FamilyKey]?: Target }; // the Routing map's four Family rows (#51)
 };
 
 // Shared with extension.ts so the no-key failure is recognizable as webview-safe text.
@@ -60,6 +63,7 @@ export type PanelHost = {
   anthropicSignIn: () => Promise<void>;
   anthropicSignOut: () => Promise<void>;
   setEffort: (effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') => Promise<void>;
+  setFamilyRoute: (family: FamilyKey, target: Target | undefined) => Promise<void>; // set/clear one Routing map Family row (#51)
   toggleBridge: () => Promise<void>; // start/stop the Bridge — the same lifecycle the command drives
   copyBridgeSecret: () => Promise<void>; // copy the access secret to the clipboard (host-side, webview can't)
   copyBridgeAddress: () => Promise<void>;
@@ -178,6 +182,16 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           // The webview only names the variant; the host rebuilds and copies its own values.
           if (msg.value === 'powershell' || msg.value === 'bash' || msg.value === 'settingsJson') await this.host.copyClaudeSnippet(msg.value);
           return;
+        case 'setFamilyRoute': {
+          // A Family row commit (#51): both halves present → the row's Target; an empty Provider or
+          // model → explicit unmapped. Family is constrained to the four fixed keys — junk is dropped.
+          const v = msg.value as { family?: unknown; providerId?: unknown; model?: unknown } | undefined;
+          if (v?.family !== 'opus' && v?.family !== 'sonnet' && v?.family !== 'haiku' && v?.family !== 'fable') return;
+          const providerId = typeof v.providerId === 'string' ? v.providerId.trim() : '';
+          const model = typeof v.model === 'string' ? v.model.trim() : '';
+          await this.host.setFamilyRoute(v.family, providerId && model ? { providerId, model } : undefined);
+          return;
+        }
       }
     } catch (err) {
       if (msg?.type === 'refreshModels') {
