@@ -37,7 +37,7 @@ import {
   type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
 import {
-  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, type AnthropicSseMeta,
+  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, anthropicErrorFrame, type AnthropicSseMeta,
 } from './bridgeAnthropic';
 
 // ----------------------------- Dependencies ----------------------------- //
@@ -447,8 +447,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      // A signed-out / refresh-failed OAuth provider throws here — a clean 502 (or end if the SSE head is out).
-      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
+      // Head already out (mid-stream failure) → write a proper Anthropic `error` event so Claude Code shows the
+      // real message instead of "empty or malformed"; otherwise a clean 502.
+      if (res.headersSent) { res.write(anthropicErrorFrame(String(err))); res.end(); }
+      else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
   };
 

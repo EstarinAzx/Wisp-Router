@@ -508,6 +508,10 @@ export type CodexResponsesBody = {
 const enforceStrictResponsesSchema = (schema: unknown): Record<string, unknown> => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {};
   const record: Record<string, unknown> = { ...(schema as Record<string, unknown>) };
+  // Codex strict mode accepts only a fixed closed shape; the dynamic-/open-object keywords 400 it
+  // (observed: Claude Code's AskUserQuestion carries `propertyNames`). Strip them at every level — Codex
+  // already forces additionalProperties:false + required-all, so these map-keywords are inert anyway.
+  for (const k of ['propertyNames', 'patternProperties', 'unevaluatedProperties', 'minProperties', 'maxProperties', 'dependencies', 'dependentSchemas']) delete record[k];
   if (record.type === 'object') {
     record.additionalProperties = false;
     const props = record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties)

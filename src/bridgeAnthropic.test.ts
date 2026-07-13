@@ -5,6 +5,7 @@ import {
   parseAnthropicMessagesRequest,
   buildAnthropicSse,
   buildAnthropicModelsList,
+  anthropicErrorFrame,
 } from './bridgeAnthropic';
 import type { ChatModelInfo } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
@@ -251,6 +252,16 @@ describe('buildAnthropicSse', () => {
   it('frames each event two-line + blank-line terminated', () => {
     const sse = buildAnthropicSse([], meta);
     expect(sse.endsWith('event: message_stop\ndata: {"type":"message_stop"}\n\n')).toBe(true);
+  });
+});
+
+describe('anthropicErrorFrame', () => {
+  // A mid-stream backend failure is surfaced as a proper Anthropic `error` event carrying the real message,
+  // so Claude Code shows it instead of reporting an empty/malformed response.
+  it('frames a backend error as an Anthropic error event', () => {
+    expect(anthropicErrorFrame('Codex API error 400: bad schema')).toBe(
+      'event: error\ndata: {"type":"error","error":{"type":"api_error","message":"Codex API error 400: bad schema"}}\n\n',
+    );
   });
 });
 

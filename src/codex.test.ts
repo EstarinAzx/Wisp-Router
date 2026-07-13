@@ -224,6 +224,20 @@ describe('toCodexResponsesTools', () => {
       properties: { list: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['x'], properties: { x: { type: 'number' } } } } },
     });
   });
+
+  // Codex strict mode rejects the dynamic-object keywords (400 "'propertyNames' is not permitted" — observed
+  // from Claude Code's AskUserQuestion tool). They are stripped at every level so the tool isn't rejected.
+  it('strips dynamic-object keywords Codex strict mode rejects', () => {
+    const [tool] = toCodexResponsesTools([{ name: 'ask', description: 'd', inputSchema: {
+      type: 'object',
+      properties: { answers: { type: 'object', propertyNames: { pattern: '^q' }, patternProperties: { '^q': { type: 'string' } } } },
+      minProperties: 1,
+    } }]);
+    expect(tool.parameters).toEqual({
+      type: 'object', additionalProperties: false, required: ['answers'],
+      properties: { answers: { type: 'object', additionalProperties: false, required: [] } },
+    });
+  });
 });
 
 describe('reduceResponsesToolCalls', () => {

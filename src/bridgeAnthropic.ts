@@ -224,6 +224,12 @@ export const buildAnthropicSse = (events: BridgeStreamEvent[], meta: AnthropicSs
   return out + enc.finish();
 };
 
+// An Anthropic `error` SSE frame. When a backend fails AFTER the SSE head is out there is no HTTP status left
+// to set, so the door writes this instead of silently truncating the stream — Claude Code then surfaces the
+// real message rather than reporting an "empty or malformed" response.
+export const anthropicErrorFrame = (message: string): string =>
+  frame('error', { type: 'error', error: { type: 'api_error', message } });
+
 // ----------------------------- Models: ChatModelInfo[] -> GET /v1/models ----------------------------- //
 
 // One entry of the Anthropic models list. created_at is fixed (the catalog has no per-Provider creation time
