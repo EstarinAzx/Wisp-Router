@@ -10,32 +10,35 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**Bridge Anthropic door — full `/preset init` funnel, design settled, tracker seeded. No code written.**
-The Bridge gets a second front door speaking Anthropic Messages so Claude Code routes through Wisp
-providers (headline: Codex OAuth / ChatGPT subscription inside Claude Code). Published on
-`EstarinAzx/Wisp-Router` (repo renamed from `Wisp` — old URLs redirect):
-- **PRD #43** (`ready-for-agent`) — spec + golden path; MVD also in `.context/happy-path.md`.
-- **Slices #44 → #47**, linear chain of blockers: gate → pure translator → wire live → panel snippet.
-- **#34 closed** as shipped. `CONTEXT.md` Bridge term now covers both dialects + the fallback rule.
-- Full decision record: `.context/decisions.md` 2026-07-13 entry.
+**Slice #44 (Anthropic-door gate) — DONE and CLOSED.** Canned door mounted on the Bridge (commit `5bb9da7`,
+pushed), real Claude Code driven against it (print mode + user's interactive picker session), all three
+acceptance criteria answered. **Full wire-fact record lives in issue #44's two comments — that is the
+contract slice #45 builds against.** Headlines: picker filters plain ids → locked decision `claude-wisp-*`
+aliases + inbound strip; `system` arrives as a block ARRAY; `role:"system"` turns appear inside `messages`;
+background tier sends stock `claude-haiku-4-5-20251001` with forced `tool_choice` + `temperature:0`.
+Bridge auth permanently widened (`x-api-key` OR Bearer). 244 tests green.
 
 ## Next task
-**Slice #44 — the gate.** Canned `/v1/models` (mix plain `wisp-*` and `claude-wisp-*` ids) + echo
-`/v1/messages` mounted on the running Bridge; point a real Claude Code session at it via the env snippet
-(`ANTHROPIC_BASE_URL`, secret, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`); record as an issue comment:
-picker-filter verdict, which auth header arrived, `system` array shape, main + background-tier model strings.
-Enter with `/preset scope 44`.
+**Slice #45 — the pure translator pair + Vitest.** Inbound: Anthropic Messages request → normalized Wisp
+turns (flatten system array, mid-messages system role, map forced `tool_choice` + `temperature`, ignore
+`thinking`/`context_management`/`output_config`/`metadata`/`cache_control`). Outbound: Wisp stream →
+Anthropic SSE (message_start → content_block deltas incl. `input_json_delta` tool streaming → message_delta
+with stop reason → message_stop). Pure module beside `src/bridge.ts`, tests beside `bridge.test.ts`, external
+behavior only. Read issue #44's comments first. Enter with `/preset scope 45`.
 
 ## Landmines
-- **Claude Code reads env at startup only** — every env change needs a fresh terminal/`claude` restart.
-- **Never suggest the global `~/.claude/settings.json` env block** — highest precedence, silently reroutes
-  every Claude Code session (including the user's real-subscription ones). Per-session shell line or
-  project-scoped `.claude/settings.json` only. Banned in PRD #43 + slice #47.
-- **Active-Provider fallback already exists on the Bridge** (prior session, verified with the real Copilot
-  binary) — slice #46 reuses it; don't build new routing.
-- **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap serves a stale panel).
-- Older carry-overs: agent-mode vision flake still OPEN (probe plan in `active-work.md`);
-  `handleAnthropicChat` outbound image drop; Copilot catalog-warning env vars. All optional.
+- **The gate routes in `bridgeServer.ts` are THROWAWAY** — #45/#46 replace them; only the widened `authOk`
+  stays. Don't build on the canned handlers.
+- **Background tier hits the door with a real haiku id** — never 404 unknown `claude-*`; the live
+  Active-Provider fallback absorbs it (reuse, don't rebuild).
+- **Forced `tool_choice` must round-trip** — background calls use `{"type":"tool","name":…}`; the OpenAI-door
+  path hardcodes `'auto'`, translator can't.
+- **Never suggest the global `~/.claude/settings.json` env block** (hijacks every session) — per-session
+  shell line or project `.claude/settings.json` only (banned in PRD #43 / slice #47).
+- **Claude Code reads env at startup only** — fresh terminal after any env change.
+- **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap).
+- Gate harness trick if wire capture is needed again: stub-deps node script over `createBridgeServer`
+  (vscode-free chain) + nested `claude -p` with `ANTHROPIC_*` env — no F5 needed.
 
 ## Related
-- [[active-work]] · [[overview]] · [[happy-path]] · [[decisions]]
+- [[active-work]] · [[overview]] · [[happy-path]] · [[decisions]] · [[api]]

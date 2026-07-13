@@ -1,7 +1,7 @@
 ---
 type: api
 project: wisp
-updated: 2026-06-24
+updated: 2026-07-13
 tags: [context, api, vscode]
 ---
 
@@ -42,7 +42,8 @@ translator; node `http` stdlib, no web framework. OFF by default — started/sto
 **and** the side-panel switch, through the shared `startBridge`/`stopBridge` in `extension.ts` (#38). Binds
 **`127.0.0.1`** on `wisp.bridge.port`. The deps seam mirrors `chatProvider.ts`'s `ChatProviderDeps` (providers +
 model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns secrets.
-- **Auth:** every request needs `Authorization: Bearer <access-secret>` (constant-time compare); mismatch → **401**.
+- **Auth:** every request needs the access secret via `Authorization: Bearer` **or** `x-api-key` (#44 — Claude
+  Code sends whichever matches the env var used; constant-time compare); mismatch → **401**.
   The secret is **auto-generated** (`randomBytes(32)` base64url, #38), stored in SecretStorage slot
   **`wisp.bridge.secret`** once and reused, surfaced in the panel with Copy, and held in a module var only while
   running (`accessSecret: () => bridgeSecret`, `''` when stopped — the sync auth check can't `await` SecretStorage).
@@ -73,6 +74,10 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
 - **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...))` — the usable Provider ids
   (`{id, object:'model', created:0, owned_by:'wisp'}`): keyed = has a key, **`codex` = signed in** (#39),
   **`anthropic` = signed in** (#40).
+- **Anthropic-door gate routes (#44, THROWAWAY until #45/#46):** requests carrying `anthropic-version` or
+  `x-api-key` get the Anthropic dialect — `GET /v1/models` serves a **hardcoded** Anthropic-shape list (mixed
+  plain + `claude-wisp-*` ids, the picker experiment) and `POST /v1/messages` (exact path only — `count_tokens`
+  404s) logs wire facts + streams one canned SSE turn. Findings on issue #44; real translators replace this.
 - **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts` +
   `codexStream`. See [[decisions]] 2026-06-24 (#39 Codex send-path) and the PowerShell test trap in [[gotchas]].
 
