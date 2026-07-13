@@ -10,26 +10,28 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**The Anthropic door SHIPPED — v1.5.0 (pre-release).** Branch `feat/anthropic-door` (slices #45/#46/#47 +
-effort threading + label fix, all demo-verified vs real Claude Code) was PR'd to `main`, merged, tagged
-`v1.5.0`, and released on GitHub as a **pre-release** with the `.vsix` attached. Issues #45/#46/#47 closed
-on merge. CHANGELOG got the 1.5.0 entry (+ a 1.4.3 backfill); README's Bridge section now documents both
-dialects + the Claude Code setup snippets. PRD #43 is fully delivered.
+**Live OAuth model lists SHIPPED to PR.** Branch `feat/live-oauth-model-lists`: Codex + Anthropic panel
+dropdowns and picker caps now read models.dev live (newest-first), curated lists demoted to offline
+fallback (refreshed with the 5.6 family + claude-sonnet-5). 282 tests green, demo-verified (Terra/Luna
++ Sonnet-5/Fable-5 in the dropdowns, messaging works, real ~1M window for 5.6). Spec + plan in
+`docs/superpowers/`.
 
 ## Next task
-**None queued — the slate is clean. Next session is open for new PRDs** (`/preset init` for a fresh idea,
-or `/preset catch-up` to orient). Optional known follow-ups if nothing new lands:
-- Agent-mode vision flake (root cause not pinned — see active-work Open questions).
-- `handleAnthropicChat` outbound image drop (Bridge OpenAI door).
-- OpenAI-door Codex path still sends strict tools (same limit #46 fixed on the Anthropic door).
-- Forced `tool_choice` + `temperature` carried but not threaded (deliberate — don't fix unasked).
+1. **If the PR is still open:** merge it (branch: `feat/live-oauth-model-lists` → main). Consider a
+   v1.5.1 release tag if the user wants it installable.
+2. **Then the user's stated next thing: TUI PRD for Wisp** — run `/preset init` on it.
+3. Queued idea from this session (file as issue/PRD before building): **claude-name routing map** —
+   panel-configurable per-family aliases so bare `claude-*` ids from bridged Claude Code (Opus/Sonnet/
+   Haiku/Fable picks, /advisor, background haiku calls) route to a chosen Provider+model each, instead
+   of all collapsing to the Active Provider. Payoff: advisor = real Opus while main = Codex; haiku
+   chores = cheap model.
 
 ## Landmines
 - **`Ctrl+R` in the Extension Dev Host runs the STALE build** — `npm run compile` first, or stop→F5.
 - **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap).
-- **PowerShell is the user's default shell**; `claude` reads env at startup only → fresh terminal after
-  any env change.
-- **v1.5.0 is marked pre-release** — promote to a full release only after real-world soak.
+- **Local `main` carries the spec/plan docs commits** (made before branching) — after the PR merges,
+  a plain `git pull` on main reconciles; don't force anything.
+- **v1.5.0 is still a pre-release** — promote after soak, or fold into v1.5.1 with this feature.
 
 ## Related
-- [[active-work]] · [[overview]] · [[api]] · [[decisions]] · [[gotchas]] · [[happy-path]]
+- [[active-work]] · [[overview]] · [[api]] · [[decisions]] · [[gotchas]]

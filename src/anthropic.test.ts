@@ -6,7 +6,7 @@ import {
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds,
   base64url, codeVerifier, codeChallenge, oauthState,
   anthropicFingerprint, anthropicAttribution,
-  buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps,
+  buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor,
   type Provider, type SseEvent,
 } from './catalog';
@@ -349,6 +349,29 @@ describe('anthropicModelCaps', () => {
     expect(anthropicModelCaps('claude-opus-4-8')).toEqual({ contextInput: 1_000_000, maxOutput: 128_000, vision: true });
     expect(anthropicModelCaps('claude-sonnet-4-6')).toEqual({ contextInput: 1_000_000, maxOutput: 64_000, vision: true });
     expect(anthropicModelCaps('claude-haiku-4-5')).toEqual({ contextInput: 200_000, maxOutput: 64_000, vision: true });
+  });
+});
+
+describe('anthropicModelsFrom', () => {
+  const catalog = {
+    anthropic: {
+      models: {
+        'claude-opus-4-8': { release_date: '2026-05-28' },
+        'claude-sonnet-5': { release_date: '2026-06-29' },
+        'claude-haiku-4-5': { release_date: '2025-10-01' },
+        'claude-haiku-4-5-20251001': { release_date: '2025-10-01' }, // dated snapshot → dropped
+        'claude-fable-5': { release_date: '2026-07-01' }, // unknown family → kept (no whitelist)
+      },
+    },
+  };
+
+  it('drops dated snapshots, keeps every undated id newest-first — no family whitelist', () => {
+    expect(anthropicModelsFrom(catalog)).toEqual(['claude-fable-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-haiku-4-5']);
+  });
+
+  it('falls back to the curated list when the catalog is absent or empty', () => {
+    expect(anthropicModelsFrom(undefined)).toEqual(ANTHROPIC_MODELS);
+    expect(anthropicModelsFrom({ anthropic: { models: {} } })).toEqual(ANTHROPIC_MODELS);
   });
 });
 

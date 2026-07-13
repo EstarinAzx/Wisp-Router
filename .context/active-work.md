@@ -7,69 +7,60 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-13 by Fable 5._
-_SHIPPED: `feat/anthropic-door` merged to `main`, tagged `v1.5.0`, GitHub **pre-release** with `.vsix`. #45/#46/#47 closed. No task queued — next session opens on new PRDs._
+_Last updated: 2026-07-13 21:15 by Fable 5 (auto)._
+_At commit: 0030295 on `feat/live-oauth-model-lists` (PR to main in flight this session)._
 
 ## Current focus
-**Bridge Anthropic door — route Claude Code through Wisp providers. PRD #43. BRANCH COMPLETE.**
-The door is live and proven end-to-end against real Claude Code: `/model` lists Wisp providers, Codex OAuth +
-keyed OpenCode Go both stream and tool-round-trip, the panel serves copy-paste setup snippets, and Claude
-Code's `/effort` now drives the backend.
+**Live OAuth model lists — panel dropdowns + picker caps for Codex/Anthropic now come from models.dev.**
+Hardcoded lists went stale (gpt-5.6 Sol/Terra/Luna missing); now both OAuth dropdowns and their context
+windows read the already-cached models.dev catalog, curated lists demoted to offline fallback. BRANCH
+COMPLETE, demo-verified; wrap-up + ship running.
 
 ## State
-- **Done this session (3 commits on `feat/anthropic-door`):**
-  - **Slice #47 (`7ee12e9`) — panel Claude Code setup section.** `buildClaudeCodeSnippets` (pure, tested in
-    `bridgeAnthropic.ts`) → three variants (PowerShell / bash per-session lines, project
-    `.claude/settings.json` env block) rendered in the Bridge section while running, Copy per variant
-    (host-side rebuild — webview only names the variant), Bridge-off explainer, restart-claude hint. No
-    global `~/.claude/settings.json` variant anywhere (PRD ban). Demo-verified: copy → fresh terminal →
-    `claude` reached the door.
-  - **Effort threading (`15ae28b`) — user-directed, reverses the "panel effort only" deferral.** The door
-    reads `output_config.effort` (where Claude Code's `/effort` rides), validated against the ladder;
-    overrides the panel effort for the door's Codex + Anthropic sends (`max` folds to `xhigh` on Codex).
-    Absent/junk → panel effort as before. One log line per door call names which effort won
-    (`[bridge] messages codex effort=max (claude code)`) — demo-verified live at xhigh/high/max.
-  - **Label fix (`df83e7d`) — Bridge discovery labels drop the effort suffix.** `buildChatModelInfos` was
-    falling back to DEFAULT_EFFORT when no effort threaded → both doors' lists pinned "· medium" forever.
-    Suffix now only when the caller threads an effort: in-VS-Code Copilot picker keeps it (live panel
-    value), Bridge doors stay bare. Demo-verified: `/model` shows `Codex — gpt-5.6-sol` clean.
-  - **278 unit tests green, tsc + vite clean, `out/` + `dist/` rebuilt.**
-- **In flight:** nothing.
+- **Done this session (4 feat commits on `feat/live-oauth-model-lists` + spec/plan docs):**
+  - `codexModelsFrom` / `anthropicModelsFrom` (catalog.ts, tested): models.dev ids, newest-first by
+    `release_date`. Codex filter keeps `gpt-5*`/`o3*`/`o4-mini*`, drops `-pro/-nano/-chat-latest/
+    -deep-research`; Anthropic drops dated `-YYYYMMDD` snapshots, NO family whitelist. Empty/absent
+    catalog → curated fallback (refreshed: +5.6 Sol/Terra/Luna, +claude-sonnet-5).
+  - `getState` (extension.ts) races `getModelsDevCatalog()` vs 4s timeout → `modelOptions`; panel never
+    stalls offline.
+  - chatProvider caps closure prefers `lookupModelsDevCaps(catalog,'openai'/'anthropic',…)` over the
+    regex tables → gpt-5.6's real ~1M window in the picker.
+  - 282 tests green, tsc+vite clean, live models.dev round-trip smoke passed, user demo-verified
+    (Terra/Luna + Sonnet-5/Fable-5 visible, messaging works).
+- **In flight:** wrap-up + ship (push branch, PR to main).
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **Nothing queued — PRD #43 fully delivered and released (v1.5.0 pre-release).** New PRDs enter via
-   `/preset init`.
-2. Older optional follow-ups (unchanged): agent-mode vision flake (Open questions), `handleAnthropicChat`
-   outbound image drop, Copilot catalog-warning env vars, and the OpenAI-door Codex path's strict-tool limit
-   (same as #46's fix, deferred — Copilot's tools may be simpler).
+1. If the PR isn't merged yet: check it, merge, consider whether this warrants v1.5.1.
+2. Next new work, user-stated: **TUI PRD for Wisp** via `/preset init` (user's words: "before i init for
+   the tui i plan for wisp").
+3. Also queued: **claude-name routing map** feature idea — per-family aliases so bare Claude ids
+   (opus/sonnet/haiku/fable) picked in bridged Claude Code map to chosen Provider+model instead of all
+   collapsing to Active Provider (advisor→real Opus, haiku chores→cheap model). File as GitHub issue /
+   PRD before building.
 
 ## Skills for next session
 - /preset pick-up — resume from the note.
-- /preset init — start a fresh PRD (the expected door).
+- /preset init — the TUI PRD (and/or the routing-map PRD).
 
 ## Open questions
-- **Still deferred by design:** forced `tool_choice` + `temperature` are carried on `parsed` but NOT
-  threaded (each backend's tool_choice API differs) — the background tip call degrades to a no-op. Effort
-  is no longer deferred (threaded this session). See `ponytail:` note in `bridgeServer.ts`.
-- **Claude Code's banner "· model · effort" suffix doesn't repaint after `/effort`** — hardcoded Claude
-  Code UI, no knob (checked docs via claude-code-guide agent). The Wisp log line is the truth; `/feedback`
-  upstream is the only lever. Not ours.
-- **Agent-mode vision intermittent — root cause NOT pinned (OPEN, pre-existing).** Plain/Ask mode reads
-  images reliably; agent mode sometimes answers "attachment empty". To resolve: re-add the probe in
-  `chatProvider.ts` `provideLanguageModelChatResponse`, F5, reproduce a FAILURE, read the pair.
+- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded; agent-mode
+  vision flake root cause open; OpenAI-door Codex strict-tools limit.
 
 ## Recent context
-- **`Ctrl+R` runs the stale build** — `npm run compile` first, or full stop→F5. See [[gotchas]].
-- **Model routing:** the door sends **Wisp's** configured Provider model (`resolveModel`), NOT Claude Code's
-  picked id — the inbound `model` only routes (named id → Provider, unknown/raw `claude-*` → Active Provider).
-- Claude Code gateway contract (empirical, issue #44 comments): `x-api-key`←`ANTHROPIC_API_KEY`,
-  `Bearer`←`ANTHROPIC_AUTH_TOKEN`, `anthropic-version` on every call (the dialect-flavoring signal), discovery
-  needs `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, env read at startup only (fresh terminal after change).
+- **Bridge routing truth (re-confirmed live):** bare Claude names (Opus/Sonnet/Haiku/Fable picks, the
+  /advisor model, background haiku calls) all send raw `claude-*` ids → Active Provider + its panel
+  model. Only named `Provider — model` entries route specifically. User now understands labels ≠ brain.
+- Billing: bridged Claude Code can't touch API billing — env "key" is the bridge secret; Anthropic
+  provider rides Claude.ai subscription OAuth.
+- models.dev carries new ids within hours (gpt-5.6-sol 2026-07-09 was present 4 days later with full
+  caps); TTL 30min, one shared cached fetch.
+- Codex dropdown from live data is ~21 ids (top: 5.6 family) — long but ordered newest-first; no
+  complaints yet.
 
 ## Related
 - [[overview]]
-- [[happy-path]] — both Bridge golden paths (Copilot door + Anthropic door)
-- [[api]] — Bridge endpoints incl. the LIVE Anthropic door (#45–#47) + panel state shape
-- [[decisions]] — 2026-07-13 effort threading (reverses the panel-effort deferral) + non-strict Codex door tools
-- [[gotchas]] — stale-build trap, non-strict door tools, PowerShell curl trap, F5 dup trap
+- [[api]] — panel state (`modelOptions` now models.dev-sourced) + Bridge doors
+- [[decisions]] — 2026-07-13 live-lists entry (filter rules, fallback contract)
+- [[gotchas]] — stale-build + dup-panel traps (still the F5 landmines)
