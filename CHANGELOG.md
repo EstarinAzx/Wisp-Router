@@ -4,6 +4,48 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-07-13
+
+The Anthropic door: run **Claude Code** on your Wisp providers.
+
+### Added
+
+- **Bridge Anthropic door.** The Bridge now speaks Anthropic's Messages protocol alongside
+  the OpenAI one: `POST /v1/messages` + Anthropic-flavored `GET /v1/models` on the same
+  listener. Point **Claude Code** at the Bridge (`ANTHROPIC_BASE_URL` + the access secret)
+  and every Wisp provider — including your **ChatGPT (Codex) subscription** — appears in
+  Claude Code's own `/model` picker (as `claude-wisp-*` rows) and runs its coding tasks:
+  streaming, full tool round-trips, per-request routing.
+- **Claude Code setup snippets in the side panel.** With the Bridge running, the Bridge
+  section offers ready-to-copy setup variants built from the live address + secret:
+  per-session shell lines (PowerShell and bash) and a persistent project
+  `.claude/settings.json` env block. No hand-typing, and no global `~/.claude` variant
+  (it would silently reroute every Claude Code session).
+- **Claude Code's `/effort` drives the backend.** The door reads the request's
+  `output_config.effort` and forwards it to the provider, overriding the panel Effort
+  (`max` folds to `xhigh` on Codex, whose wire tops out there). No effort on the request →
+  the panel Effort applies, as before.
+
+### Fixed
+
+- **Bridge model lists no longer pin a frozen "· medium" onto Codex rows.** The effort
+  suffix now appears only where a live effort value backs it (the in-VS-Code picker);
+  Bridge discovery labels stay bare.
+- **Mid-stream backend failures surface as a proper Anthropic `error` SSE event** instead
+  of a truncated stream Claude Code reported as an empty/malformed response.
+- **External toolsets forward to Codex non-strict.** Claude Code's rich tool schemas
+  (dynamic maps like `AskUserQuestion`) can't be strict-coerced; the door now sends them
+  `strict: false`. The native VS Code agent path keeps strict mode.
+
+## [1.4.3] — 2026-07-06
+
+### Fixed
+
+- **DeepSeek agent-mode 400 on no-arg tools.** VS Code no-arg tools arrive with no
+  `inputSchema`; `toOpenAiTools` defaulted it to a bare `{}`, which DeepSeek rejects.
+  Now defaults to `{ type: "object", properties: {} }`, matching the Codex and Anthropic
+  tool builders (backfilled — this entry was missing when v1.4.3 shipped).
+
 ## [1.4.2] — 2026-07-06
 
 ### Fixed

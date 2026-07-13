@@ -8,7 +8,7 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-13 by Fable 5._
-_On branch `feat/anthropic-door` at `df83e7d` (NOT pushed). Slices #45–#47 ALL done + demo-verified; branch complete — PR to main is the next move._
+_SHIPPED: `feat/anthropic-door` merged to `main`, tagged `v1.5.0`, GitHub **pre-release** with `.vsix`. #45/#46/#47 closed. No task queued — next session opens on new PRDs._
 
 ## Current focus
 **Bridge Anthropic door — route Claude Code through Wisp providers. PRD #43. BRANCH COMPLETE.**
@@ -38,15 +38,15 @@ Code's `/effort` now drives the backend.
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **Open ONE PR `feat/anthropic-door` → `main`** (`/preset ship`) — closes #45/#46/#47 (all still OPEN on
-   GitHub, they close on merge). Branch has 7 commits `5089a32`→`df83e7d`, not pushed.
+1. **Nothing queued — PRD #43 fully delivered and released (v1.5.0 pre-release).** New PRDs enter via
+   `/preset init`.
 2. Older optional follow-ups (unchanged): agent-mode vision flake (Open questions), `handleAnthropicChat`
    outbound image drop, Copilot catalog-warning env vars, and the OpenAI-door Codex path's strict-tool limit
    (same as #46's fix, deferred — Copilot's tools may be simpler).
 
 ## Skills for next session
 - /preset pick-up — resume from the note.
-- /preset ship — push + PR the branch (step 1 above).
+- /preset init — start a fresh PRD (the expected door).
 
 ## Open questions
 - **Still deferred by design:** forced `tool_choice` + `temperature` are carried on `parsed` but NOT
