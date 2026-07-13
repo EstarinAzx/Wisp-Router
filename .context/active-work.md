@@ -1,41 +1,41 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-13
+updated: 2026-07-14
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-13 by Fable 5 (auto)._
-_At commit: f9c0519 on `feat/routing-map-family-routes` (slice 1 committed, NOT yet pushed/PR'd)._
+_Last updated: 2026-07-14 by Fable 5 (auto)._
+_At commit: 8d6be05 on `feat/routing-map-family-routes` (#51 + vision bugfix committed, NOT yet pushed/PR'd)._
 
 ## Current focus
-**Bridge Routing map — slice 1 (#51) BUILT and demo-verified; needs ship, then #52.** Family routes
-work end to end: demo showed `[bridge] route family 'claude-sonnet-5' -> codex model=gpt-5.6-sol`
-with a live Claude Code session answering from the pinned Codex model.
+**Ship the branch.** It now carries #51 (Routing map slice 1, `f9c0519`) PLUS a live-verified Anthropic-door
+vision bugfix (`ab21c18`, `8d6be05`). All demo-verified; `/preset ship` is the next mechanical step, then #52.
 
 ## State
-- **Done this session (#51, commit f9c0519):**
-  - `src/routing.ts` — pure resolver, built COMPLETE per ticket: Provider id → Alias exact → Family
-    fuzzy (`claude-*` any version/date suffix) → Active fallback; dangling Target → undefined → door
-    404s loud. Alias LOGIC included ahead of the #52 UI.
-  - `src/routing.test.ts` — TDD'd full decision table, 14 tests. Suite 296/296 green.
-  - `bridgeServer.ts` — both doors route via one `routeFor`; pinned model overrides panel model at all
-    four send sites (routed requests only); one `[bridge] route …` log line per request.
-  - `extension.ts` — map in globalState `wisp.routingMap`, read live per request; `setFamilyRoute`
-    validates Target providerId against the catalog.
-  - Panel — Bridge → "Routing map": four always-visible Family rows (Provider dropdown + free-text
-    model, explicit Unmapped state, webview-local drafts).
-  - Subagent review: fixed catalog validation; SKIPPED provider-rename migration for stored Targets
-    (YAGNI — write the migration when a rename happens; fail-loud 404 covers it) and draft-resync on
-    failed host write (globalState.update can't realistically fail; reopen reseeds).
-- **In flight:** branch `feat/routing-map-family-routes` committed locally, not pushed — `/preset ship`
-  is the next mechanical step.
+- **Done this session (vision bugfix, commits ab21c18 + 8d6be05):**
+  - **Bug 1 — inline attach dead on the Anthropic provider path only:** `startProviderStream` in
+    `bridgeServer.ts` forwarded `images` on the Codex + keyed paths but omitted them on the Anthropic
+    path. One-word fix (`images: t.images`). Codex/keyed inline attach was never broken.
+  - **Bug 2 — Read-on-image dead on ALL door paths:** `splitUserBlocks` in `bridgeAnthropic.ts`
+    flattened `tool_result` content to text, dropping the image block Claude Code's Read tool returns.
+    Fix: hoist tool_result images into the turn's `images[]` (normalized shape has no per-result slot).
+    TDD'd (`bridgeAnthropic.test.ts` hoist test). Suite 297/297.
+  - **Observable added:** the door's per-request log line now ends `images=N` — 0 means the client never
+    sent pixels, >0 means any blindness is downstream of the door.
+  - **Live-verified by user:** Anthropic-bound model reads inline attach; codex path proven clean
+    (`images=1` on the attach turn, `images=2` after Read). GPT calling Read despite inline pixels is
+    model habit, NOT a Wisp bug — the source-path text Claude Code sends with every attach baits it.
+- **Done earlier on this branch (#51, commit f9c0519):** pure resolver `src/routing.ts` (id → alias →
+  family → active) + 14-test decision table; both doors route via `routeFor` with pinned-model override;
+  map in globalState `wisp.routingMap`; panel Family rows.
+- **In flight:** branch committed locally, not pushed.
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **`/preset ship`** — push the branch, open the PR for #51, merge.
+1. **`/preset ship`** — push the branch, open the PR (covers #51 + the vision fix), merge.
 2. **#52 Aliases + models list** — panel add/remove Alias rows (name + Target; panel must refuse an
    Alias shadowing a Provider id) + advertise aliases in both doors' `GET /v1/models`. Resolver needs
    NO changes — alias lookup already built + tested in `routing.ts`.
@@ -46,15 +46,16 @@ with a live Claude Code session answering from the pinned Codex model.
 - /preset ship — if the PR still isn't open.
 
 ## Open questions
-- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded; agent-mode
-  vision flake root cause open; OpenAI-door Codex strict-tools limit.
+- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded; OpenAI-door
+  Codex strict-tools limit. (The old "agent-mode vision flake" open question is likely EXPLAINED by
+  bug 1/2 above — retest before reopening it.)
 
 ## Recent context
-- Routing seam now: `routeFor` in `bridgeServer.ts` (logs + resolves), called by `handleChat` and
-  `handleAnthropicMessages`; pinned model threads as a param into `handleCodexChat` /
-  `handleAnthropicChat` / `startProviderStream` and the keyed path (`pinnedModel ?? resolveModel`).
-- Anthropic door routes POST-alias-strip: `claude-wisp-<id>` → Provider id; stock `claude-*`
-  (background tier) → Family rows. Verified in demo.
+- Vision seam now: inline attach → `splitUserBlocks` images; Read-on-image → tool_result hoist into the
+  same `images[]`; all three `startProviderStream` paths forward them; send-builders emit
+  `image` (Anthropic) / `input_image` (Codex) / `image_url` (keyed) blocks.
+- Debugging a "model can't see image" report: check the Wisp output channel `images=N` first — see
+  [[gotchas]] (2026-07-14 entry).
 - #52's models-list surface: OpenAI door `buildModelsList`, Anthropic door `buildAnthropicModelsList`
   (`bridgeAnthropic.ts`) — aliases must appear in both; Claude Code's own /model picker can't list
   them (hardcoded), users type `/model <alias>`.
@@ -63,7 +64,7 @@ with a live Claude Code session answering from the pinned Codex model.
 
 ## Related
 - [[overview]]
-- [[api]] — Bridge doors + Routing map (now live, documented)
-- [[decisions]] — 2026-07-13 Routing-map entry (rejected paths: wildcards, silent fallback)
-- [[gotchas]] — stale-build + dup-panel traps (still the F5 landmines)
+- [[api]] — Bridge doors + Routing map (live, documented)
+- [[decisions]] — 2026-07-13 Routing-map entry · 2026-07-14 tool_result-image-hoist entry
+- [[gotchas]] — stale-build + dup-panel traps · images=N vision-debug entry
 - [[happy-path]] — "Bridge Routing map" MVD
