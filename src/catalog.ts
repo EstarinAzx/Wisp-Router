@@ -298,9 +298,11 @@ export const buildChatModelInfos = (
     const outputBudget = dyn?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const maxOutputTokens = Math.min(outputBudget, Math.max(1, Math.floor(totalContext / 2)));
     const maxInputTokens = Math.max(totalContext - maxOutputTokens, 1);
-    // Codex reasoning rows mirror the active Effort in the picker label (· medium). Reuse codexReasoning's
-    // gate so an inert spark/gpt-4.x row never claims a depth; non-Codex rows never get a suffix.
-    const depth = isCodexProvider(p) && codexReasoning(model) ? ` · ${state.effort ?? DEFAULT_EFFORT}` : '';
+    // Codex reasoning rows mirror the active Effort in the picker label (· medium) — but only when the
+    // caller threads one (the in-VS-Code picker does). The Bridge doors don't: their effort is per-request
+    // (Claude Code's /effort), so a static label would show DEFAULT_EFFORT forever — noise, and a lie.
+    // codexReasoning still gates so an inert spark/gpt-4.x row never claims a depth.
+    const depth = isCodexProvider(p) && state.effort && codexReasoning(model) ? ` · ${state.effort}` : '';
     return [{
       id: p.id,
       name: `${p.label} — ${model}${depth}`,
