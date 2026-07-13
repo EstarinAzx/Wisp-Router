@@ -309,6 +309,24 @@ describe('buildAnthropicModelsList', () => {
   it('returns an empty list when there are no providers', () => {
     expect(buildAnthropicModelsList([])).toEqual({ data: [], has_more: false, first_id: null, last_id: null });
   });
+
+  // Alias advertising (#52): aliases ride after the Providers, claude-wisp- prefixed like every listed id
+  // (the inbound parse strips the prefix back to the raw alias name, so a picked entry round-trips to the
+  // alias route). display_name carries the pinned model like the Provider rows do ('Codex — gpt-5').
+  // The list is exactly Providers + aliases — Family routes never appear.
+  it('appends claude-wisp- aliased Alias names and lists nothing else', () => {
+    const list = buildAnthropicModelsList([modelInfo('codex', 'Codex — gpt-5')], [{ name: 'sol', model: 'gpt-5.6-terra' }]);
+    expect(list.data.map((m) => m.id)).toEqual(['claude-wisp-codex', 'claude-wisp-sol']);
+    expect(list.data[1]).toEqual({ type: 'model', id: 'claude-wisp-sol', display_name: 'sol — gpt-5.6-terra', created_at: '2025-01-01T00:00:00Z' });
+    expect(list.last_id).toBe('claude-wisp-sol');
+  });
+
+  // The pinned model in the row is a per-user preference (wisp.bridge.aliasPickerShowsModel): an alias
+  // arriving without a model renders bare — no dangling ' — '.
+  it('renders a bare alias name when no model is passed', () => {
+    const list = buildAnthropicModelsList([], [{ name: 'sol' }]);
+    expect(list.data[0].display_name).toBe('sol');
+  });
 });
 
 describe('buildClaudeCodeSnippets', () => {

@@ -288,4 +288,12 @@ describe('buildModelsList', () => {
   it('returns an empty list when there are no providers', () => {
     expect(buildModelsList([])).toEqual({ object: 'list', data: [] });
   });
+
+  // Alias advertising (#52): alias names ride the list after the Provider ids so pickers (Copilot CLI)
+  // offer them. The list is exactly ids + aliases — Family routes never appear.
+  it('appends alias names after the Provider ids and lists nothing else', () => {
+    const list = buildModelsList([modelInfo('codex')], ['sol', 'lite']);
+    expect(list.data.map((m) => m.id)).toEqual(['codex', 'sol', 'lite']);
+    expect(list.data[1]).toEqual({ id: 'sol', object: 'model', created: 0, owned_by: 'wisp' });
+  });
 });

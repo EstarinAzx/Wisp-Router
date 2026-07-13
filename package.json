@@ -147,6 +147,11 @@
           "scope": "machine",
           "default": 41184,
           "description": "Port the Bridge listener binds on 127.0.0.1 (the local OpenAI-compatible endpoint external tools point at). Machine-scoped so a workspace cannot move the listener. Change it if the default clashes with another local service."
+        },
+        "wisp.bridge.aliasPickerShowsModel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the alias's pinned model id in Claude Code's /model picker ('sol — gpt-5'). Off lists the bare alias name ('sol'). Claude Code fetches the list at startup, so a change shows after its next restart."
         }
       }
     }

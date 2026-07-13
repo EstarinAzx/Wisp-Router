@@ -64,6 +64,7 @@ export type BridgeDeps = {
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
+  aliasPickerShowsModel: () => boolean;                          // wisp.bridge.aliasPickerShowsModel — alias picker rows carry the pinned model id (#52)
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
@@ -156,14 +157,22 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     return route;
   };
 
-  // GET /v1/models — the OpenAI-door discovery list (one entry per usable Provider id).
-  const handleModels = async (res: http.ServerResponse): Promise<void> =>
-    sendJson(res, 200, buildModelsList(await computeModelInfos()));
+  // The Routing-map Alias names (#52), read live so a panel edit shows up on the next list fetch.
+  const aliasNames = (): string[] => deps.routingMap().aliases.map((a) => a.name);
 
-  // GET /v1/models — the Anthropic-door discovery list: the same usable Providers in Anthropic shape, ids
-  // aliased claude-wisp-<id> so Claude Code's /model picker lists them (slice #44's decision).
+  // GET /v1/models — the OpenAI-door discovery list (one entry per usable Provider id, then the Aliases).
+  const handleModels = async (res: http.ServerResponse): Promise<void> =>
+    sendJson(res, 200, buildModelsList(await computeModelInfos(), aliasNames()));
+
+  // GET /v1/models — the Anthropic-door discovery list: the same usable Providers + Aliases in Anthropic
+  // shape, ids aliased claude-wisp-<id> so Claude Code's /model picker lists them (slice #44's decision).
+  // Aliases carry their pinned model so the picker row reads 'sol — gpt-5', like the Provider rows —
+  // unless the user prefers bare alias names (wisp.bridge.aliasPickerShowsModel off).
   const handleAnthropicModels = async (res: http.ServerResponse): Promise<void> =>
-    sendJson(res, 200, buildAnthropicModelsList(await computeModelInfos()));
+    sendJson(res, 200, buildAnthropicModelsList(
+      await computeModelInfos(),
+      deps.routingMap().aliases.map((a) => ({ name: a.name, model: deps.aliasPickerShowsModel() ? a.target.model : undefined })),
+    ));
 
   // POST /v1/chat/completions for the `codex` Provider — the Responses stream behind the ChatGPT sign-in,
   // rendered back through the SAME bridge.ts SSE emitters the keyed path uses (so the wire shape is identical).

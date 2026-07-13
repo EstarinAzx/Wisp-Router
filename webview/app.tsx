@@ -13,7 +13,8 @@
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
  *     | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut | selectEffort{value}
  *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
- *     | setFamilyRoute{value:{family,providerId,model}}.
+ *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
+ *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
  */
 
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -39,6 +40,8 @@ type State = {
   bridgeSecret?: string; // present only while running — the secret to paste into the Copilot CLI
   claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), present only while running
   routingFamilies?: Partial<Record<FamilyKey, { providerId: string; model: string }>>; // the Routing map's four Family rows (#51)
+  routingAliases?: { name: string; target: { providerId: string; model: string } }[]; // the Routing map's Alias rows (#52)
+  aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52)
 };
 
 // The Routing map's four fixed Family routes (#51) — rendered as always-visible rows, in this order.
@@ -67,6 +70,9 @@ export const App = () => {
   // push after a partial commit (provider picked, model still empty → row stored unmapped) must not
   // wipe what the user is mid-typing.
   const [routeDrafts, setRouteDrafts] = useState<Record<FamilyKey, { providerId: string; model: string }> | undefined>(undefined);
+  // The Alias add-row draft (#52) — saved rows live in state.routingAliases (host-pushed), only the
+  // in-progress new row is local.
+  const [aliasDraft, setAliasDraft] = useState({ name: '', providerId: '', model: '' });
   // Where the current models list came from — used to drop it when Provider/endpoint/credentials
   // change. Keyed on providerId too so a switch refetches even if two rows shared a base URL.
   const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean } | undefined>(undefined);
@@ -144,6 +150,17 @@ export const App = () => {
   const commitFamilyRoute = (family: FamilyKey, draft: { providerId: string; model: string }) => {
     setRouteDrafts((cur) => cur && { ...cur, [family]: draft });
     vscode.postMessage({ type: 'setFamilyRoute', value: { family, providerId: draft.providerId, model: draft.model } });
+  };
+
+  // Alias add-row (#52). A name shadowing a Provider id would be unreachable (the resolver checks ids
+  // first), so it's refused HERE with a visible message — the host guard is only the trust boundary.
+  const aliasName = aliasDraft.name.trim();
+  const aliasCollides = state.providers.some((p) => p.id === aliasName);
+  const aliasReady = !!(aliasName && aliasDraft.providerId && aliasDraft.model.trim()) && !aliasCollides;
+  const addAlias = () => {
+    if (!aliasReady) return;
+    vscode.postMessage({ type: 'setAlias', value: { name: aliasName, providerId: aliasDraft.providerId, model: aliasDraft.model.trim() } });
+    setAliasDraft({ name: '', providerId: '', model: '' }); // saved row arrives via the state push
   };
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
@@ -407,6 +424,66 @@ export const App = () => {
         <p class="text-xs text-[var(--vscode-descriptionForeground)]">
           Bridged claude-opus / sonnet / haiku / fable names answer with their Target (Provider + pinned model). Unmapped rows use the Active Provider.
         </p>
+
+        {/* Alias rows (#52): user-invented exact names → Target. Saved rows are read-only + removable;
+            the draft row below adds one. Names shadowing a Provider id are refused visibly. */}
+        {(state.routingAliases ?? []).map((a) => (
+          <div key={a.name} class="flex items-center gap-1.5">
+            <span class="w-12 shrink-0 truncate text-xs" title={a.name}>{a.name}</span>
+            <span class="min-w-0 flex-1 truncate text-xs text-[var(--vscode-descriptionForeground)]" title={`${a.target.providerId} · ${a.target.model}`}>
+              {state.providers.find((p) => p.id === a.target.providerId)?.label ?? a.target.providerId} · {a.target.model}
+            </span>
+            <button class="btn btn-secondary shrink-0" title={`Remove alias ${a.name}`} onClick={() => vscode.postMessage({ type: 'removeAlias', value: { name: a.name } })}>✕</button>
+          </div>
+        ))}
+        <div class="flex items-center gap-1.5">
+          <input
+            class="input w-12 shrink-0 min-w-0"
+            type="text"
+            placeholder="alias"
+            value={aliasDraft.name}
+            onInput={(e) => setAliasDraft({ ...aliasDraft, name: e.currentTarget.value })}
+          />
+          <select
+            class="input min-w-0 flex-1"
+            value={aliasDraft.providerId}
+            onChange={(e) => setAliasDraft({ ...aliasDraft, providerId: e.currentTarget.value })}
+          >
+            <option value="">Provider…</option>
+            {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          <input
+            class="input min-w-0 flex-1"
+            type="text"
+            placeholder="model id"
+            value={aliasDraft.model}
+            onInput={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') addAlias(); }}
+          />
+          <button class="btn btn-secondary shrink-0" disabled={!aliasReady} onClick={addAlias}>Add</button>
+        </div>
+        {aliasCollides && (
+          <p class="text-xs text-[var(--vscode-errorForeground)]">
+            '{aliasName}' is a Provider id — pick a different alias name.
+          </p>
+        )}
+        <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+          Aliases are exact bridged model names (e.g. /model sol) answering with their Target. They also appear in the Bridge's models list.
+        </p>
+        {/* Optimistic echo like chooseModel — the config listener's state push confirms; without it an
+            unrelated re-render mid-round-trip snaps the checkbox back. */}
+        <label class="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={state.aliasPickerShowsModel !== false}
+            onChange={(e) => {
+              const on = e.currentTarget.checked;
+              setState({ ...state, aliasPickerShowsModel: on });
+              vscode.postMessage({ type: 'setAliasPickerShowsModel', value: on });
+            }}
+          />
+          Show pinned model next to aliases in Claude Code's /model list
+        </label>
 
         {/* --------------------- Claude Code setup (#47) --------------------- */}
         {/* Ready-to-copy env snippets pointing Claude Code at the live door. Per-session shell lines are the
