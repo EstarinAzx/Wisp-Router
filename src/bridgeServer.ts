@@ -165,8 +165,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
   // GET /v1/models — the Anthropic-door discovery list: the same usable Providers + Aliases in Anthropic
   // shape, ids aliased claude-wisp-<id> so Claude Code's /model picker lists them (slice #44's decision).
+  // Aliases carry their pinned model so the picker row reads 'sol — gpt-5', like the Provider rows.
   const handleAnthropicModels = async (res: http.ServerResponse): Promise<void> =>
-    sendJson(res, 200, buildAnthropicModelsList(await computeModelInfos(), aliasNames()));
+    sendJson(res, 200, buildAnthropicModelsList(
+      await computeModelInfos(),
+      deps.routingMap().aliases.map((a) => ({ name: a.name, model: a.target.model })),
+    ));
 
   // POST /v1/chat/completions for the `codex` Provider — the Responses stream behind the ChatGPT sign-in,
   // rendered back through the SAME bridge.ts SSE emitters the keyed path uses (so the wire shape is identical).
