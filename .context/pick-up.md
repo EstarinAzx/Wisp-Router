@@ -24,9 +24,13 @@ turns (flatten system array, mid-messages system role, map forced `tool_choice` 
 `thinking`/`context_management`/`output_config`/`metadata`/`cache_control`). Outbound: Wisp stream →
 Anthropic SSE (message_start → content_block deltas incl. `input_json_delta` tool streaming → message_delta
 with stop reason → message_stop). Pure module beside `src/bridge.ts`, tests beside `bridge.test.ts`, external
-behavior only. Read issue #44's comments first. Enter with `/preset scope 45`.
+behavior only. Read issue #44's comments first. **Branch first:** create the PRD-43 feature branch
+(suggest `feat/anthropic-door`) off `main` — slices #45–#47 all land there, one PR to `main` at the end.
+Enter with `/preset scope 45`.
 
 ## Landmines
+- **Remaining PRD-43 work rides a feature branch, not `main`** — #44 landed on `main` directly (accepted,
+  predates this call); #45–#47 go on the PRD branch → PR to `main`.
 - **The gate routes in `bridgeServer.ts` are THROWAWAY** — #45/#46 replace them; only the widened `authOk`
   stays. Don't build on the canned handlers.
 - **Background tier hits the door with a real haiku id** — never 404 unknown `claude-*`; the live
