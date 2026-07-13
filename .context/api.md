@@ -78,13 +78,17 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   get the Anthropic dialect (`isAnthropicFlavored`). `POST /v1/messages` (exact path only — `count_tokens` 404s)
   → `parseAnthropicMessagesRequest` (`bridgeAnthropic.ts`: flatten `system` array + mid-messages `role:"system"`,
   strip the `claude-wisp-` alias, map tool_use/tool_result/image blocks, carry forced `tool_choice` +
-  `temperature`, ignore beta fields) → routed via `startProviderStream` (same model→Provider→Active fallback as
+  `temperature`, read `output_config.effort` — Claude Code's `/effort`, ladder-validated; other beta fields
+  ignored) → routed via `startProviderStream` (same model→Provider→Active fallback as
   the OpenAI door, all three Provider kinds) → reply as **Anthropic SSE** via `createAnthropicSseEncoder`. SSE-only
-  (Claude Code always streams). A mid-stream backend failure writes an Anthropic `error` event, not a truncated
+  (Claude Code always streams). **Effort: `parsed.effort ?? panel effort`** — Claude Code's pick wins when
+  present (`max` folds to `xhigh` on Codex); one log line per call names which won. A mid-stream backend
+  failure writes an Anthropic `error` event, not a truncated
   stream. **Codex tools go `strict:false` on this path** (external toolset — Codex strict mode rejects Claude
   Code's dynamic-map schemas like `AskUserQuestion`). `GET /v1/models` → `buildAnthropicModelsList` (`claude-wisp-<id>`
-  aliases + Provider label as `display_name`). Verified live vs real Claude Code: Codex OAuth **and** keyed
-  (OpenCode Go) both stream + complete a tool round-trip (file write).
+  aliases + Provider label as `display_name`; **no effort suffix** — Bridge lists thread no effort, only the
+  in-VS-Code picker label carries "· <effort>"). Verified live vs real Claude Code: Codex OAuth **and** keyed
+  (OpenCode Go) both stream + complete a tool round-trip (file write); `/effort` max/xhigh/high reach the backend.
 - **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts` +
   `codexStream`. See [[decisions]] 2026-06-24 (#39 Codex send-path) and the PowerShell test trap in [[gotchas]].
 
@@ -105,8 +109,8 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
 - The panel calls the same shared actions as the commands (`storeApiKey`/`clearApiKey`/`fetchModelIds`/`setModel`/`setProvider`/`setBaseUrl`/`getState`), injected as a `PanelHost` — panel and commands never drift.
 
 ### Message protocol
-- **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `selectProvider{value}` · `setBaseUrl{value}` · `refreshModels` · `codexSignIn` · `codexSignOut` · `selectEffort{value}` · `bridgeToggle` · `copyBridgeSecret` · `copyBridgeAddress` (#38 — toggle drives the shared start/stop; copies are done host-side via `vscode.env.clipboard`).
-- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', keyEnv, model, baseUrl, providerId, providers: {id,label}[], isCustom, kind?, signedIn?, modelOptions?, effort?, effortOptions?, bridgeRunning, bridgeAddress, bridgeSecret?}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`. For a `codex` Provider the panel shows sign-in/out (driven by `signedIn`) instead of the key field, and the model dropdown uses `modelOptions` (the curated `CODEX_MODELS`) since there's no live `/models` fetch. The **Bridge** section (#38) shows a running/stopped dot + Start/Stop, and while running the address + secret (`bridgeSecret` present only then) with Copy buttons.
+- **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `selectProvider{value}` · `setBaseUrl{value}` · `refreshModels` · `codexSignIn` · `codexSignOut` · `selectEffort{value}` · `bridgeToggle` · `copyBridgeSecret` · `copyBridgeAddress` · `copyClaudeSnippet{value: 'powershell'|'bash'|'settingsJson'}` (#38/#47 — toggle drives the shared start/stop; copies are done host-side via `vscode.env.clipboard`, the snippet rebuilt from host-owned values).
+- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', keyEnv, model, baseUrl, providerId, providers: {id,label}[], isCustom, kind?, signedIn?, modelOptions?, effort?, effortOptions?, bridgeRunning, bridgeAddress, bridgeSecret?, claudeSnippets?}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`. For a `codex` Provider the panel shows sign-in/out (driven by `signedIn`) instead of the key field, and the model dropdown uses `modelOptions` (the curated `CODEX_MODELS`) since there's no live `/models` fetch. The **Bridge** section (#38) shows a running/stopped dot + Start/Stop, and while running the address + secret (`bridgeSecret` present only then) with Copy buttons, plus a **Claude Code** sub-section (#47): three copy-paste setup variants (`claudeSnippets` = PowerShell/bash session lines + project `.claude/settings.json` env block, present only while running; built by `buildClaudeCodeSnippets`), a Bridge-off explainer otherwise. No global `~/.claude/settings.json` variant — banned (PRD #43).
 - **Key is write-only across the boundary** — the value is never sent back (only presence + source), and error text is `sanitizeError`'d so a server 401 body can't leak key fragments. See [[gotchas]].
 - State is pushed on `ready`, on `onDidChangeConfiguration` (any `wisp.*`), and on `secrets.onDidChange` (covers this window's key writes and changes from other windows).
 - **Activity** (`activity{thinking}`) is the live Thinking/Idle signal, pushed separately from `state` on every in-flight transition (`enter/exitInFlight`) **and** on `ready` (via `PanelHost.getActivity`), so it never drags the async `getState`/model-refetch path. The panel renders it as a top status row (pulse dot); the status bar shows the same Activity as `ready`/`thinking`/`error`. See [[decisions]].
