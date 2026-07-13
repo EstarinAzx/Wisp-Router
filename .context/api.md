@@ -74,10 +74,17 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
 - **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...))` — the usable Provider ids
   (`{id, object:'model', created:0, owned_by:'wisp'}`): keyed = has a key, **`codex` = signed in** (#39),
   **`anthropic` = signed in** (#40).
-- **Anthropic-door gate routes (#44, THROWAWAY until #45/#46):** requests carrying `anthropic-version` or
-  `x-api-key` get the Anthropic dialect — `GET /v1/models` serves a **hardcoded** Anthropic-shape list (mixed
-  plain + `claude-wisp-*` ids, the picker experiment) and `POST /v1/messages` (exact path only — `count_tokens`
-  404s) logs wire facts + streams one canned SSE turn. Findings on issue #44; real translators replace this.
+- **Anthropic door (#45 translator + #46 wiring, LIVE):** requests carrying `anthropic-version` or `x-api-key`
+  get the Anthropic dialect (`isAnthropicFlavored`). `POST /v1/messages` (exact path only — `count_tokens` 404s)
+  → `parseAnthropicMessagesRequest` (`bridgeAnthropic.ts`: flatten `system` array + mid-messages `role:"system"`,
+  strip the `claude-wisp-` alias, map tool_use/tool_result/image blocks, carry forced `tool_choice` +
+  `temperature`, ignore beta fields) → routed via `startProviderStream` (same model→Provider→Active fallback as
+  the OpenAI door, all three Provider kinds) → reply as **Anthropic SSE** via `createAnthropicSseEncoder`. SSE-only
+  (Claude Code always streams). A mid-stream backend failure writes an Anthropic `error` event, not a truncated
+  stream. **Codex tools go `strict:false` on this path** (external toolset — Codex strict mode rejects Claude
+  Code's dynamic-map schemas like `AskUserQuestion`). `GET /v1/models` → `buildAnthropicModelsList` (`claude-wisp-<id>`
+  aliases + Provider label as `display_name`). Verified live vs real Claude Code: Codex OAuth **and** keyed
+  (OpenCode Go) both stream + complete a tool round-trip (file write).
 - **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts` +
   `codexStream`. See [[decisions]] 2026-06-24 (#39 Codex send-path) and the PowerShell test trap in [[gotchas]].
 
