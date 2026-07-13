@@ -6,7 +6,7 @@ import {
   buildCodexResponsesBody, reduceResponsesTextEvents, extractResponsesText, parseSseBlock,
   responsesIncompleteReason,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
-  parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS,
+  parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
   toCodexResponsesTools, reduceResponsesToolCalls,
   type Provider, type EditMessage, type CodexResponsesEvent,
 } from './catalog';
@@ -376,6 +376,39 @@ describe('CODEX_MODELS', () => {
   it('is a non-empty curated list including a current Codex coding model', () => {
     expect(CODEX_MODELS.length).toBeGreaterThan(0);
     expect(CODEX_MODELS).toContain('gpt-5.3-codex');
+  });
+});
+
+describe('codexModelsFrom', () => {
+  // A miniature models.dev openai entry exercising every filter rule at once.
+  const catalog = {
+    openai: {
+      models: {
+        'gpt-5.6-sol': { release_date: '2026-07-09' },
+        'gpt-5.6-terra': { release_date: '2026-07-09' },
+        'gpt-5.5': { release_date: '2026-03-12' },
+        'gpt-5.5-pro': { release_date: '2026-03-12' },
+        'gpt-5.4-nano': { release_date: '2025-12-05' },
+        'gpt-5.3-chat-latest': { release_date: '2025-10-01' },
+        'o4-mini-deep-research': { release_date: '2025-06-26' },
+        'o4-mini': { release_date: '2025-04-16' },
+        'gpt-5.2': {}, // undated → must trail the dated ids, not vanish
+        'o1': { release_date: '2024-12-17' },
+        'gpt-4.1': { release_date: '2025-04-14' },
+      },
+    },
+  };
+
+  it('keeps the Codex-served families newest-first, drops the API-only variants', () => {
+    // Dropped: -pro, -nano, -chat-latest, -deep-research suffixes; o1/gpt-4.1 (outside the keep families).
+    // Sol before terra: same release_date → alphabetical tiebreak. Undated gpt-5.2 trails.
+    expect(codexModelsFrom(catalog)).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5', 'o4-mini', 'gpt-5.2']);
+  });
+
+  it('falls back to the curated list when the catalog is absent, has no openai entry, or filters to nothing', () => {
+    expect(codexModelsFrom(undefined)).toEqual(CODEX_MODELS);
+    expect(codexModelsFrom({})).toEqual(CODEX_MODELS);
+    expect(codexModelsFrom({ openai: { models: { 'gpt-4.1': {} } } })).toEqual(CODEX_MODELS);
   });
 });
 

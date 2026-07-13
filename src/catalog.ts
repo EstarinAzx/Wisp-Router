@@ -250,7 +250,7 @@ export type ModelCaps = { contextInput?: number; maxOutput?: number; vision?: bo
 
 // The slices we read from models.dev's api.json (it carries far more we ignore). The catalog is the
 // whole document keyed by provider id (e.g. "opencode-go", "groq"), each with a models map.
-type ModelsDevEntry = { limit?: { context?: number; output?: number }; modalities?: { input?: string[] } };
+type ModelsDevEntry = { limit?: { context?: number; output?: number }; modalities?: { input?: string[] }; release_date?: string };
 export type ModelsDevCatalog = Record<string, { models?: Record<string, ModelsDevEntry> }>;
 
 // Map one models.dev model entry to ModelCaps. Vision = its input modalities include "image" (the
@@ -267,6 +267,15 @@ export const lookupModelsDevCaps = (catalog: ModelsDevCatalog | undefined, key: 
   const entry = catalog?.[key]?.models?.[modelId];
   return entry ? parseModelsDevEntry(entry) : undefined;
 };
+
+// Order dropdown ids newest-first by models.dev release_date (ISO dates compare lexicographically);
+// undated ids trail, alphabetically, so an entry missing metadata can never bury a fresh release.
+const sortByReleaseDesc = (models: Record<string, ModelsDevEntry>, ids: string[]): string[] =>
+  [...ids].sort((a, b) => {
+    const da = models[a]?.release_date ?? '';
+    const db = models[b]?.release_date ?? '';
+    return da !== db ? (db < da ? -1 : 1) : a.localeCompare(b);
+  });
 
 // Build the descriptors Wisp advertises into VS Code's native model picker: one row per Provider that
 // is actually usable. Usable = has a key AND a resolvable model AND (for Custom only) a base URL — a
@@ -626,12 +635,25 @@ export const codexModelCaps = (model: string): ModelCaps => {
   return { contextInput: 400_000, maxOutput: 32_768, vision: true };
 };
 
-// Curated Codex model ids for the panel dropdown — the Codex backend has no /models route, so this
-// mirrors the Codex CLI's known lineup. The codex row's defaultModel must stay a member of this list.
+// Curated Codex model ids — the OFFLINE FALLBACK for codexModelsFrom (the live models.dev list is the
+// primary source). The codex row's defaultModel must stay a member of this list.
 export const CODEX_MODELS: string[] = [
-  'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex', 'gpt-5.3-codex-spark',
-  'gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.4-mini', 'o3', 'o4-mini',
+  'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex',
+  'gpt-5.3-codex-spark', 'gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini',
+  'gpt-5.4-mini', 'o3', 'o4-mini',
 ];
+
+// Live Codex dropdown ids from models.dev's openai lineup — keep the families the ChatGPT-subscription
+// Codex backend serves (gpt-5*, o3*, o4-mini*), drop the API-only variants it rejects (-pro, -nano,
+// -chat-latest, -deep-research). Catalog absent or filter empty → curated fallback, the old behaviour.
+export const codexModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
+  const models = catalog?.openai?.models;
+  if (!models) return CODEX_MODELS;
+  const ids = Object.keys(models).filter(
+    (id) => /^(gpt-5|o3|o4-mini)/.test(id) && !/-(pro|nano|chat-latest|deep-research)$/.test(id),
+  );
+  return ids.length ? sortByReleaseDesc(models, ids) : CODEX_MODELS;
+};
 
 // ----------------------------- Codex Responses reply ----------------------------- //
 
