@@ -1,12 +1,12 @@
 {
   "name": "wisp",
   "displayName": "Wisp",
-  "description": "BYOK model router for VS Code's Copilot chat, agent, and Ctrl+I — bring your own API keys or ChatGPT (Codex) subscription. Plus Inquire inline edits.",
-  "version": "1.5.0",
+  "description": "BYOK model router for VS Code's Copilot chat, agent, and Ctrl+I — bring your own API keys or ChatGPT (Codex) / Claude.ai subscription. Bridge external tools like Claude Code onto the same providers. Plus Inquire inline edits.",
+  "version": "1.6.0",
   "publisher": "EsarinAzx",
   "repository": {
     "type": "git",
-    "url": "https://github.com/EstarinAzx/Wisp.git"
+    "url": "https://github.com/EstarinAzx/Wisp-Router.git"
   },
   "engines": {
     "vscode": "^1.104.0"
