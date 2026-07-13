@@ -238,6 +238,15 @@ describe('toCodexResponsesTools', () => {
       properties: { answers: { type: 'object', additionalProperties: false, required: [] } },
     });
   });
+
+  // Non-strict (the Bridge door): the schema rides through verbatim, no strict closure — Codex strict rejects
+  // the rich dynamic-map schemas an external toolset (Claude Code) carries, so the door passes strict:false.
+  it('passes the schema through verbatim when strict is false', () => {
+    const schema = { type: 'object', properties: { answers: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['answers'] };
+    expect(toCodexResponsesTools([{ name: 'ask', description: 'd', inputSchema: schema }], false)).toEqual([
+      { type: 'function', name: 'ask', description: 'd', strict: false, parameters: schema },
+    ]);
+  });
 });
 
 describe('reduceResponsesToolCalls', () => {

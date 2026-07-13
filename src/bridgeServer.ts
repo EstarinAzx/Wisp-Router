@@ -388,7 +388,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
       const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
+      // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
+      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
     }
     if (isAnthropicProvider(provider)) {
