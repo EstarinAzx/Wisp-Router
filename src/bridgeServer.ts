@@ -84,12 +84,16 @@ const readBody = (req: http.IncomingMessage): Promise<string> =>
     req.on('error', reject);
   });
 
-// Constant-time Bearer check. timingSafeEqual throws on a length mismatch, so the length guard runs first —
-// it leaks only the secret's length, which a high-entropy random secret can afford.
+// Constant-time secret check. The secret arrives as `Authorization: Bearer` (OpenAI-style clients) or
+// `x-api-key` (Anthropic-style — Claude Code sends whichever matches the env var the user set, PRD #43).
+// timingSafeEqual throws on a length mismatch, so the length guard runs first — it leaks only the secret's
+// length, which a high-entropy random secret can afford.
 const authOk = (req: http.IncomingMessage, secret: string): boolean => {
-  const match = /^Bearer (.+)$/.exec(req.headers['authorization'] ?? '');
-  if (!match) return false;
-  const given = Buffer.from(match[1]);
+  const apiKey = req.headers['x-api-key'];
+  const bearer = /^Bearer (.+)$/.exec(req.headers['authorization'] ?? '')?.[1];
+  const presented = typeof apiKey === 'string' && apiKey ? apiKey : bearer;
+  if (!presented) return false;
+  const given = Buffer.from(presented);
   const want = Buffer.from(secret);
   return given.length === want.length && crypto.timingSafeEqual(given, want);
 };
@@ -323,12 +327,77 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     }
   };
 
-  // Route one request: the access-secret Bearer is enforced on EVERY request before any routing.
+  // ------------- Slice #44 gate — canned Anthropic door (THROWAWAY until the real translator, #45/#46) ------------- //
+
+  // The gate's whole job is recording exactly what Claude Code sends. Auth header VALUES are redacted —
+  // only which header carried the secret is a fact we need.
+  const logWireFacts = (req: http.IncomingMessage, body?: unknown): void => {
+    const h = req.headers;
+    const auth = [h['x-api-key'] ? 'x-api-key' : '', h['authorization'] ? `authorization(${String(h['authorization']).split(' ')[0]})` : '']
+      .filter(Boolean).join(' + ') || 'none';
+    deps.log(`[gate] ${req.method} ${req.url} auth=${auth} anthropic-version=${h['anthropic-version'] ?? '-'} anthropic-beta=${h['anthropic-beta'] ?? '-'} user-agent=${h['user-agent'] ?? '-'}`);
+    if (body !== undefined) deps.log(`[gate] body ${JSON.stringify(body, null, 2)}`);
+  };
+
+  // Anthropic-flavored requests are told apart from OpenAI-door ones by the headers only an Anthropic
+  // client sends — whether that distinguisher holds for real Claude Code is itself a fact the gate records.
+  const isAnthropicFlavored = (req: http.IncomingMessage): boolean =>
+    !!(req.headers['anthropic-version'] || req.headers['x-api-key']);
+
+  // The picker experiment: plain provider-style ids alongside claude-wisp-* aliases. Which of the four
+  // survive into Claude Code's /model picker decides slice #46's discovery shape (issue #44 criterion 1).
+  const CANNED_GATE_MODELS = ['codex', 'opencode', 'claude-wisp-codex', 'claude-wisp-opencode'];
+
+  // GET /v1/models, Anthropic discovery shape — hardcoded; the real list arrives with the live wiring (#46).
+  const handleGateModels = (res: http.ServerResponse): void => {
+    const data = CANNED_GATE_MODELS.map((id) => ({ type: 'model', id, display_name: `Wisp gate: ${id}`, created_at: '2026-07-13T00:00:00Z' }));
+    sendJson(res, 200, { data, has_more: false, first_id: data[0].id, last_id: data[data.length - 1].id });
+  };
+
+  // POST /v1/messages — log the request, answer with one canned turn so the session stays alive long enough
+  // to observe. SSE by default (Claude Code always streams); a stream:false body gets the JSON envelope.
+  const handleGateMessages = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let body: any;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
+    logWireFacts(req, body);
+
+    const text = 'Canned reply from the Wisp Bridge gate (slice #44).';
+    const id = `msg_${crypto.randomBytes(12).toString('hex')}`;
+    const model = typeof body?.model === 'string' ? body.model : 'unknown';
+    if (body?.stream === false) {
+      return sendJson(res, 200, {
+        id, type: 'message', role: 'assistant', model,
+        content: [{ type: 'text', text }],
+        stop_reason: 'end_turn', stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 12 },
+      });
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    const ev = (type: string, payload: object): void => { res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`); };
+    ev('message_start', { message: { id, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+    ev('ping', {});
+    ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
+    ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } });
+    ev('content_block_stop', { index: 0 });
+    ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 12 } });
+    ev('message_stop', {});
+    res.end();
+  };
+
+  // ----------------------------- Routing ----------------------------- //
+
+  // Route one request: the access secret is enforced on EVERY request before any routing.
   const handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     if (!authOk(req, deps.accessSecret())) return sendError(res, 401, 'invalid or missing access secret');
     const url = req.url ?? '';
-    if (req.method === 'GET' && url.startsWith('/v1/models')) return handleModels(res);
+    if (req.method === 'GET' && url.startsWith('/v1/models')) {
+      logWireFacts(req); // gate: discovery headers answer whether anthropic-version arrives on GET too
+      return isAnthropicFlavored(req) ? handleGateModels(res) : handleModels(res);
+    }
+    // Exact path only — /v1/messages/count_tokens must fall through to the logged 404, not the canned reply.
+    if (req.method === 'POST' && (url === '/v1/messages' || url.startsWith('/v1/messages?'))) return handleGateMessages(req, res);
     if (req.method === 'POST' && url.startsWith('/v1/chat/completions')) return handleChat(req, res);
+    logWireFacts(req); // gate: any endpoint Claude Code probes beyond the two doors is a wire fact
     return sendError(res, 404, `no route for ${req.method} ${url}`);
   };
 
