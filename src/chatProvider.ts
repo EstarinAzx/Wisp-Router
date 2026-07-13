@@ -123,11 +123,12 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       getModelsDevCatalog(),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
     ]);
-    // Codex and Anthropic have no models.dev catalogKey (no /models route), so each uses its own real-window
-    // table; every other row pulls live caps from models.dev when it has a catalogKey.
+    // Codex and Anthropic have no catalogKey, but models.dev's openai/anthropic entries DO carry their
+    // real windows — look the id up there first so new releases (gpt-5.6's 1M window) are honest, and
+    // fall back to each kind's hardcoded table offline; every other row pulls caps via its catalogKey.
     const caps = (provider: Provider, model: string) =>
-      isCodexProvider(provider) ? codexModelCaps(model)
-        : isAnthropicProvider(provider) ? anthropicModelCaps(model)
+      isCodexProvider(provider) ? (lookupModelsDevCaps(catalog, 'openai', model) ?? codexModelCaps(model))
+        : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers, {
       keyed,
