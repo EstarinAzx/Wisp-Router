@@ -897,6 +897,12 @@ export const anthropicModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
   return ids.length ? sortByReleaseDesc(models, ids) : ANTHROPIC_MODELS;
 };
 
+// One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel
+// state and the per-row Routing-map lists (#53). Keyed kinds answer undefined: they have a live
+// /models route instead of a curated list.
+export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): string[] | undefined =>
+  isCodexProvider(p) ? codexModelsFrom(catalog) : isAnthropicProvider(p) ? anthropicModelsFrom(catalog) : undefined;
+
 // ----------------------------- Anthropic client attestation ----------------------------- //
 
 // The subscription Messages backend recomputes + validates a per-request fingerprint and rejects an

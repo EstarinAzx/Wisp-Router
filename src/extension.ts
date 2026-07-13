@@ -22,8 +22,8 @@ import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
   Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
-  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, codexModelsFrom, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicModelsFrom, standardEffortToCodex, effortOptionsFor,
+  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
+  isAnthropicProvider, isAnthropicSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds,
 } from './catalog';
 import { getModelsDevCatalog } from './modelsDev';
@@ -276,6 +276,30 @@ const fetchModelIds = async (): Promise<string[]> => {
   return page.data.map((m) => m.id).sort();
 };
 
+// Model ids for ANY catalog Provider — the Routing-map rows' dropdowns (#53). OAuth kinds read the
+// models.dev curated list; keyed kinds probe GET /models with that Provider's own key. Every failure
+// (unknown id, no key, Custom without URL, offline) is an empty list, never a throw — the row falls
+// back to free text and configuring a route is never blocked.
+const providerModelIds = async (id: string): Promise<string[]> => {
+  const p = PROVIDERS.find((r) => r.id === id);
+  if (!p) return [];
+  try {
+    if (isCodexProvider(p) || isAnthropicProvider(p)) {
+      // Same timeout race as getState so a cold models.dev can't stall the row; undefined → curated list.
+      const catalog = await Promise.race([
+        getModelsDevCatalog(),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
+      ]);
+      return oauthModelOptions(p, catalog) ?? [];
+    }
+    const client = await clientForProvider(p);
+    if (!client) return [];
+    return (await client.models.list()).data.map((m) => m.id).sort();
+  } catch {
+    return [];
+  }
+};
+
 // Write to the narrowest scope that already defines the value — a Global write under a
 // workspace override changes nothing effective and the panel controls would just snap back.
 const targetFor = (key: string): vscode.ConfigurationTarget => {
@@ -390,7 +414,7 @@ const getState = async (): Promise<PanelState> => {
     kind: p.kind ?? 'openai-chat',
     signedIn,
     // The OAuth Providers have no /models route — their dropdown comes from models.dev (curated fallback).
-    modelOptions: isCodexProvider(p) ? codexModelsFrom(catalog) : isAnthropicProvider(p) ? anthropicModelsFrom(catalog) : undefined,
+    modelOptions: oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
     effort: isCodexProvider(p) || isAnthropicProvider(p) ? activeEffort() : undefined,
@@ -884,6 +908,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     storeApiKey,
     clearApiKey,
     fetchModelIds,
+    fetchProviderModelIds: providerModelIds, // Routing-map row dropdowns (#53) — any Provider, silent empty on failure
     setModel,
     setProvider,
     setBaseUrl,

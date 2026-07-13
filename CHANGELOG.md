@@ -4,6 +4,37 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-07-14
+
+The Bridge Routing map: pin bridged model names to the backends you choose.
+
+### Added
+
+- **Routing map — Family routes.** Four fixed rows in the side panel's Bridge section
+  (`opus` / `sonnet` / `haiku` / `fable`): a bridged `claude-*` id of that family answers
+  with the row's **Target** — the picked Provider plus a pinned model — instead of the
+  Active Provider. Unmapped rows keep today's behaviour. So Claude Code's own model names
+  can fan out: opus traffic to a strong backend, haiku traffic to a cheap one. (#51)
+- **Routing map — Aliases.** Invent exact bridged model names (e.g. `sol`) and point each
+  at its own Target. Aliases are advertised in both doors' `GET /v1/models` — so they show
+  up right in Claude Code's `/model` picker (as `claude-wisp-` rows) and in any
+  OpenAI-dialect tool's model list — and a picked alias routes to its Target. Names that
+  would shadow a Provider id are refused. (#52)
+- **Routing map — per-row model dropdowns.** Every row's model field is a real dropdown
+  listing the picked Provider's models: the models.dev catalog for the OAuth kinds, a live
+  `/models` fetch (with that Provider's own key) for keyed kinds. When a list can't be
+  fetched (offline, no key yet) the field falls back to free text — configuring a route is
+  never blocked. (#53)
+- **`wisp.bridge.aliasPickerShowsModel`** setting (default on): alias rows in Claude Code's
+  `/model` picker carry their pinned model (`sol — gpt-5.6-terra`); also a checkbox in the
+  panel. Claude Code re-reads the list on restart.
+
+### Fixed
+
+- **Images now cross the Bridge's Anthropic door.** Inbound image blocks were dropped on
+  the way to the backend (the follow-up noted in 1.4.1); they are now forwarded end to end,
+  with an inbound image-count log line for debugging.
+
 ## [1.5.0] — 2026-07-13
 
 The Anthropic door: run **Claude Code** on your Wisp providers.

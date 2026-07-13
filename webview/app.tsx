@@ -8,10 +8,12 @@
  * Data shapes:
  *   - State: { keyIsSet, keySource, keyEnv, model, baseUrl, providerId, providers, isCustom } —
  *     pushed by the extension; the key value itself never arrives here, only keyIsSet.
- *   - InMsg: state{state} | models{ids} | modelsError{message} | activity{thinking} — everything
- *     the extension sends. activity carries the live Thinking/Idle state, separate from state.
+ *   - InMsg: state{state} | models{ids} | modelsError{message} | providerModels{providerId, ids}
+ *     | activity{thinking} — everything the extension sends. activity carries the live
+ *     Thinking/Idle state, separate from state.
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
- *     | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut | selectEffort{value}
+ *     | setBaseUrl{value} | refreshModels | fetchProviderModels{value: providerId}
+ *     | codexSignIn | codexSignOut | selectEffort{value}
  *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
  *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
@@ -52,6 +54,7 @@ type InMsg =
   | { type: 'state'; state: State }
   | { type: 'models'; ids: string[] }
   | { type: 'modelsError'; message: string }
+  | { type: 'providerModels'; providerId: string; ids: string[] } // a Routing-map row's list (#53); [] = unavailable
   | { type: 'activity'; thinking: boolean };
 
 const vscode = acquireVsCodeApi();
@@ -76,6 +79,17 @@ export const App = () => {
   // Where the current models list came from — used to drop it when Provider/endpoint/credentials
   // change. Keyed on providerId too so a switch refetches even if two rows shared a base URL.
   const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean } | undefined>(undefined);
+  // Per-Provider model lists for the Routing-map rows (#53) — one cache entry serves every row that
+  // picked that Provider; [] means "asked, unavailable" → the row falls back to free text.
+  const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
+  const requestedProviders = useRef(new Set<string>());
+
+  // One fetch per Provider per panel session — a re-pick never re-spams the endpoint.
+  const ensureProviderModels = (id: string) => {
+    if (!id || requestedProviders.current.has(id)) return;
+    requestedProviders.current.add(id);
+    vscode.postMessage({ type: 'fetchProviderModels', value: id });
+  };
 
   useEffect(() => {
     const onMessage = (e: MessageEvent<InMsg>) => {
@@ -86,6 +100,12 @@ export const App = () => {
         const prev = modelsOrigin.current;
         if (prev && (prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl || (prev.keyIsSet && !msg.state.keyIsSet))) {
           setModels([]);
+        }
+        // Key presence changed → the row caches (including cached empties from a key-less fetch) are
+        // stale; drop them so the next row pick refetches with the new credentials (#53).
+        if (prev && prev.keyIsSet !== msg.state.keyIsSet) {
+          setProviderModels({});
+          requestedProviders.current.clear();
         }
         // First state, a newly-set key, a switched Provider, or a changed endpoint → pull the live
         // list once so the dropdown fills on its own. Without this the user only ever sees the
@@ -104,8 +124,14 @@ export const App = () => {
           setModelsError('');
           vscode.postMessage({ type: 'refreshModels' });
         }
+        // First state: fetch lists for the Providers the saved Family rows already reference, so
+        // their dropdowns fill on open without a re-pick (#53).
+        if (!prev) {
+          FAMILY_KEYS.forEach((k) => ensureProviderModels(msg.state.routingFamilies?.[k]?.providerId ?? ''));
+        }
       }
       if (msg.type === 'models') { setModels(msg.ids); setModelsError(''); }
+      if (msg.type === 'providerModels') setProviderModels((cur) => ({ ...cur, [msg.providerId]: msg.ids }));
       if (msg.type === 'modelsError') setModelsError(msg.message);
       if (msg.type === 'activity') setThinking(msg.thinking);
     };
@@ -161,6 +187,16 @@ export const App = () => {
     if (!aliasReady) return;
     vscode.postMessage({ type: 'setAlias', value: { name: aliasName, providerId: aliasDraft.providerId, model: aliasDraft.model.trim() } });
     setAliasDraft({ name: '', providerId: '', model: '' }); // saved row arrives via the state push
+  };
+
+  // A Routing-map row's dropdown options (#53): the row Provider's fetched/curated list, with the row's
+  // current value prepended when absent so a stored pick stays visible (same idiom as the main picker).
+  // No list (not fetched, or unavailable) → undefined → the row renders the free-text input instead.
+  const rowModelOptions = (providerId: string, current: string): string[] | undefined => {
+    const ids = providerModels[providerId];
+    if (!ids?.length) return undefined;
+    const cur = current.trim();
+    return cur && !ids.includes(cur) ? [cur, ...ids] : ids;
   };
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
@@ -401,23 +437,40 @@ export const App = () => {
               <select
                 class="input min-w-0 flex-1"
                 value={d.providerId}
-                onChange={(e) => commitFamilyRoute(family, { ...d, providerId: e.currentTarget.value })}
+                onChange={(e) => {
+                  const providerId = e.currentTarget.value;
+                  ensureProviderModels(providerId); // pull this Provider's list so the model dropdown fills (#53)
+                  commitFamilyRoute(family, { ...d, providerId });
+                }}
               >
                 <option value="">Unmapped</option>
                 {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
-              <input
-                class="input min-w-0 flex-1"
-                type="text"
-                placeholder="model id"
-                value={d.model}
-                onInput={(e) => {
-                  const model = e.currentTarget.value;
-                  setRouteDrafts((cur) => cur && { ...cur, [family]: { ...cur[family], model } });
-                }}
-                onBlur={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
-                onKeyDown={(e) => { if (e.key === 'Enter') commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value }); }}
-              />
+              {/* Model: a dropdown when the row Provider's list is known (#53), else the free-text
+                  input — configuring a route is never blocked on a fetch. */}
+              {rowModelOptions(d.providerId, d.model) ? (
+                <select
+                  class="input min-w-0 flex-1"
+                  value={d.model}
+                  onChange={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
+                >
+                  <option value="">model…</option>
+                  {rowModelOptions(d.providerId, d.model)!.map((id) => <option key={id} value={id}>{id}</option>)}
+                </select>
+              ) : (
+                <input
+                  class="input min-w-0 flex-1"
+                  type="text"
+                  placeholder="model id"
+                  value={d.model}
+                  onInput={(e) => {
+                    const model = e.currentTarget.value;
+                    setRouteDrafts((cur) => cur && { ...cur, [family]: { ...cur[family], model } });
+                  }}
+                  onBlur={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value }); }}
+                />
+              )}
             </div>
           );
         })}
@@ -447,19 +500,35 @@ export const App = () => {
           <select
             class="input min-w-0 flex-1"
             value={aliasDraft.providerId}
-            onChange={(e) => setAliasDraft({ ...aliasDraft, providerId: e.currentTarget.value })}
+            onChange={(e) => {
+              const providerId = e.currentTarget.value;
+              ensureProviderModels(providerId); // pull this Provider's list so the model dropdown fills (#53)
+              setAliasDraft({ ...aliasDraft, providerId });
+            }}
           >
             <option value="">Provider…</option>
             {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          <input
-            class="input min-w-0 flex-1"
-            type="text"
-            placeholder="model id"
-            value={aliasDraft.model}
-            onInput={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
-            onKeyDown={(e) => { if (e.key === 'Enter') addAlias(); }}
-          />
+          {/* Model: dropdown when the draft Provider's list is known (#53), else free text. */}
+          {rowModelOptions(aliasDraft.providerId, aliasDraft.model) ? (
+            <select
+              class="input min-w-0 flex-1"
+              value={aliasDraft.model}
+              onChange={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
+            >
+              <option value="">model…</option>
+              {rowModelOptions(aliasDraft.providerId, aliasDraft.model)!.map((id) => <option key={id} value={id}>{id}</option>)}
+            </select>
+          ) : (
+            <input
+              class="input min-w-0 flex-1"
+              type="text"
+              placeholder="model id"
+              value={aliasDraft.model}
+              onInput={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
+              onKeyDown={(e) => { if (e.key === 'Enter') addAlias(); }}
+            />
+          )}
           <button class="btn btn-secondary shrink-0" disabled={!aliasReady} onClick={addAlias}>Add</button>
         </div>
         {aliasCollides && (

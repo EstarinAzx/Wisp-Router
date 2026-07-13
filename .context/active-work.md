@@ -8,60 +8,59 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-14 by Fable 5 (auto)._
-_At commit: f634a35 on `feat/routing-map-aliases` (#52 done + demo-verified; branch stacked on the
-still-unpushed `feat/routing-map-family-routes`)._
+_At commit: release-1.6.0 work on `feat/routing-map-row-dropdowns` (#53 + release chores), shipping to
+main via PR at wrap-up time._
 
 ## Current focus
-**Ship BOTH branches.** Two local, unpushed branches now stack: `feat/routing-map-family-routes`
-(#51 Routing map slice 1 + the vision bugfix, through `80e746e`) and `feat/routing-map-aliases` on top
-(#52, `02e8bde`..`f634a35`). Ship order: PR + merge the family branch first, then the aliases branch.
-Then #53.
+**v1.6.0 released.** The Routing map arc (#50 PRD) is complete: #51 Family routes, #52 Aliases +
+models-list advertising, #53 per-row model dropdowns — all merged to main (PRs #54, #55, and the
+#53/release PR). Version bumped to 1.6.0, CHANGELOG entry added, README fully rewritten (was stale at
+1.5.0: new repo name Wisp-Router, Routing map section, Bridge de-experimentalized, new setting,
+Anthropic tokens in Security). New `.vsix` packaged + GitHub release v1.6.0.
 
 ## State
-- **Done this session (#52 Aliases + models-list advertising, demo-verified by user):**
-  - Panel Alias rows (`webview/app.tsx`): saved rows read-only + ✕ remove; draft add-row (name +
-    Provider dropdown + free-text model). Name colliding with a Provider id → Add disabled + visible
-    red message (webview check; `setAlias` in `extension.ts` re-guards as the trust boundary, upsert
-    by exact name).
-  - Both doors' `GET /v1/models` advertise alias names after the Provider ids, read live per request —
-    raw on the OpenAI door, `claude-wisp-` prefixed on the Anthropic door so a picked entry
-    round-trips through the inbound strip to the alias route. Family routes never listed.
-  - Alias picker rows carry the pinned model (`sol — gpt-5.6-terra`), toggleable via
-    `wisp.bridge.aliasPickerShowsModel` (new setting, default on) — settable from Settings **or** the
-    panel checkbox under the alias rows. Claude Code refetches the list only on restart.
-  - Resolver untouched — alias lookup shipped + tested in #51. Suite 300/300, compile clean.
-- **Done earlier on the stack:** #51 resolver + Family rows + both-door routing (`f9c0519`); Anthropic-door
-  vision bugfix (`ab21c18`, `8d6be05`).
-- **In flight:** both branches local, nothing pushed.
+- **Done this session:**
+  - **Shipped the stacked pair:** PR #54 (`feat/routing-map-family-routes` — #51 + Anthropic-door
+    vision fix) and PR #55 (`feat/routing-map-aliases` — #52), both merged with merge commits.
+  - **#53 per-row model dropdowns (demo-verified by user):** every Routing-map row (4 family rows +
+    alias add-row) upgrades free-text model → dropdown fed by the row's Provider. New pure
+    `oauthModelOptions(p, catalog)` in `catalog.ts` (+4 tests, suite 304/304); `providerModelIds(id)`
+    in `extension.ts` (OAuth → models.dev w/ 4s race, keyed → `clientForProvider(p).models.list()`,
+    ANY failure → `[]`); `fetchProviderModels`/`providerModels` webview messages (silent empty, no
+    error spam); webview caches per Provider per panel session, drops cache when `keyIsSet` flips,
+    free-text fallback when no list.
+  - **Release 1.6.0 chores:** `package.json` 1.6.0 + repo URL → `Wisp-Router.git` + description
+    mentions Claude.ai/Claude Code; CHANGELOG 1.6.0 entry (Routing map ×3 + vision fix); README
+    rewritten whole.
+- **In flight:** nothing (post-release).
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **`/preset ship`** ×2 — push + PR + merge `feat/routing-map-family-routes` (covers #51 + vision fix),
-   then `feat/routing-map-aliases` (covers #52).
-2. **#53 per-row model dropdowns** — panel Routing-map rows get live model lists instead of free-text
-   (the plumbing deliberately kept OUT of #52).
-3. Then **TUI PRD for Wisp** via `/preset init` (user-stated order).
+1. **TUI PRD for Wisp** via `/preset init` (user-stated order — next line of work).
 
 ## Skills for next session
 - /preset pick-up — resume from the note.
-- /preset ship — twice, family branch first.
+- /preset init — the TUI PRD is a fresh idea → interview → MVD → spec → tickets.
 
 ## Open questions
-- None new. Still deferred by design: forced `tool_choice` + `temperature` not threaded on the OpenAI
-  door; OpenAI-door Codex strict-tools limit.
+- Still deferred by design: forced `tool_choice` + `temperature` not threaded on the OpenAI door;
+  OpenAI-door Codex strict-tools limit.
+- Routing-map Targets + aliases store raw provider ids with no rename migration (deliberate skip).
 
 ## Recent context
-- Alias UI state split: saved rows live in host-pushed `state.routingAliases`; only the draft add-row is
-  webview-local (`aliasDraft`). The checkbox uses an optimistic echo confirmed by the config listener's
-  state push.
-- `buildModelsList(infos, aliasNames?)` / `buildAnthropicModelsList(infos, aliases?)` — second param
-  optional, alias display_name renders bare when no model passed (that's how the toggle threads through:
-  `bridgeServer.ts` passes `model: undefined` when the setting is off).
-- Panel model lists still Active-Provider-only — that's exactly #53's job.
+- Row-dropdown design (#53): one cache entry serves every row sharing a Provider; a row Provider
+  switch calls `ensureProviderModels` (one fetch per Provider per panel session); saved family rows
+  prefetch on first state push. `rowModelOptions(providerId, current)` prepends the current value when
+  absent (same idiom as the main picker) and returns undefined → free-text input.
+- Known ceiling: when a list IS available the row offers only listed ids (+current) — a brand-new
+  unlisted model needs the list fetch to fail or a temporary Provider de-pick to type free text.
+- Git trap hit this session: a commit intended for a fresh branch landed on local main (HEAD had
+  slid back between `checkout -b` and the commit — cause unclear); fixed with `git branch -f`.
+  Sanity-check `git branch --show-current` right before committing.
 
 ## Related
 - [[overview]]
-- [[api]] — Bridge doors + Routing map + alias advertising (updated this session)
-- [[decisions]] — 2026-07-13 Routing-map entry (covers the alias/advertising design)
-- [[gotchas]] — stale-build + dup-panel traps · images=N vision-debug entry
+- [[api]] — panel message protocol + Routing map rows (updated this session)
+- [[decisions]] — 2026-07-13 Routing-map entry (covers the whole arc's design)
+- [[gotchas]] — stale-build + dup-panel traps
 - [[happy-path]] — "Bridge Routing map" MVD
