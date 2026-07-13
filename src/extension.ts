@@ -312,6 +312,26 @@ const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Pr
   void panel?.postState();
 };
 
+// Add or retarget one Alias row (#52). Upsert by exact name; same live-read globalState pattern as
+// setFamilyRoute. The webview shows the collision message — this guard is the trust boundary that keeps
+// a bypassed/malformed message from persisting an alias that shadows a Provider id (the resolver checks
+// ids first, so a shadowing alias would be silently unreachable).
+const setAlias = async (name: string, target: Target): Promise<void> => {
+  if (!name || PROVIDERS.some((p) => p.id === name)) return;
+  if (!PROVIDERS.some((p) => p.id === target.providerId)) return;
+  const map = activeRoutingMap();
+  const rest = map.aliases.filter((a) => a.name !== name);
+  await globalState.update(ROUTING_MAP_KEY, { ...map, aliases: [...rest, { name, target }] });
+  void panel?.postState();
+};
+
+// Remove one Alias row by name (#52). Unknown names are a no-op.
+const removeAlias = async (name: string): Promise<void> => {
+  const map = activeRoutingMap();
+  await globalState.update(ROUTING_MAP_KEY, { ...map, aliases: map.aliases.filter((a) => a.name !== name) });
+  void panel?.postState();
+};
+
 // Keep wisp.model honestly reflecting the Active Provider's model after a raw wisp.provider edit
 // (the panel has no part in Issue 4). Guarded against a write-loop: writes only when stale.
 const mirrorActiveModel = async (): Promise<void> => {
@@ -377,8 +397,9 @@ const getState = async (): Promise<PanelState> => {
     bridgeRunning: bridge.isRunning(),
     bridgeAddress: bridgeAddress(),
     bridgeSecret: bridge.isRunning() ? bridgeSecret : undefined,
-    // The Routing map's four Family rows (#51) — drives the panel's Bridge routing section.
+    // The Routing map's four Family rows (#51) + Alias rows (#52) — drive the panel's routing section.
     routingFamilies: activeRoutingMap().families,
+    routingAliases: activeRoutingMap().aliases,
     // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
     // they cross the boundary only while running, like bridgeSecret.
     claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
@@ -865,6 +886,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     anthropicSignOut,
     setEffort,
     setFamilyRoute, // Routing map Family rows (#51) — set/clear one row
+    setAlias, // Routing map Alias rows (#52) — add/retarget one
+    removeAlias, // Routing map Alias rows (#52) — remove one by name
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,

@@ -174,8 +174,10 @@ export type OAModelsList = { object: 'list'; data: OAModel[] };
 
 // Build the GET /v1/models response from the ChatModelInfo[] buildChatModelInfos already produces (one
 // entry per usable Provider). The Provider id (ChatModelInfo.id) is the model id the inbound `model` field
-// then names. Pure — created is a fixed 0, not a clock read.
-export const buildModelsList = (infos: ChatModelInfo[]): OAModelsList => ({
+// then names. Alias names (#52) ride after the ids so pickers offer them; Family routes stay unlisted —
+// they shadow claude-* names rather than adding new ones. Pure — created is a fixed 0, not a clock read.
+export const buildModelsList = (infos: ChatModelInfo[], aliasNames: string[] = []): OAModelsList => ({
   object: 'list',
-  data: infos.map((info) => ({ id: info.id, object: 'model', created: 0, owned_by: 'wisp' })),
+  data: [...infos.map((info) => info.id), ...aliasNames]
+    .map((id) => ({ id, object: 'model' as const, created: 0, owned_by: 'wisp' as const })),
 });

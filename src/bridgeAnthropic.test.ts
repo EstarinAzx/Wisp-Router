@@ -309,6 +309,16 @@ describe('buildAnthropicModelsList', () => {
   it('returns an empty list when there are no providers', () => {
     expect(buildAnthropicModelsList([])).toEqual({ data: [], has_more: false, first_id: null, last_id: null });
   });
+
+  // Alias advertising (#52): aliases ride after the Providers, claude-wisp- prefixed like every listed id
+  // (the inbound parse strips the prefix back to the raw alias name, so a picked entry round-trips to the
+  // alias route). The list is exactly Providers + aliases — Family routes never appear.
+  it('appends claude-wisp- aliased Alias names and lists nothing else', () => {
+    const list = buildAnthropicModelsList([modelInfo('codex', 'Codex — gpt-5')], ['sol']);
+    expect(list.data.map((m) => m.id)).toEqual(['claude-wisp-codex', 'claude-wisp-sol']);
+    expect(list.data[1]).toEqual({ type: 'model', id: 'claude-wisp-sol', display_name: 'sol', created_at: '2025-01-01T00:00:00Z' });
+    expect(list.last_id).toBe('claude-wisp-sol');
+  });
 });
 
 describe('buildClaudeCodeSnippets', () => {

@@ -15,7 +15,8 @@
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
  *     | selectProvider{value} | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut
  *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
- *     | setFamilyRoute{value:{family,providerId,model}}.
+ *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
+ *     | removeAlias{value:{name}}.
  *   - Ext → webview messages: state{state} | models{ids} | modelsError{message} | activity{thinking}.
  */
 
@@ -44,6 +45,7 @@ export type PanelState = {
   bridgeSecret?: string; // the access secret, sent only while running (meant to be copied into the CLI)
   claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), sent only while running
   routingFamilies?: { [K in FamilyKey]?: Target }; // the Routing map's four Family rows (#51)
+  routingAliases?: { name: string; target: Target }[]; // the Routing map's Alias rows (#52)
 };
 
 // Shared with extension.ts so the no-key failure is recognizable as webview-safe text.
@@ -64,6 +66,8 @@ export type PanelHost = {
   anthropicSignOut: () => Promise<void>;
   setEffort: (effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') => Promise<void>;
   setFamilyRoute: (family: FamilyKey, target: Target | undefined) => Promise<void>; // set/clear one Routing map Family row (#51)
+  setAlias: (name: string, target: Target) => Promise<void>; // add/retarget one Routing map Alias row (#52)
+  removeAlias: (name: string) => Promise<void>; // remove one Routing map Alias row by name (#52)
   toggleBridge: () => Promise<void>; // start/stop the Bridge — the same lifecycle the command drives
   copyBridgeSecret: () => Promise<void>; // copy the access secret to the clipboard (host-side, webview can't)
   copyBridgeAddress: () => Promise<void>;
@@ -190,6 +194,21 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           const providerId = typeof v.providerId === 'string' ? v.providerId.trim() : '';
           const model = typeof v.model === 'string' ? v.model.trim() : '';
           await this.host.setFamilyRoute(v.family, providerId && model ? { providerId, model } : undefined);
+          return;
+        }
+        case 'setAlias': {
+          // An Alias add/retarget (#52): all three halves must be present; the host re-checks the
+          // Provider-id collision + Target validity (this switch only shapes the untrusted message).
+          const v = msg.value as { name?: unknown; providerId?: unknown; model?: unknown } | undefined;
+          const name = typeof v?.name === 'string' ? v.name.trim() : '';
+          const providerId = typeof v?.providerId === 'string' ? v.providerId.trim() : '';
+          const model = typeof v?.model === 'string' ? v.model.trim() : '';
+          if (name && providerId && model) await this.host.setAlias(name, { providerId, model });
+          return;
+        }
+        case 'removeAlias': {
+          const v = msg.value as { name?: unknown } | undefined;
+          if (typeof v?.name === 'string' && v.name) await this.host.removeAlias(v.name);
           return;
         }
       }

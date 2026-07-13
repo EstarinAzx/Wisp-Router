@@ -260,10 +260,15 @@ const FIXED_CREATED_AT = '2025-01-01T00:00:00Z';
 
 // Build the GET /v1/models response in Anthropic shape from the ChatModelInfo[] buildChatModelInfos produces
 // (one entry per usable Provider). id is claude-wisp-<providerId> (the alias the picker filters to); the
-// Provider label rides as display_name. first_id/last_id bound the page, null when empty.
-export const buildAnthropicModelsList = (infos: ChatModelInfo[]): AntModelsList => {
-  const data: AntModel[] = infos.map((info) => ({
-    type: 'model', id: `claude-wisp-${info.id}`, display_name: info.name, created_at: FIXED_CREATED_AT,
+// Provider label rides as display_name. Routing-map Alias names (#52) follow, same prefix — the inbound
+// parse strips it back to the raw alias, so a picked entry round-trips to the alias route. Family routes
+// stay unlisted. first_id/last_id bound the page, null when empty.
+export const buildAnthropicModelsList = (infos: ChatModelInfo[], aliasNames: string[] = []): AntModelsList => {
+  const data: AntModel[] = [
+    ...infos.map((info) => ({ id: info.id, name: info.name })),
+    ...aliasNames.map((name) => ({ id: name, name })),
+  ].map((m) => ({
+    type: 'model' as const, id: `claude-wisp-${m.id}`, display_name: m.name, created_at: FIXED_CREATED_AT,
   }));
   return {
     data,
