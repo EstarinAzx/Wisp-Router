@@ -450,9 +450,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
 
-    // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's.
-    // The observable for #47's effort threading; without it a quick reply proves nothing.
-    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'})`);
+    // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's
+    // — plus how many images the request carried (the vision observable: 0 here means the client never sent
+    // pixels; >0 means any blindness is downstream of the door).
+    const imageCount = parsed.turns.reduce((n, t) => n + (t.images?.length ?? 0), 0);
+    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'}) images=${imageCount}`);
 
     const controller = new AbortController();
     req.on('close', () => controller.abort());
