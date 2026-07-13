@@ -22,10 +22,11 @@ import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
   Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
-  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, CODEX_MODELS, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, ANTHROPIC_MODELS, standardEffortToCodex, effortOptionsFor,
+  buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, codexModelsFrom, DEFAULT_EFFORT,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicModelsFrom, standardEffortToCodex, effortOptionsFor,
   type CodexCreds, type EffortLevel, type AnthropicCreds,
 } from './catalog';
+import { getModelsDevCatalog } from './modelsDev';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer } from './bridgeServer';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from './bridgeAnthropic';
@@ -325,6 +326,15 @@ const getState = async (): Promise<PanelState> => {
   const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
     : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
     : false;
+  // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
+  // pattern as chatProvider) so a cold/slow models.dev can never stall panel open; undefined → curated
+  // fallback inside the *ModelsFrom pures. Skipped entirely for the API-key kinds (live /models instead).
+  const catalog = isCodexProvider(p) || isAnthropicProvider(p)
+    ? await Promise.race([
+        getModelsDevCatalog(),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
+      ])
+    : undefined;
   return {
     keyIsSet: keySource !== 'none',
     keySource,
@@ -336,8 +346,8 @@ const getState = async (): Promise<PanelState> => {
     isCustom: p.id === CUSTOM_ID,
     kind: p.kind ?? 'openai-chat',
     signedIn,
-    // The OAuth Providers have no /models route — offer the curated list instead of a live fetch.
-    modelOptions: isCodexProvider(p) ? CODEX_MODELS : isAnthropicProvider(p) ? ANTHROPIC_MODELS : undefined,
+    // The OAuth Providers have no /models route — their dropdown comes from models.dev (curated fallback).
+    modelOptions: isCodexProvider(p) ? codexModelsFrom(catalog) : isAnthropicProvider(p) ? anthropicModelsFrom(catalog) : undefined,
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
     effort: isCodexProvider(p) || isAnthropicProvider(p) ? activeEffort() : undefined,
