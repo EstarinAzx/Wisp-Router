@@ -913,6 +913,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
+    aliasPickerShowsModel: () => cfg().get<boolean>('bridge.aliasPickerShowsModel') ?? true,
     port: bridgePort,
     accessSecret: () => bridgeSecret,
     log: (m) => output.appendLine(m),

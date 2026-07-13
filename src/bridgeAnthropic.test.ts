@@ -320,6 +320,13 @@ describe('buildAnthropicModelsList', () => {
     expect(list.data[1]).toEqual({ type: 'model', id: 'claude-wisp-sol', display_name: 'sol — gpt-5.6-terra', created_at: '2025-01-01T00:00:00Z' });
     expect(list.last_id).toBe('claude-wisp-sol');
   });
+
+  // The pinned model in the row is a per-user preference (wisp.bridge.aliasPickerShowsModel): an alias
+  // arriving without a model renders bare — no dangling ' — '.
+  it('renders a bare alias name when no model is passed', () => {
+    const list = buildAnthropicModelsList([], [{ name: 'sol' }]);
+    expect(list.data[0].display_name).toBe('sol');
+  });
 });
 
 describe('buildClaudeCodeSnippets', () => {
