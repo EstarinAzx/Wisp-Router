@@ -1,7 +1,7 @@
 ---
 type: api
 project: wisp
-updated: 2026-07-13
+updated: 2026-07-14
 tags: [context, api, vscode]
 ---
 
@@ -73,9 +73,10 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   Every path renders back through `bridge.ts`'s SSE emitters, OR one aggregated `chat.completion` object when
   the client sent `stream:false`. Tool calls assembled whole. Codex + Anthropic reuse the **same wire shape**
   (`textChunk`/`toolCallChunk`/`finalChunk`) as the keyed path, not a second renderer.
-- **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...))` — the usable Provider ids
+- **`GET /v1/models`:** `buildModelsList(buildChatModelInfos(...), aliasNames)` — the usable Provider ids
   (`{id, object:'model', created:0, owned_by:'wisp'}`): keyed = has a key, **`codex` = signed in** (#39),
-  **`anthropic` = signed in** (#40).
+  **`anthropic` = signed in** (#40); Routing-map **Alias names appended raw** after the ids (#52, read live
+  per request). **Family routes never listed** on either door.
 - **Anthropic door (#45 translator + #46 wiring, LIVE):** requests carrying `anthropic-version` or `x-api-key`
   get the Anthropic dialect (`isAnthropicFlavored`). `POST /v1/messages` (exact path only — `count_tokens` 404s)
   → `parseAnthropicMessagesRequest` (`bridgeAnthropic.ts`: flatten `system` array + mid-messages `role:"system"`,
@@ -91,7 +92,10 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   stream. **Codex tools go `strict:false` on this path** (external toolset — Codex strict mode rejects Claude
   Code's dynamic-map schemas like `AskUserQuestion`). `GET /v1/models` → `buildAnthropicModelsList` (`claude-wisp-<id>`
   aliases + Provider label as `display_name`; **no effort suffix** — Bridge lists thread no effort, only the
-  in-VS-Code picker label carries "· <effort>"). Verified live vs real Claude Code: Codex OAuth **and** keyed
+  in-VS-Code picker label carries "· <effort>"). Routing-map Aliases follow the Providers, also
+  `claude-wisp-` prefixed so a picked entry round-trips through the inbound strip to the alias route (#52);
+  their `display_name` carries the pinned model (`sol — gpt-5`) unless `wisp.bridge.aliasPickerShowsModel`
+  is off (default on; Claude Code refetches the list only on restart). Verified live vs real Claude Code: Codex OAuth **and** keyed
   (OpenCode Go) both stream + complete a tool round-trip (file write); `/effort` max/xhigh/high reach the backend.
 - **Not unit-tested** (glue → F5/manual per PRD); the genuinely-new logic is the unit-tested `bridge.ts` +
   `codexStream`. See [[decisions]] 2026-06-24 (#39 Codex send-path) and the PowerShell test trap in [[gotchas]].
@@ -113,8 +117,8 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
 - The panel calls the same shared actions as the commands (`storeApiKey`/`clearApiKey`/`fetchModelIds`/`setModel`/`setProvider`/`setBaseUrl`/`getState`), injected as a `PanelHost` — panel and commands never drift.
 
 ### Message protocol
-- **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `selectProvider{value}` · `setBaseUrl{value}` · `refreshModels` · `codexSignIn` · `codexSignOut` · `selectEffort{value}` · `bridgeToggle` · `copyBridgeSecret` · `copyBridgeAddress` · `copyClaudeSnippet{value: 'powershell'|'bash'|'settingsJson'}` (#38/#47 — toggle drives the shared start/stop; copies are done host-side via `vscode.env.clipboard`, the snippet rebuilt from host-owned values) · `setFamilyRoute{value:{family,providerId,model}}` (#51 — both halves present → Target stored, else row explicitly unmapped; host validates providerId against the catalog).
-- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', keyEnv, model, baseUrl, providerId, providers: {id,label}[], isCustom, kind?, signedIn?, modelOptions?, effort?, effortOptions?, bridgeRunning, bridgeAddress, bridgeSecret?, claudeSnippets?, routingFamilies?}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`. For a `codex` Provider the panel shows sign-in/out (driven by `signedIn`) instead of the key field, and the model dropdown uses `modelOptions` (the curated `CODEX_MODELS`) since there's no live `/models` fetch. The **Bridge** section (#38) shows a running/stopped dot + Start/Stop, and while running the address + secret (`bridgeSecret` present only then) with Copy buttons, plus a **Routing map** sub-section (#51): four always-visible Family rows (Opus/Sonnet/Haiku/Fable), each a Provider dropdown ("Unmapped" default) + free-text pinned-model field, drafts local to the webview (seeded once from the first `state` push so a half-typed row survives pushes), plus a **Claude Code** sub-section (#47): three copy-paste setup variants (`claudeSnippets` = PowerShell/bash session lines + project `.claude/settings.json` env block, present only while running; built by `buildClaudeCodeSnippets`), a Bridge-off explainer otherwise. No global `~/.claude/settings.json` variant — banned (PRD #43).
+- **webview → ext:** `ready` · `setApiKey{value}` · `clearApiKey` · `selectModel{value}` · `selectProvider{value}` · `setBaseUrl{value}` · `refreshModels` · `codexSignIn` · `codexSignOut` · `selectEffort{value}` · `bridgeToggle` · `copyBridgeSecret` · `copyBridgeAddress` · `copyClaudeSnippet{value: 'powershell'|'bash'|'settingsJson'}` (#38/#47 — toggle drives the shared start/stop; copies are done host-side via `vscode.env.clipboard`, the snippet rebuilt from host-owned values) · `setFamilyRoute{value:{family,providerId,model}}` (#51 — both halves present → Target stored, else row explicitly unmapped; host validates providerId against the catalog) · `setAlias{value:{name,providerId,model}}` + `removeAlias{value:{name}}` (#52 — upsert by exact name / remove; host refuses a name colliding with a Provider id and a dangling Target, the webview shows the visible collision message) · `setAliasPickerShowsModel{value:boolean}` (#52 — writes `wisp.bridge.aliasPickerShowsModel`; the config listener's state push confirms).
+- **ext → webview:** `state{state}` where `state = {keyIsSet, keySource: 'stored'|'env'|'none', keyEnv, model, baseUrl, providerId, providers: {id,label}[], isCustom, kind?, signedIn?, modelOptions?, effort?, effortOptions?, bridgeRunning, bridgeAddress, bridgeSecret?, claudeSnippets?, routingFamilies?, routingAliases?, aliasPickerShowsModel?}` · `models{ids}` · `modelsError{message}` · `activity{thinking}`. For a `codex` Provider the panel shows sign-in/out (driven by `signedIn`) instead of the key field, and the model dropdown uses `modelOptions` (the curated `CODEX_MODELS`) since there's no live `/models` fetch. The **Bridge** section (#38) shows a running/stopped dot + Start/Stop, and while running the address + secret (`bridgeSecret` present only then) with Copy buttons, plus a **Routing map** sub-section (#51/#52): four always-visible Family rows (Opus/Sonnet/Haiku/Fable), each a Provider dropdown ("Unmapped" default) + free-text pinned-model field, drafts local to the webview (seeded once from the first `state` push so a half-typed row survives pushes); below them the saved Alias rows (read-only, ✕ removes) + one draft add-row (name + Provider + model, Add disabled and a visible message on a Provider-id collision) + the alias-picker model-suffix checkbox, plus a **Claude Code** sub-section (#47): three copy-paste setup variants (`claudeSnippets` = PowerShell/bash session lines + project `.claude/settings.json` env block, present only while running; built by `buildClaudeCodeSnippets`), a Bridge-off explainer otherwise. No global `~/.claude/settings.json` variant — banned (PRD #43).
 - **Key is write-only across the boundary** — the value is never sent back (only presence + source), and error text is `sanitizeError`'d so a server 401 body can't leak key fragments. See [[gotchas]].
 - State is pushed on `ready`, on `onDidChangeConfiguration` (any `wisp.*`), and on `secrets.onDidChange` (covers this window's key writes and changes from other windows).
 - **Activity** (`activity{thinking}`) is the live Thinking/Idle signal, pushed separately from `state` on every in-flight transition (`enter/exitInFlight`) **and** on `ready` (via `PanelHost.getActivity`), so it never drags the async `getState`/model-refetch path. The panel renders it as a top status row (pulse dot); the status bar shows the same Activity as `ready`/`thinking`/`error`. See [[decisions]].
