@@ -34,8 +34,11 @@ import { codexStream } from './codexClient';
 import { anthropicStream } from './anthropicClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
-  type ChunkMeta, type FinishReason, type BridgeChatRequest,
+  type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
+import {
+  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, type AnthropicSseMeta,
+} from './bridgeAnthropic';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -127,20 +130,28 @@ const buildCompletion = (meta: ChunkMeta, text: string, calls: { id: string; nam
 export const createBridgeServer = (deps: BridgeDeps) => {
   let server: http.Server | undefined;
 
-  // GET /v1/models — the usable Provider ids. Keyed = has a key; the OAuth rows (Codex #39, Anthropic #40)
-  // are usable when signed in. caps is omitted: the list only needs ids, so the conservative default windows
-  // are fine (no models.dev fetch to stall on).
-  const handleModels = async (res: http.ServerResponse): Promise<void> => {
+  // The usable-Provider descriptors both doors' discovery lists derive from. Keyed = has a key; the OAuth rows
+  // (Codex #39, Anthropic #40) are usable when signed in. caps is omitted: the list only needs ids/labels, so
+  // the conservative default windows are fine (no models.dev fetch to stall on).
+  const computeModelInfos = async () => {
     const keyedPairs = await Promise.all(deps.providers.map(async (p) =>
       [p.id, isCodexProvider(p) ? await deps.codexSignedIn()
         : isAnthropicProvider(p) ? await deps.anthropicSignedIn() : !!(await deps.keyFor(p))] as const));
-    const infos = buildChatModelInfos(deps.providers, {
+    return buildChatModelInfos(deps.providers, {
       keyed: Object.fromEntries(keyedPairs),
       modelMap: deps.modelMap(),
       customBaseUrl: deps.customBaseUrl(),
     });
-    sendJson(res, 200, buildModelsList(infos));
   };
+
+  // GET /v1/models — the OpenAI-door discovery list (one entry per usable Provider id).
+  const handleModels = async (res: http.ServerResponse): Promise<void> =>
+    sendJson(res, 200, buildModelsList(await computeModelInfos()));
+
+  // GET /v1/models — the Anthropic-door discovery list: the same usable Providers in Anthropic shape, ids
+  // aliased claude-wisp-<id> so Claude Code's /model picker lists them (slice #44's decision).
+  const handleAnthropicModels = async (res: http.ServerResponse): Promise<void> =>
+    sendJson(res, 200, buildAnthropicModelsList(await computeModelInfos()));
 
   // POST /v1/chat/completions for the `codex` Provider — the Responses stream behind the ChatGPT sign-in,
   // rendered back through the SAME bridge.ts SSE emitters the keyed path uses (so the wire shape is identical).
@@ -327,61 +338,118 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     }
   };
 
-  // ------------- Slice #44 gate — canned Anthropic door (THROWAWAY until the real translator, #45/#46) ------------- //
+  // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
 
-  // The gate's whole job is recording exactly what Claude Code sends. Auth header VALUES are redacted —
-  // only which header carried the secret is a fact we need.
-  const logWireFacts = (req: http.IncomingMessage, body?: unknown): void => {
-    const h = req.headers;
-    const auth = [h['x-api-key'] ? 'x-api-key' : '', h['authorization'] ? `authorization(${String(h['authorization']).split(' ')[0]})` : '']
-      .filter(Boolean).join(' + ') || 'none';
-    deps.log(`[gate] ${req.method} ${req.url} auth=${auth} anthropic-version=${h['anthropic-version'] ?? '-'} anthropic-beta=${h['anthropic-beta'] ?? '-'} user-agent=${h['user-agent'] ?? '-'}`);
-    if (body !== undefined) deps.log(`[gate] body ${JSON.stringify(body, null, 2)}`);
-  };
-
-  // Anthropic-flavored requests are told apart from OpenAI-door ones by the headers only an Anthropic
-  // client sends — whether that distinguisher holds for real Claude Code is itself a fact the gate records.
+  // Anthropic-door traffic is told apart from OpenAI-door traffic on the shared routes by the headers only an
+  // Anthropic client sends. Slice #44 verified `anthropic-version || x-api-key` cleanly separates them (a
+  // Bearer-only OpenAI client hits neither), so this is the live door selector.
   const isAnthropicFlavored = (req: http.IncomingMessage): boolean =>
     !!(req.headers['anthropic-version'] || req.headers['x-api-key']);
 
-  // The picker experiment: plain provider-style ids alongside claude-wisp-* aliases. Which of the four
-  // survive into Claude Code's /model picker decides slice #46's discovery shape (issue #44 criterion 1).
-  const CANNED_GATE_MODELS = ['codex', 'opencode', 'claude-wisp-codex', 'claude-wisp-opencode'];
-
-  // GET /v1/models, Anthropic discovery shape — hardcoded; the real list arrives with the live wiring (#46).
-  const handleGateModels = (res: http.ServerResponse): void => {
-    const data = CANNED_GATE_MODELS.map((id) => ({ type: 'model', id, display_name: `Wisp gate: ${id}`, created_at: '2026-07-13T00:00:00Z' }));
-    sendJson(res, 200, { data, has_more: false, first_id: data[0].id, last_id: data[data.length - 1].id });
+  // Map a Codex/Anthropic provider stream (text fragments live, whole tool calls at end) onto the door-neutral
+  // BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to stream).
+  const mapOAuthStream = async function* (
+    upstream: AsyncIterable<{ type: 'text'; value: string } | { type: 'toolCall'; call: AssembledToolCall }>,
+  ): AsyncGenerator<BridgeStreamEvent> {
+    for await (const ev of upstream) {
+      if (ev.type === 'text') { if (ev.value) yield { type: 'text', text: ev.value }; }
+      else yield { type: 'tool_call', call: ev.call };
+    }
   };
 
-  // POST /v1/messages — log the request, answer with one canned turn so the session stays alive long enough
-  // to observe. SSE by default (Claude Code always streams); a stream:false body gets the JSON envelope.
-  const handleGateMessages = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
-    let body: any;
-    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
-    logWireFacts(req, body);
-
-    const text = 'Canned reply from the Wisp Bridge gate (slice #44).';
-    const id = `msg_${crypto.randomBytes(12).toString('hex')}`;
-    const model = typeof body?.model === 'string' ? body.model : 'unknown';
-    if (body?.stream === false) {
-      return sendJson(res, 200, {
-        id, type: 'message', role: 'assistant', model,
-        content: [{ type: 'text', text }],
-        stop_reason: 'end_turn', stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 12 },
-      });
+  // Map a keyed OpenAI-SDK stream onto BridgeStreamEvent. Tool calls arrive as fragments across chunks, so they
+  // buffer and assemble whole once the stream ends (the same shape the LM Chat Provider path folds). Structural
+  // chunk type (not the SDK's) keeps this in the module's hand-rolled-shape style.
+  type KeyedChunk = { choices?: { delta?: { content?: string | null; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
+  const mapKeyedStream = async function* (upstream: AsyncIterable<KeyedChunk>): AsyncGenerator<BridgeStreamEvent> {
+    const toolDeltas: ToolCallDelta[] = [];
+    for await (const chunk of upstream) {
+      const choice = chunk.choices?.[0];
+      const delta = choice?.delta?.content ?? '';
+      if (delta) yield { type: 'text', text: delta };
+      for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
     }
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const ev = (type: string, payload: object): void => { res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...payload })}\n\n`); };
-    ev('message_start', { message: { id, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
-    ev('ping', {});
-    ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } });
-    ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text } });
-    ev('content_block_stop', { index: 0 });
-    ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 12 } });
-    ev('message_stop', {});
-    res.end();
+    for (const call of assembleToolCalls(toolDeltas)) yield { type: 'tool_call', call };
+  };
+
+  // Resolve a normalized request + routed Provider to a BridgeStreamEvent stream, doing the creds/client check
+  // EAGERLY so a signed-out (401) / keyless (400) provider is caught before any SSE head is written. The three
+  // provider kinds mirror the OpenAI door's own senders (handleChat/handleCodexChat/handleAnthropicChat).
+  // ponytail: send params match those senders (tool_choice 'auto'); the forced tool_choice + temperature #45
+  // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
+  // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
+  const startProviderStream = async (
+    parsed: BridgeChatRequest, provider: Provider, controller: AbortController,
+  ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent> }> => {
+    const modelId = resolveModel(deps.modelMap(), provider);
+    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+    if (isCodexProvider(provider)) {
+      const creds = await deps.codexCreds();
+      if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      return { ok: true, events: mapOAuthStream(upstream) };
+    }
+    if (isAnthropicProvider(provider)) {
+      const creds = await deps.anthropicCreds();
+      if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      return { ok: true, events: mapOAuthStream(upstream) };
+    }
+    const client = await deps.clientFor(provider);
+    if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
+    const base = buildOpenAiChatMessages(parsed.turns);
+    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
+    const tools = toOpenAiTools(parsed.tools);
+    const upstream = await client.chat.completions.create(
+      { model: modelId, messages, stream: true, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
+      { signal: controller.signal },
+    );
+    return { ok: true, events: mapKeyedStream(upstream) };
+  };
+
+  // POST /v1/messages — the Anthropic door. Parse the Messages body → route (a Provider-id model to that
+  // Provider, an unrecognized id — notably the background tier's raw claude-* — to the Active Provider) →
+  // stream the provider's reply back as Anthropic SSE via the #45 encoder. Claude Code always streams, so this
+  // is SSE-only. message_start echoes the model the client requested (raw, pre-alias-strip).
+  const handleAnthropicMessages = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let body: unknown;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
+
+    const parsed = parseAnthropicMessagesRequest(body as Parameters<typeof parseAnthropicMessagesRequest>[0]);
+    if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
+
+    // A model naming a Provider id routes to it; anything else (the background tier's raw claude-* id) falls
+    // back to the Active Provider — so a mid-session background call never 404s.
+    const provider = deps.providers.find((p) => p.id === parsed.model)
+      ?? deps.providers.find((p) => p.id === deps.activeProviderId());
+    if (!provider) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+
+    const controller = new AbortController();
+    req.on('close', () => controller.abort());
+
+    const requested = (body as { model?: unknown }).model;
+    const meta: AnthropicSseMeta = { id: `msg_${crypto.randomBytes(12).toString('hex')}`, model: typeof requested === 'string' ? requested : parsed.model };
+
+    try {
+      const result = await startProviderStream(parsed, provider, controller);
+      if (!result.ok) return sendError(res, result.status, result.message);
+
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      const enc = createAnthropicSseEncoder(meta);
+      res.write(enc.start());
+      for await (const ev of result.events) res.write(enc.push(ev));
+      res.write(enc.finish());
+      res.end();
+    } catch (err) {
+      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      // A signed-out / refresh-failed OAuth provider throws here — a clean 502 (or end if the SSE head is out).
+      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
+    }
   };
 
   // ----------------------------- Routing ----------------------------- //
@@ -390,14 +458,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
     if (!authOk(req, deps.accessSecret())) return sendError(res, 401, 'invalid or missing access secret');
     const url = req.url ?? '';
+    // Both doors share /v1/models — the Anthropic client's headers select the Anthropic-shaped list.
     if (req.method === 'GET' && url.startsWith('/v1/models')) {
-      logWireFacts(req); // gate: discovery headers answer whether anthropic-version arrives on GET too
-      return isAnthropicFlavored(req) ? handleGateModels(res) : handleModels(res);
+      return isAnthropicFlavored(req) ? handleAnthropicModels(res) : handleModels(res);
     }
-    // Exact path only — /v1/messages/count_tokens must fall through to the logged 404, not the canned reply.
-    if (req.method === 'POST' && (url === '/v1/messages' || url.startsWith('/v1/messages?'))) return handleGateMessages(req, res);
+    // Exact path only — /v1/messages/count_tokens must fall through to the 404, not the messages door.
+    if (req.method === 'POST' && (url === '/v1/messages' || url.startsWith('/v1/messages?'))) return handleAnthropicMessages(req, res);
     if (req.method === 'POST' && url.startsWith('/v1/chat/completions')) return handleChat(req, res);
-    logWireFacts(req); // gate: any endpoint Claude Code probes beyond the two doors is a wire fact
     return sendError(res, 404, `no route for ${req.method} ${url}`);
   };
 
