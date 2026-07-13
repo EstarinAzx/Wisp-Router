@@ -8,59 +8,52 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-14 by Fable 5 (auto)._
-_At commit: release-1.6.0 work on `feat/routing-map-row-dropdowns` (#53 + release chores), shipping to
-main via PR at wrap-up time._
+_At commit: c1f63dc on `main` (docs: TUI groundwork), pushed._
 
 ## Current focus
-**v1.6.0 released.** The Routing map arc (#50 PRD) is complete: #51 Family routes, #52 Aliases +
-models-list advertising, #53 per-row model dropdowns — all merged to main (PRs #54, #55, and the
-#53/release PR). Version bumped to 1.6.0, CHANGELOG entry added, README fully rewritten (was stale at
-1.5.0: new repo name Wisp-Router, Routing map section, Bridge de-experimentalized, new setting,
-Anthropic tokens in Security). New `.vsix` packaged + GitHub release v1.6.0.
+**The Wisp TUI arc is fully staged, zero code written.** `/preset init` ran end to end: grill →
+MVD → PRD [#57](https://github.com/EstarinAzx/Wisp-Router/issues/57) → tickets #58–#67
+(`ready-for-agent`) + #68/#69 backlog. The TUI (opentui + Bun) becomes the face + only config
+surface of Wisp; the extension shrinks to VS Code chat routing (v2.0.0); Bridge moves to
+`wisp serve`; `claude-wisp` launcher added.
 
 ## State
 - **Done this session:**
-  - **Shipped the stacked pair:** PR #54 (`feat/routing-map-family-routes` — #51 + Anthropic-door
-    vision fix) and PR #55 (`feat/routing-map-aliases` — #52), both merged with merge commits.
-  - **#53 per-row model dropdowns (demo-verified by user):** every Routing-map row (4 family rows +
-    alias add-row) upgrades free-text model → dropdown fed by the row's Provider. New pure
-    `oauthModelOptions(p, catalog)` in `catalog.ts` (+4 tests, suite 304/304); `providerModelIds(id)`
-    in `extension.ts` (OAuth → models.dev w/ 4s race, keyed → `clientForProvider(p).models.list()`,
-    ANY failure → `[]`); `fetchProviderModels`/`providerModels` webview messages (silent empty, no
-    error spam); webview caches per Provider per panel session, drops cache when `keyIsSet` flips,
-    free-text fallback when no list.
-  - **Release 1.6.0 chores:** `package.json` 1.6.0 + repo URL → `Wisp-Router.git` + description
-    mentions Claude.ai/Claude Code; CHANGELOG 1.6.0 entry (Routing map ×3 + vision fix); README
-    rewritten whole.
-- **In flight:** nothing (post-release).
+  - Grill settled every branch — see decisions.md 2026-07-14 entry + ADRs 0001–0003 (`docs/adr/`).
+  - `CONTEXT.md`: TUI-era terms (Wisp TUI, Wisp home, wisp serve, claude-wisp) + third Provider
+    kind (Anthropic) fixed.
+  - `.context/happy-path.md`: fourth MVD — "Wisp TUI — install to bridged Claude Code".
+  - PRD #57 published; tickets #58–#67 with real blocking edges; #68 (chat mode) + #69
+    (copilot-wisp) as unlabeled backlog.
+  - All docs committed to main (c1f63dc) and pushed.
+- **In flight:** nothing.
 - **Blocked:** nothing.
 
 ## Pick up here
-1. **TUI PRD for Wisp** via `/preset init` (user-stated order — next line of work).
+**`/preset scope 58`** — TUI slice 1 (restructure: bun-workspaces monorepo, packages
+core / vscode / tui). The only unblocked ticket; frontier then runs #59 → #60 → fan-out.
+Read #58's body + ADR-0001 before planning.
 
 ## Skills for next session
-- /preset pick-up — resume from the note.
-- /preset init — the TUI PRD is a fresh idea → interview → MVD → spec → tickets.
+- /preset scope — entry gate for ticket #58.
+- superpowers:using-git-worktrees — restructure is a whole-repo move; isolate it on a branch.
 
 ## Open questions
-- Still deferred by design: forced `tool_choice` + `temperature` not threaded on the OpenAI door;
-  OpenAI-door Codex strict-tools limit.
-- Routing-map Targets + aliases store raw provider ids with no rename migration (deliberate skip).
+- (carried) forced `tool_choice` + `temperature` not threaded on the OpenAI door; OpenAI-door
+  Codex strict-tools limit; routing-map rename migration — all deliberate skips.
 
 ## Recent context
-- Row-dropdown design (#53): one cache entry serves every row sharing a Provider; a row Provider
-  switch calls `ensureProviderModels` (one fetch per Provider per panel session); saved family rows
-  prefetch on first state push. `rowModelOptions(providerId, current)` prepends the current value when
-  absent (same idiom as the main picker) and returns undefined → free-text input.
-- Known ceiling: when a list IS available the row offers only listed ids (+current) — a brand-new
-  unlisted model needs the list fetch to fail or a temporary Provider de-pick to type free text.
-- Git trap hit this session: a commit intended for a fresh branch landed on local main (HEAD had
-  slid back between `checkout -b` and the commit — cause unclear); fixed with `git branch -f`.
-  Sanity-check `git branch --show-current` right before committing.
+- Ticket dependency shape: #58→#59→#60, then #61/#62/#63/#65 fan out from #60; #64 behind #63;
+  #66 (extension shrink) gated on #61+#63+#65 (TUI must reach full panel parity first — no
+  configuration gap); #67 (release) behind #64.
+- npm names checked: `wisp` + `wisp-cli` taken; package is `wisp-router`, bins `wisp` +
+  `claude-wisp`.
+- opentui-on-plain-Node deliberately left unresolved — compiled binaries (ADR-0003) make it moot.
+- OAuth two-process refresh races: spec answer is atomic writes + re-read-before-refresh on
+  auth.json (acceptance criteria in #59).
 
 ## Related
 - [[overview]]
-- [[api]] — panel message protocol + Routing map rows (updated this session)
-- [[decisions]] — 2026-07-13 Routing-map entry (covers the whole arc's design)
-- [[gotchas]] — stale-build + dup-panel traps
-- [[happy-path]] — "Bridge Routing map" MVD
+- [[decisions]] — 2026-07-14 TUI-arc entry + ADR pointers
+- [[happy-path]] — the new TUI MVD embedded in PRD #57
+- [[gotchas]] — stale-build + dup-panel traps still apply while the extension is touched
