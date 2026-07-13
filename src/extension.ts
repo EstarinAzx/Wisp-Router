@@ -325,6 +325,12 @@ const setAlias = async (name: string, target: Target): Promise<void> => {
   void panel?.postState();
 };
 
+// Panel toggle for the alias picker rows' model-id suffix (#52). A plain config write — the wisp.*
+// config listener re-pushes the panel state, and the Bridge reads the setting live per list request.
+const setAliasPickerShowsModel = async (on: boolean): Promise<void> => {
+  await cfg().update('bridge.aliasPickerShowsModel', on, targetFor('bridge.aliasPickerShowsModel'));
+};
+
 // Remove one Alias row by name (#52). Unknown names are a no-op.
 const removeAlias = async (name: string): Promise<void> => {
   const map = activeRoutingMap();
@@ -400,6 +406,7 @@ const getState = async (): Promise<PanelState> => {
     // The Routing map's four Family rows (#51) + Alias rows (#52) — drive the panel's routing section.
     routingFamilies: activeRoutingMap().families,
     routingAliases: activeRoutingMap().aliases,
+    aliasPickerShowsModel: cfg().get<boolean>('bridge.aliasPickerShowsModel') ?? true,
     // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
     // they cross the boundary only while running, like bridgeSecret.
     claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
@@ -888,6 +895,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     setFamilyRoute, // Routing map Family rows (#51) — set/clear one row
     setAlias, // Routing map Alias rows (#52) — add/retarget one
     removeAlias, // Routing map Alias rows (#52) — remove one by name
+    setAliasPickerShowsModel, // alias picker rows: pinned-model suffix on/off (#52)
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,

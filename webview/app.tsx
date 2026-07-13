@@ -14,7 +14,7 @@
  *     | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut | selectEffort{value}
  *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
- *     | removeAlias{value:{name}}.
+ *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
  */
 
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -41,6 +41,7 @@ type State = {
   claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), present only while running
   routingFamilies?: Partial<Record<FamilyKey, { providerId: string; model: string }>>; // the Routing map's four Family rows (#51)
   routingAliases?: { name: string; target: { providerId: string; model: string } }[]; // the Routing map's Alias rows (#52)
+  aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52)
 };
 
 // The Routing map's four fixed Family routes (#51) — rendered as always-visible rows, in this order.
@@ -469,6 +470,20 @@ export const App = () => {
         <p class="text-xs text-[var(--vscode-descriptionForeground)]">
           Aliases are exact bridged model names (e.g. /model sol) answering with their Target. They also appear in the Bridge's models list.
         </p>
+        {/* Optimistic echo like chooseModel — the config listener's state push confirms; without it an
+            unrelated re-render mid-round-trip snaps the checkbox back. */}
+        <label class="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={state.aliasPickerShowsModel !== false}
+            onChange={(e) => {
+              const on = e.currentTarget.checked;
+              setState({ ...state, aliasPickerShowsModel: on });
+              vscode.postMessage({ type: 'setAliasPickerShowsModel', value: on });
+            }}
+          />
+          Show pinned model next to aliases in Claude Code's /model list
+        </label>
 
         {/* --------------------- Claude Code setup (#47) --------------------- */}
         {/* Ready-to-copy env snippets pointing Claude Code at the live door. Per-session shell lines are the
