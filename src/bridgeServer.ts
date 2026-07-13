@@ -414,7 +414,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (isAnthropicProvider(provider)) {
       const creds = await deps.anthropicCreds();
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
-      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      // images must ride along (the Codex + keyed paths already forward them) — omitting them here was the
+      // door's vision hole: inline attaches never reached the Anthropic backend.
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };

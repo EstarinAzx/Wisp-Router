@@ -127,6 +127,24 @@ describe('parseAnthropicMessagesRequest', () => {
     });
   });
 
+  // Claude Code's Read on an image file returns the pixels as an image block INSIDE tool_result content.
+  // Those hoist into the turn's images[] (the normalized toolResults content stays plain text) so the
+  // send-builders forward them — dropping them blinds the model to every Read-a-screenshot call.
+  it('hoists an image block inside tool_result content into images', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_7', content: [
+          { type: 'text', text: 'image 2525x1427' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'PIXELS' } },
+        ] },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0]).toEqual({
+      role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'toolu_7', content: 'image 2525x1427' }],
+      images: [{ mimeType: 'image/png', dataBase64: 'PIXELS' }],
+    });
+  });
+
   // Tools ride through: name/description kept, input_schema → inputSchema (Anthropic's JSON schema verbatim).
   it('maps tools to ToolSpec', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }],
