@@ -48,7 +48,7 @@ New ids work day one without code changes: `codexModelCaps` and `anthropicModelC
 family/regex, and `anthropicThinkingEffort` omits the thinking fields for ids not in its support
 table (degrades, never 400s).
 
-## Optional slice — live caps for the OAuth kinds (strike if unwanted)
+## Slice 2 — live caps for the OAuth kinds (approved in-scope)
 
 models.dev reports `gpt-5.6-sol` at 1.05M context / 128K output; `codexModelCaps` hardcodes
 400K/32K for all gpt-5.x — the caps tables go stale exactly like the model lists did. Fix in the
