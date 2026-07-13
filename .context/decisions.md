@@ -1203,6 +1203,37 @@ the canned door; plain ids stay usable via `--model`/`ANTHROPIC_MODEL` (sent ver
 validation), so the alias list costs nothing in capability.
 **Reversibility:** easy — discovery list shape is one function; the strip is one line inbound.
 
+## 2026-07-13 — The Bridge door forwards Codex tools `strict:false` (external toolsets can't be strict-coerced)
+**Decision:** On the Anthropic door's Codex path, `toCodexResponsesTools(tools, false)` sends tools **non-strict**
+— the schema rides through verbatim, no strict closure. `toCodexResponsesTools` gained a `strict` flag (default
+true, so the native VS Code agent path is unchanged). Tried first: extend `enforceStrictResponsesSchema` to strip
+Codex-rejected keywords (`propertyNames`, `patternProperties`, …) — that strip stays as strict-path hardening but
+did NOT solve it (Codex then rejected the coerced `required`/`properties` mismatch on `AskUserQuestion`'s dynamic
+`answers` map).
+**Why:** Codex strict mode demands a fixed closed shape (every object `additionalProperties:false`, `required` ==
+all keys, no open/dynamic maps). Claude Code's built-in tools (esp. `AskUserQuestion`, a question→answer map) can't
+be expressed that way — coercing them is whack-a-mole, one strict violation after another. A proxy doesn't own the
+external client's schemas, so it must forward them loosely, exactly as the OpenAI-chat and Anthropic tool builders
+already do. Verified live: Codex OAuth completes a tool round-trip through the door with strict:false.
+**Reversibility:** easy — one flag; native path untouched. Note the OpenAI door's Codex path (`handleCodexChat`)
+still sends strict — same latent limit for Copilot's tools, out of #46 scope.
+
+## 2026-07-13 — The door honors Claude Code's /effort (reverses the "panel effort only" deferral)
+**Decision:** The Anthropic door reads **`output_config.effort`** (where Claude Code's `/effort` rides) and,
+when it's a valid ladder value, it **overrides the Wisp panel effort** for the door's Codex + Anthropic sends
+(`max` still folds to `xhigh` on Codex's wire). Absent/junk → panel effort, exactly the old behavior. A log
+line per door call names which effort won (`[bridge] messages <provider> effort=<level> (claude code|panel)`).
+Companion fix: `buildChatModelInfos` appends the "· <effort>" picker-label suffix **only when the caller
+threads an effort** — the in-VS-Code Copilot picker does (live panel value), the Bridge doors don't (their
+effort is per-request now, so a static label would pin DEFAULT_EFFORT forever — both doors' discovery lists
+showed a frozen "· medium" regardless of the real level).
+**Why:** User-directed — wanted gpt models driven at Claude Code's chosen depth. Verified live: `/effort`
+xhigh/high/max each arrived at the door (`effort=max (claude code)` in the Wisp channel). The remaining
+carried-but-not-threaded extras (forced `tool_choice`, `temperature`) stay deferred. Claude Code's own banner
+effort badge doesn't repaint after `/effort` — hardcoded upstream UI, no knob; not ours.
+**Reversibility:** easy (drop the `parsed.effort ??` override) — but don't: the deferral was explicitly
+reversed on request, and the suffix-only-when-threaded rule keeps discovery labels honest.
+
 ## Related
 - [[overview]]
 - [[oauth-recon]]

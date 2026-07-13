@@ -332,6 +332,14 @@ describe('buildChatModelInfos', () => {
     expect(info.name).toBe('Codex — gpt-5.3-codex-spark');
   });
 
+  // No effort threaded (the Bridge doors) → no suffix at all. The doors' effort is per-request (Claude
+  // Code's /effort), so a static label would pin DEFAULT_EFFORT forever — it must stay bare instead.
+  it('omits the Effort suffix when no effort is threaded', () => {
+    const codex = provider({ id: 'codex', label: 'Codex', defaultModel: 'gpt-5.3-codex', kind: 'codex' });
+    const [info] = buildChatModelInfos([codex], { keyed: { codex: true }, modelMap: {}, customBaseUrl: '' });
+    expect(info.name).toBe('Codex — gpt-5.3-codex');
+  });
+
   // No dynamic caps (no catalogKey / offline) → the neutral default window, decomposed so input+output
   // total it. There is no per-model context guess table; an unknown model is honestly "neutral default".
   it('uses the neutral default window when there are no caps', () => {

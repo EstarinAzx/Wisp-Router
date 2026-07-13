@@ -12,7 +12,7 @@ Wisp is a **BYOK model router** for the Copilot harness, registering your own ba
 
 Net: run Copilot's chat / agent / edit experience on the model access you already pay for — your ChatGPT or Claude.ai subscription, or any key-based backend.
 
-- **Version:** 1.4.0
+- **Version:** 1.5.0
 - **Requires:** VS Code 1.104+
 - **Repo:** [github.com/EstarinAzx/Wisp](https://github.com/EstarinAzx/Wisp)
 - **Not on the Marketplace** — install from a `.vsix` release or from source (see [Install](#install)).
@@ -125,12 +125,13 @@ Inquire is **code-only** and **fails safe**: a block whose search text isn't fou
 
 > **Experimental.** The Bridge is new and may change. It opens a local network listener — treat it as a power-user feature.
 
-The Bridge is the **reverse** of the chat harness: instead of routing your backends *into* VS Code, it exposes them *out* as one ordinary **OpenAI-compatible endpoint** on `127.0.0.1`, so external tools — notably the **GitHub Copilot CLI** — can run on the same providers, including your **ChatGPT (Codex)** and **Claude.ai** subscriptions.
+The Bridge is the **reverse** of the chat harness: instead of routing your backends *into* VS Code, it exposes them *out* as a local endpoint on `127.0.0.1` speaking **two dialects** — OpenAI-compatible and Anthropic Messages — so external tools like the **GitHub Copilot CLI** and **Claude Code** can run on the same providers, including your **ChatGPT (Codex)** and **Claude.ai** subscriptions.
 
 - **Turn it on** from the **Wisp side panel** (Bridge **Start / Stop**) or the **`Wisp: Toggle Bridge`** command. While running, the panel shows the **address** (`http://127.0.0.1:41184` by default) and a generated **access secret**, both with copy buttons.
-- **Auth.** Every request needs `Authorization: Bearer <access secret>`. The secret is generated on start, lives in the OS keychain, and is shown only while the Bridge is running.
-- **Endpoints.** `GET /v1/models` and `POST /v1/chat/completions` (streaming or not). A request naming a provider id routes to it; anything else falls back to your **Active Provider**.
+- **Auth.** Every request needs the access secret — `Authorization: Bearer <secret>` or `x-api-key: <secret>`. The secret is generated on start, lives in the OS keychain, and is shown only while the Bridge is running.
+- **Endpoints.** `GET /v1/models`, `POST /v1/chat/completions` (OpenAI dialect, streaming or not), and `POST /v1/messages` (Anthropic dialect, SSE). A request naming a provider id routes to it; anything else falls back to your **Active Provider**.
 - **Copilot CLI, zero setup.** Terminals opened *after* you start the Bridge inherit `COPILOT_*` environment variables that point the Copilot CLI straight at the Bridge — open a new terminal, run `copilot`, and it's already on your Wisp providers.
+- **Claude Code, copy-paste setup.** The panel's **Claude Code** section (Bridge running) offers ready-to-copy env snippets — PowerShell / bash session lines or a project `.claude/settings.json` block — carrying the live address, secret, and model-discovery flag. Paste, open a fresh terminal, run `claude`: every Wisp provider shows up in Claude Code's own `/model` picker (as `claude-wisp-*` rows) with streaming and full tool round-trips, and Claude Code's `/effort` level is forwarded to the backend.
 - **Local only.** The listener binds `127.0.0.1` (never a public interface). Change the port with [`wisp.bridge.port`](#settings).
 
 ---

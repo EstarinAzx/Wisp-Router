@@ -12,7 +12,7 @@
  *     the extension sends. activity carries the live Thinking/Idle state, separate from state.
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
  *     | setBaseUrl{value} | refreshModels | codexSignIn | codexSignOut | selectEffort{value}
- *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress.
+ *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}.
  */
 
 import { useEffect, useRef, useState } from 'preact/hooks';
@@ -36,6 +36,7 @@ type State = {
   bridgeRunning: boolean;
   bridgeAddress: string;
   bridgeSecret?: string; // present only while running — the secret to paste into the Copilot CLI
+  claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), present only while running
 };
 
 type InMsg =
@@ -344,6 +345,36 @@ export const App = () => {
               Open a new terminal after starting so the Copilot CLI inherits the Bridge.
             </p>
           </div>
+        )}
+
+        {/* --------------------- Claude Code setup (#47) --------------------- */}
+        {/* Ready-to-copy env snippets pointing Claude Code at the live door. Per-session shell lines are the
+            default; the project .claude/settings.json block is the persistent variant. The global
+            ~/.claude/settings.json form is deliberately never offered — it would reroute every session. */}
+        <h3 class="section-title mt-2">Claude Code</h3>
+        {state.claudeSnippets ? (
+          <div class="flex flex-col gap-1.5">
+            {([
+              ['PowerShell (this session)', 'powershell', state.claudeSnippets.powershell],
+              ['bash (this session)', 'bash', state.claudeSnippets.bash],
+              ['Project .claude/settings.json (persistent)', 'settingsJson', state.claudeSnippets.settingsJson],
+            ] as const).map(([label, variant, text]) => (
+              <div key={variant} class="flex flex-col gap-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="min-w-0 flex-1 text-xs text-[var(--vscode-descriptionForeground)]">{label}</span>
+                  <button class="btn btn-secondary shrink-0" title={`Copy ${label} snippet`} onClick={() => vscode.postMessage({ type: 'copyClaudeSnippet', value: variant })}>Copy</button>
+                </div>
+                <pre class="input overflow-x-auto whitespace-pre text-xs">{text}</pre>
+              </div>
+            ))}
+            <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+              Claude Code reads env at startup — open a new terminal (or restart claude) after applying.
+            </p>
+          </div>
+        ) : (
+          <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+            Start the Bridge to get copy-paste setup snippets for Claude Code.
+          </p>
         )}
       </section>
 

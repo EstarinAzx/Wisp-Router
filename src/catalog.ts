@@ -298,9 +298,11 @@ export const buildChatModelInfos = (
     const outputBudget = dyn?.maxOutput ?? DEFAULT_MAX_OUTPUT_TOKENS;
     const maxOutputTokens = Math.min(outputBudget, Math.max(1, Math.floor(totalContext / 2)));
     const maxInputTokens = Math.max(totalContext - maxOutputTokens, 1);
-    // Codex reasoning rows mirror the active Effort in the picker label (· medium). Reuse codexReasoning's
-    // gate so an inert spark/gpt-4.x row never claims a depth; non-Codex rows never get a suffix.
-    const depth = isCodexProvider(p) && codexReasoning(model) ? ` · ${state.effort ?? DEFAULT_EFFORT}` : '';
+    // Codex reasoning rows mirror the active Effort in the picker label (· medium) — but only when the
+    // caller threads one (the in-VS-Code picker does). The Bridge doors don't: their effort is per-request
+    // (Claude Code's /effort), so a static label would show DEFAULT_EFFORT forever — noise, and a lie.
+    // codexReasoning still gates so an inert spark/gpt-4.x row never claims a depth.
+    const depth = isCodexProvider(p) && state.effort && codexReasoning(model) ? ` · ${state.effort}` : '';
     return [{
       id: p.id,
       name: `${p.label} — ${model}${depth}`,
@@ -487,7 +489,7 @@ export type CodexInputItem =
 // A Responses-API function tool. FLAT (name/description/parameters at top level), unlike chat completions'
 // nested `function` object. strict:true makes Codex honour the schema exactly — which is why every object
 // in `parameters` must be closed (additionalProperties:false) with all its keys required.
-export type CodexResponsesTool = { type: 'function'; name: string; description: string; parameters: Record<string, unknown>; strict: true };
+export type CodexResponsesTool = { type: 'function'; name: string; description: string; parameters: Record<string, unknown>; strict: boolean };
 
 export type CodexResponsesBody = {
   model: string;
@@ -508,6 +510,10 @@ export type CodexResponsesBody = {
 const enforceStrictResponsesSchema = (schema: unknown): Record<string, unknown> => {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {};
   const record: Record<string, unknown> = { ...(schema as Record<string, unknown>) };
+  // Codex strict mode accepts only a fixed closed shape; the dynamic-/open-object keywords 400 it
+  // (observed: Claude Code's AskUserQuestion carries `propertyNames`). Strip them at every level — Codex
+  // already forces additionalProperties:false + required-all, so these map-keywords are inert anyway.
+  for (const k of ['propertyNames', 'patternProperties', 'unevaluatedProperties', 'minProperties', 'maxProperties', 'dependencies', 'dependentSchemas']) delete record[k];
   if (record.type === 'object') {
     record.additionalProperties = false;
     const props = record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties)
@@ -532,15 +538,21 @@ const enforceStrictResponsesSchema = (schema: unknown): Record<string, unknown> 
   return record;
 };
 
-// Map VS Code tool defs to strict Responses function tools. A tool with no schema gets an empty closed
-// object ({} forced to a strict object), so the API still sees a valid (and strict) parameters field.
-export const toCodexResponsesTools = (tools: ToolSpec[]): CodexResponsesTool[] =>
+// Map tool defs to Responses function tools. `strict` (default true) drives Codex's exact-schema mode for
+// native VS Code tools — every object closed, all keys required. The Bridge door forwarding an EXTERNAL
+// client's toolset (Claude Code) passes strict:false: Codex strict rejects rich schemas an external toolset
+// carries (dynamic keyed maps, propertyNames, partial `required`), so the schema rides through verbatim
+// instead — the same leniency the OpenAI-chat and Anthropic tool builders already give. A tool with no
+// schema gets an empty object either way, so the parameters field is always valid.
+export const toCodexResponsesTools = (tools: ToolSpec[], strict = true): CodexResponsesTool[] =>
   tools.map((t) => ({
     type: 'function',
     name: t.name,
     description: t.description,
-    parameters: enforceStrictResponsesSchema(t.inputSchema ?? { type: 'object', properties: {} }),
-    strict: true,
+    parameters: strict
+      ? enforceStrictResponsesSchema(t.inputSchema ?? { type: 'object', properties: {} })
+      : ((t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} }),
+    strict,
   }));
 
 // The Codex backend REQUIRES a non-empty instructions field (400 "Instructions are required" otherwise).
