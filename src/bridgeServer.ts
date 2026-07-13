@@ -37,7 +37,8 @@ import {
   type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
 import {
-  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, anthropicErrorFrame, type AnthropicSseMeta,
+  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, anthropicErrorFrame,
+  type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
 
 // ----------------------------- Dependencies ----------------------------- //
@@ -379,10 +380,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
   const startProviderStream = async (
-    parsed: BridgeChatRequest, provider: Provider, controller: AbortController,
+    parsed: BridgeAnthropicRequest, provider: Provider, controller: AbortController,
   ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent> }> => {
     const modelId = resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+    // Claude Code's /effort (output_config.effort, #47) wins over the panel effort when present — the badge
+    // Claude Code shows next to the model then matches what the backend actually runs.
+    const effort = parsed.effort ?? deps.effort();
     if (isCodexProvider(provider)) {
       const creds = await deps.codexCreds();
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
@@ -390,7 +394,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
       // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
-      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
+      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(effort), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
     }
     if (isAnthropicProvider(provider)) {
@@ -398,7 +402,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
       const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
     }
     const client = await deps.clientFor(provider);
@@ -429,6 +433,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const provider = deps.providers.find((p) => p.id === parsed.model)
       ?? deps.providers.find((p) => p.id === deps.activeProviderId());
     if (!provider) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+
+    // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's.
+    // The observable for #47's effort threading; without it a quick reply proves nothing.
+    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'})`);
 
     const controller = new AbortController();
     req.on('close', () => controller.abort());
