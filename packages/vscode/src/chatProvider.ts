@@ -6,7 +6,7 @@
  *     Providers as selectable models in the native chat / Ctrl+I picker and streams their replies.
  *   - openai: the streamed chat client, built per-Provider by the injected clientFor (same
  *     OpenAI-compatible pattern Inquire uses, with stream: true).
- *   - ./catalog: Provider type + resolveModel + buildChatModelInfos (the vscode-free descriptor
+ *   - @wisp/core: Provider type + resolveModel + buildChatModelInfos (the vscode-free descriptor
  *     builder, unit-tested) — this file is only the vscode/openai glue around it.
  *
  * Design: an ADDITIONAL surface only. Inquire stays the primary feature and is untouched; this just
@@ -17,7 +17,7 @@
  * Data shapes:
  *   - ChatProviderDeps: the seam to extension.ts — the catalog, the current model-map/baseUrl getters,
  *     and async per-Provider key/client resolvers.
- *   - NormalizedTurn (from ./catalog): a vscode-free flattening of each chat turn (text + tool calls +
+ *   - NormalizedTurn (from @wisp/core): a vscode-free flattening of each chat turn (text + tool calls +
  *     tool results) that the pure builder turns into OpenAI messages — this file does the vscode-part
  *     extraction, catalog does the shaping. Tool calling is supported: agent tools are forwarded and
  *     streamed tool-call fragments are emitted back as LanguageModelToolCallParts.
@@ -30,10 +30,10 @@ import {
   buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools, toCodexResponsesTools, isCodexProvider, codexModelCaps,
   isAnthropicProvider, anthropicModelCaps, toAnthropicTools, standardEffortToCodex,
   type NormalizedTurn, type ToolCallDelta, type CodexCreds, type EffortLevel, type AnthropicCreds,
-} from './catalog';
-import { codexStream } from './codexClient';
-import { anthropicStream } from './anthropicClient';
-import { getModelsDevCatalog } from './modelsDev';
+} from '@wisp/core';
+import { codexStream } from '@wisp/core';
+import { anthropicStream } from '@wisp/core';
+import { getModelsDevCatalog } from '@wisp/core';
 
 // ----------------------------- Dependencies ----------------------------- //
 

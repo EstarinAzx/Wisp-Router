@@ -8,11 +8,11 @@
  *     just a redirect catcher).
  *   - node crypto: PKCE (S256) + CSRF state.
  *   - node fs/os/path: import an existing Codex CLI login from ~/.codex/auth.json.
- *   - ./catalog: the pure introspection cores (parseChatgptAccountId, shouldRefreshCodexToken,
+ *   - @wisp/core: the pure introspection cores (parseChatgptAccountId, shouldRefreshCodexToken,
  *     parseCodexAuthJson, isCodexSignedIn) + the CodexCreds shape — all unit-tested, vscode-free.
  *
  * Data shapes:
- *   - CodexCreds (from ./catalog): { accessToken?, refreshToken?, idToken?, accountId?, apiKey? } —
+ *   - CodexCreds (from @wisp/core): { accessToken?, refreshToken?, idToken?, accountId?, apiKey? } —
  *     the stored token bundle. The OAuth access token is the bearer for the subscription Codex backend.
  *
  * Flow: published Codex-CLI OAuth app (client_id app_EMoamEEZ…, PKCE S256, loopback :1455 redirect,
@@ -28,7 +28,7 @@ import { randomBytes, webcrypto } from 'crypto';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import { CodexCreds, parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn } from './catalog';
+import { CodexCreds, parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 

@@ -3,13 +3,12 @@
     "module": "commonjs",
     "target": "ES2021",
     "lib": ["ES2021"],
-    "outDir": "out",
-    "rootDir": "src",
-    "sourceMap": true,
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src"],
-  "exclude": ["node_modules", "out", "src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts"]
 }

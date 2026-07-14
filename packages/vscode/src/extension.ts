@@ -9,7 +9,7 @@
  *   - ./sidePanelProvider: the side-panel webview. It receives the shared action helpers below
  *     (storeApiKey/clearApiKey/fetchModelIds/setModel/setProvider/setBaseUrl/getState) so panel and
  *     commands drive the exact same logic.
- *   - ./catalog: vscode-free Provider-catalog data + the Inquire edit-prompt/reply helpers.
+ *   - @wisp/core: vscode-free Provider-catalog data + the Inquire edit-prompt/reply helpers.
  *
  * Design decisions (settled in design review): chat-as-editor over the whole file (one confirmable
  * WorkspaceEdit replace, add and delete in one shot), non-streaming, key in SecretStorage (env-var
@@ -25,16 +25,16 @@ import {
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
   isAnthropicProvider, isAnthropicSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds,
-} from './catalog';
-import { getModelsDevCatalog } from './modelsDev';
-import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from './routing';
+} from '@wisp/core';
+import { getModelsDevCatalog } from '@wisp/core';
+import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
-import { createBridgeServer } from './bridgeServer';
-import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from './bridgeAnthropic';
+import { createBridgeServer } from '@wisp/core';
+import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
 import { CodexAuth } from './codexAuth';
-import { codexInquire } from './codexClient';
+import { codexInquire } from '@wisp/core';
 import { AnthropicAuth } from './anthropicAuth';
-import { anthropicInquire } from './anthropicClient';
+import { anthropicInquire } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 

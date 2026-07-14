@@ -24,7 +24,7 @@
 
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
-import type { FamilyKey, Target } from './routing';
+import type { FamilyKey, Target } from '@wisp/core';
 
 // ----------------------------- Types ----------------------------- //
 

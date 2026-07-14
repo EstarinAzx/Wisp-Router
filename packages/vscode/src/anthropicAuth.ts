@@ -6,12 +6,12 @@
  *     both injected via the constructor so this module isn't otherwise coupled to the editor host.
  *   - node http/net: a one-shot localhost server that captures the OAuth redirect (NOT an OAuth server,
  *     just a redirect catcher).
- *   - ./catalog: the shared PKCE/state generators + the pure token cores (AnthropicCreds shape,
+ *   - @wisp/core: the shared PKCE/state generators + the pure token cores (AnthropicCreds shape,
  *     tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds, isAnthropicSignedIn) —
  *     all unit-tested and vscode-free.
  *
  * Data shapes:
- *   - AnthropicCreds (from ./catalog): { accessToken?, refreshToken?, expiresAt? } — the stored token
+ *   - AnthropicCreds (from @wisp/core): { accessToken?, refreshToken?, expiresAt? } — the stored token
  *     bundle. The OAuth access token is the bearer for the subscription Messages backend; expiresAt is
  *     an absolute epoch-ms deadline computed at exchange time (Anthropic tokens carry no JWT exp).
  *
@@ -27,7 +27,7 @@ import type { AddressInfo } from 'net';
 import {
   AnthropicCreds, codeVerifier, codeChallenge, oauthState,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds, isAnthropicSignedIn,
-} from './catalog';
+} from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 
