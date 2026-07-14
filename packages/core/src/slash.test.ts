@@ -77,4 +77,8 @@ describe('SLASH_COMMANDS — the real palette', () => {
     const names = SLASH_COMMANDS.map((c) => c.name);
     for (const n of ['signin', 'signout', 'effort']) expect(names).toContain(n);
   });
+
+  it('carries the wiring check (#62)', () => {
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain('test');
+  });
 });

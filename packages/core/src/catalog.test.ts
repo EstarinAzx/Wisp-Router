@@ -8,6 +8,7 @@ import {
   modelSupportsVision,
   parseModelsDevEntry, lookupModelsDevCaps,
   oauthModelOptions, CODEX_MODELS, ANTHROPIC_MODELS,
+  chatCompletionTextDelta,
   CUSTOM_ID, type Provider,
 } from './catalog';
 
@@ -618,5 +619,29 @@ describe('oauthModelOptions', () => {
   // Keyed kinds answer undefined — they have a live /models route, not a curated list.
   it('is undefined for keyed kinds', () => {
     expect(oauthModelOptions(provider(), undefined)).toBeUndefined();
+  });
+});
+
+describe('chatCompletionTextDelta', () => {
+  // The OpenAI chat-completions stream is data-only SSE (no event: line) — one JSON chunk per block,
+  // answer text under choices[0].delta.content. This is the /test command's block→text step.
+  it('extracts the content delta from a chunk', () => {
+    expect(chatCompletionTextDelta('data: {"choices":[{"delta":{"content":"hi"}}]}')).toBe('hi');
+  });
+
+  it('joins multiple data lines before parsing', () => {
+    expect(chatCompletionTextDelta('data: {"choices":[{"delta":\ndata: {"content":"hi"}}]}')).toBe('hi');
+  });
+
+  // The leading role chunk carries content:null; keep-alives carry no data line at all.
+  it('answers empty for role chunks, keep-alives, and the [DONE] sentinel', () => {
+    expect(chatCompletionTextDelta('data: {"choices":[{"delta":{"role":"assistant","content":null}}]}')).toBe('');
+    expect(chatCompletionTextDelta(': keep-alive')).toBe('');
+    expect(chatCompletionTextDelta('data: [DONE]')).toBe('');
+  });
+
+  it('answers empty for malformed JSON and shapeless chunks', () => {
+    expect(chatCompletionTextDelta('data: not-json')).toBe('');
+    expect(chatCompletionTextDelta('data: {"object":"chat.completion.chunk"}')).toBe('');
   });
 });

@@ -466,6 +466,23 @@ export const assembleToolCalls = (deltas: ToolCallDelta[]): AssembledToolCall[] 
   return [...byIndex.values()];
 };
 
+// One OpenAI chat-completions SSE block → its answer-text delta. Chat streams are data-only SSE
+// (no event: line, so parseSseBlock can't read them): each block is one JSON chunk with the text
+// under choices[0].delta.content. '' for anything else — role chunks (content:null), keep-alives,
+// the [DONE] sentinel, malformed JSON. The TUI's /test wiring check consumes this per block.
+// ponytail: mid-stream `data: {"error":…}` frames on a 200 read as '' — surface them if a real
+// compat backend is seen emitting one.
+export const chatCompletionTextDelta = (block: string): string => {
+  const dataLines = block.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('data:'));
+  if (dataLines.length === 0) return '';
+  const raw = dataLines.map((l) => l.slice('data:'.length).trim()).join('\n');
+  if (raw === '[DONE]') return '';
+  try {
+    const parsed = JSON.parse(raw) as { choices?: { delta?: { content?: string | null } }[] };
+    return parsed?.choices?.[0]?.delta?.content ?? '';
+  } catch { return ''; }
+};
+
 // ----------------------------- Migration ----------------------------- //
 
 // Decide what the one-time pre-catalog migration should do, given the current storage state. Returns
