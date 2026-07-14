@@ -209,8 +209,11 @@ export const App = () => {
 
       {mode.kind === 'providers' && (
         <box border title="Active Provider" marginTop={1} flexDirection="column">
+          {/* select collapses to zero rows without an explicit height; an option is 2 rows with description */}
           <select
             focused
+            height={Math.min(PROVIDERS.length * 2, 16)}
+            showScrollIndicator
             options={PROVIDERS.map((p) => ({
               name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
               description: p.id,
@@ -229,6 +232,8 @@ export const App = () => {
         <box border title="Set key for…" marginTop={1} flexDirection="column">
           <select
             focused
+            height={Math.min(keyedProviders().length * 2, 16)}
+            showScrollIndicator
             options={keyedProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
             onSelect={(_i, opt) => {
               const p = PROVIDERS.find((x) => x.id === opt?.value);
@@ -249,9 +254,13 @@ export const App = () => {
       )}
 
       {mode.kind === 'model-pick' && (
-        <box border title={`Model — ${mode.provider.label}`} marginTop={1} flexDirection="column" maxHeight={14}>
+        <box border title={`Model — ${mode.provider.label}`} marginTop={1} flexDirection="column">
+          {/* descriptions are empty here — hide them so each model is one row */}
           <select
             focused
+            height={Math.min(mode.options.length, 14)}
+            showDescription={false}
+            showScrollIndicator
             options={mode.options.map((id) => ({
               name: id === resolveModel(home.readConfig().models ?? {}, mode.provider) ? `${id} (current)` : id,
               description: '',
