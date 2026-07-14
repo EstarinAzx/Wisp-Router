@@ -100,38 +100,6 @@
     "configuration": {
       "title": "Wisp",
       "properties": {
-        "wisp.provider": {
-          "type": "string",
-          "scope": "machine",
-          "default": "opencode-go",
-          "enum": [
-            "opencode-go",
-            "opencode-zen",
-            "codex",
-            "anthropic",
-            "openai",
-            "groq",
-            "mistral",
-            "openrouter",
-            "ollama",
-            "ollama-cloud",
-            "kilocode",
-            "cline",
-            "custom"
-          ],
-          "description": "Active Provider — which Provider's base URL your API key is sent to. 'custom' uses wisp.baseUrl. Machine-scoped because selecting a Provider selects where your bearer key is sent, so a workspace must not be able to redirect it. Unknown values fall back to opencode-go."
-        },
-        "wisp.baseUrl": {
-          "type": "string",
-          "scope": "machine",
-          "default": "https://opencode.ai/zen/go/v1",
-          "description": "OpenAI-compatible base URL used ONLY when the Active Provider is 'custom' (built-in Providers use their own hardcoded URLs and ignore this). Machine-scoped so a workspace cannot redirect requests (and the API key) to another endpoint."
-        },
-        "wisp.model": {
-          "type": "string",
-          "default": "minimax-m3",
-          "description": "Model id (bare, as served by /models — the endpoint rejects a provider-prefixed id). Run 'Wisp: List / Choose Model' to discover valid ids."
-        },
         "wisp.maxTokens": {
           "type": "number",
           "default": 0,
@@ -141,17 +109,6 @@
           "type": "number",
           "default": 0.1,
           "description": "Sampling temperature. Low keeps edits deterministic."
-        },
-        "wisp.bridge.port": {
-          "type": "number",
-          "scope": "machine",
-          "default": 41184,
-          "description": "Port the Bridge listener binds on 127.0.0.1 (the local OpenAI-compatible endpoint external tools point at). Machine-scoped so a workspace cannot move the listener. Change it if the default clashes with another local service."
-        },
-        "wisp.bridge.aliasPickerShowsModel": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the alias's pinned model id in Claude Code's /model picker ('sol — gpt-5'). Off lists the bare alias name ('sol'). Claude Code fetches the list at startup, so a change shows after its next restart."
         }
       }
     }

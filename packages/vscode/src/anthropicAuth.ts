@@ -2,18 +2,20 @@
 
 /*
  * Depends on:
- *   - vscode: SecretStorage (token slot, never plaintext settings) + openExternal (system browser) —
- *     both injected via the constructor so this module isn't otherwise coupled to the editor host.
+ *   - injected store accessors: the anthropic slice of ~/.wisp/auth.json (ADR-0002) — extension.ts
+ *     wires them to its WispHome, so this module never touches the filesystem layout itself.
+ *   - injected openExternal (system browser) — keeps the module decoupled from the editor host.
  *   - node http/net: a one-shot localhost server that captures the OAuth redirect (NOT an OAuth server,
  *     just a redirect catcher).
  *   - @wisp/core: the shared PKCE/state generators + the pure token cores (AnthropicCreds shape,
- *     tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds, isAnthropicSignedIn) —
+ *     tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn) —
  *     all unit-tested and vscode-free.
  *
  * Data shapes:
  *   - AnthropicCreds (from @wisp/core): { accessToken?, refreshToken?, expiresAt? } — the stored token
  *     bundle. The OAuth access token is the bearer for the subscription Messages backend; expiresAt is
  *     an absolute epoch-ms deadline computed at exchange time (Anthropic tokens carry no JWT exp).
+ *   - AnthropicCredsStore: { read, write } over that bundle — read undefined = never signed in.
  *
  * Flow: Claude Code's published OAuth app (client_id 9d1c250a-…, PKCE S256, OS-assigned loopback
  * redirect). Sign-in opens the browser to the claude.ai consent page, captures the code on the loopback,
@@ -21,12 +23,11 @@
  * token is within 5 minutes of expiry.
  */
 
-import * as vscode from 'vscode';
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
 import {
   AnthropicCreds, codeVerifier, codeChallenge, oauthState,
-  tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds, isAnthropicSignedIn,
+  tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn,
 } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
@@ -41,9 +42,6 @@ const ANTHROPIC_CALLBACK_PATH = '/callback';
 // The full scope set Claude Code's OAuth app registers — mirrored exactly so the subscriber consent +
 // inference behave identically to the reference. user:inference is the gate that enables Messages calls.
 const ANTHROPIC_SCOPE = 'user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload org:create_api_key';
-// SecretStorage slot — deliberately OUTSIDE the wisp.apiKey.<id> namespace (and distinct from Codex's
-// wisp.codexAuth) so the bundles never collide.
-const ANTHROPIC_SECRET_SLOT = 'wisp.anthropicAuth';
 // Abandon a sign-in the user never completes, so the loopback server can't linger forever.
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
 
@@ -148,63 +146,71 @@ const runAnthropicOAuth = async (openExternal: (url: string) => Thenable<boolean
 
 // ----------------------------- AnthropicAuth — store + refresh ----------------------------- //
 
-// Owns the Anthropic token lifecycle against one SecretStorage. extension.ts holds a single instance and
-// drives sign-in/out commands + the Inquire anthropic branch through it.
+// The anthropic slice of ~/.wisp/auth.json, as extension.ts exposes it.
+export type AnthropicCredsStore = {
+  read: () => AnthropicCreds | undefined;
+  write: (creds: AnthropicCreds) => void;
+};
+
+// Owns the Anthropic token lifecycle against one auth.json slice. extension.ts holds a single instance
+// and drives sign-in/out commands + the Inquire anthropic branch through it.
 export class AnthropicAuth {
   constructor(
-    private readonly secrets: vscode.SecretStorage,
+    private readonly store: AnthropicCredsStore,
     private readonly openExternal: (url: string) => Thenable<boolean>,
     private readonly log: (message: string) => void,
   ) {}
 
-  // Read the stored bundle; a corrupt slot reads as "no creds" rather than throwing (parseAnthropicCreds).
-  private read = async (): Promise<AnthropicCreds | undefined> =>
-    parseAnthropicCreds(await this.secrets.get(ANTHROPIC_SECRET_SLOT));
-
-  private store = (creds: AnthropicCreds): Thenable<void> => this.secrets.store(ANTHROPIC_SECRET_SLOT, JSON.stringify(creds));
-
   // Refresh the access token when it's within the 5-minute skew window, persisting the new bundle.
+  // Two processes share auth.json (extension + TUI), so RE-READ before refreshing (#59): if the other
+  // process already rotated the token, use its bundle instead of firing our stale refresh token.
   // Subscribers OMIT scopes on refresh so the backend re-expands them. A failed refresh is non-fatal —
   // keep the existing creds (they may still work; the live call surfaces a 401).
   private refreshIfNeeded = async (creds: AnthropicCreds): Promise<AnthropicCreds> => {
     if (!creds.refreshToken || !shouldRefreshAnthropicToken(creds, Date.now())) return creds;
+    const fresh = this.store.read() ?? creds;
+    if (!shouldRefreshAnthropicToken(fresh, Date.now())) return fresh;
+    if (!fresh.refreshToken) return fresh;
+    let next: AnthropicCreds;
     try {
       const res = await fetch(ANTHROPIC_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: creds.refreshToken, client_id: ANTHROPIC_CLIENT_ID }),
+        body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: fresh.refreshToken, client_id: ANTHROPIC_CLIENT_ID }),
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) { this.log(`[anthropic] token refresh failed (${res.status})`); return creds; }
+      if (!res.ok) { this.log(`[anthropic] token refresh failed (${res.status})`); return fresh; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
-      const next = tokensToAnthropicCreds(payload, Date.now());
+      next = tokensToAnthropicCreds(payload, Date.now());
       // The refresh response may omit a fresh refresh_token — keep the old one so the next refresh works.
-      if (!next.refreshToken) next.refreshToken = creds.refreshToken;
-      await this.store(next);
-      return next;
+      if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
       this.log(`[anthropic] token refresh error: ${String(err)}`);
-      return creds;
+      return fresh;
     }
+    // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
+    // write must not discard the new bundle — keep using it in memory and let a later write retry.
+    try { this.store.write(next); } catch (err) { this.log(`[anthropic] token persist error: ${String(err)}`); }
+    return next;
   };
 
   // Sign in via the browser OAuth flow and persist the result.
   signIn = async (): Promise<AnthropicCreds> => {
     const creds = await runAnthropicOAuth(this.openExternal);
-    await this.store(creds);
+    this.store.write(creds);
     return creds;
   };
 
-  // Sign out by writing an empty TOMBSTONE rather than deleting the slot — mirrors Codex so a present-
+  // Sign out by writing an empty TOMBSTONE rather than deleting the field — mirrors Codex so a present-
   // but-bearer-less blob reads as "signed out" (isAnthropicSignedIn === false).
-  signOut = (): Thenable<void> => this.store({});
+  signOut = (): void => this.store.write({});
 
   // The credentials to use right now: the stored bundle, refreshed if near expiry. undefined = not signed in.
   current = async (): Promise<AnthropicCreds | undefined> => {
-    const creds = await this.read();
+    const creds = this.store.read();
     return creds ? this.refreshIfNeeded(creds) : undefined;
   };
 
   // Cheap signed-in check for UI/usability — read-only (no refresh round-trip).
-  isSignedIn = async (): Promise<boolean> => isAnthropicSignedIn(await this.read());
+  isSignedIn = async (): Promise<boolean> => isAnthropicSignedIn(this.store.read());
 }

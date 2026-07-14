@@ -104,7 +104,7 @@ Reach Claude by running **`Wisp: Sign in to Claude`** (OAuth with a Claude.ai ac
 
 | Provider | Auth | Notes |
 | --- | --- | --- |
-| **Custom** | Bearer key | Any OpenAI-compatible base URL you supply via [`wisp.baseUrl`](#settings). |
+| **Custom** | Bearer key | Any OpenAI-compatible base URL you supply in the side panel. |
 
 > **Not providers:** GitHub Copilot and Cursor are deliberately excluded (incompatible / against their ToS).
 
@@ -135,14 +135,14 @@ The Bridge is the **reverse** of the chat harness: instead of routing your backe
 - **Endpoints.** `GET /v1/models`, `POST /v1/chat/completions` (OpenAI dialect, streaming or not), and `POST /v1/messages` (Anthropic dialect, SSE). A request naming a provider id, alias, or mapped family routes accordingly; anything else falls back to your **Active Provider**.
 - **Copilot CLI, zero setup.** Terminals opened *after* you start the Bridge inherit `COPILOT_*` environment variables that point the Copilot CLI straight at the Bridge — open a new terminal, run `copilot`, and it's already on your Wisp providers.
 - **Claude Code, copy-paste setup.** The panel's **Claude Code** section (Bridge running) offers ready-to-copy env snippets — PowerShell / bash session lines or a project `.claude/settings.json` block — carrying the live address, secret, and model-discovery flag. Paste, open a fresh terminal, run `claude`: every Wisp provider shows up in Claude Code's own `/model` picker (as `claude-wisp-*` rows) with streaming and full tool round-trips, and Claude Code's `/effort` level is forwarded to the backend.
-- **Local only.** The listener binds `127.0.0.1` (never a public interface). Change the port with [`wisp.bridge.port`](#settings).
+- **Local only.** The listener binds `127.0.0.1` (never a public interface). Change the port via `bridge.port` in [`~/.wisp/config.json`](#settings).
 
 ### Routing map
 
 By default every bridged request answers with your Active Provider. The **Routing map** (in the panel's Bridge section) pins bridged model names to backends you choose instead:
 
 - **Family routes.** Four fixed rows — `opus`, `sonnet`, `haiku`, `fable`. A bridged `claude-*` id of that family answers with the row's **Target** (the picked Provider + a pinned model). So Claude Code's own model names fan out the way you want: opus-grade traffic to a strong backend, haiku-grade traffic to a cheap one. Unmapped rows keep the Active-Provider default.
-- **Aliases.** Invent exact model names (e.g. `sol`) and point each at its own Target. Aliases are advertised in both dialects' model lists — they appear right in Claude Code's `/model` picker (optionally with their pinned model: `sol — gpt-5.6-terra`, toggleable via [`wisp.bridge.aliasPickerShowsModel`](#settings)) — and `/model sol` routes to its Target. Names that would shadow a provider id are refused.
+- **Aliases.** Invent exact model names (e.g. `sol`) and point each at its own Target. Aliases are advertised in both dialects' model lists — they appear right in Claude Code's `/model` picker (optionally with their pinned model: `sol — gpt-5.6-terra`, toggleable via `bridge.aliasPickerShowsModel` in [`~/.wisp/config.json`](#settings)) — and `/model sol` routes to its Target. Names that would shadow a provider id are refused.
 - **Per-row model dropdowns.** Each row's model field is a real dropdown listing the picked Provider's models — the models.dev catalog for the OAuth kinds, a live `/models` fetch (with that provider's own key) for keyed kinds. If a list can't be fetched (offline, no key yet), the field falls back to free text — configuring a route is never blocked.
 
 Claude Code reads the model list at startup — restart it (or open a new session) after editing aliases to see them in the picker. Routes themselves apply live, per request.
@@ -175,26 +175,28 @@ Available from the Command Palette (and the editor chrome where noted):
 
 ## Settings
 
-All settings live under `wisp.*`.
+Wisp's state lives in the **Wisp home** at `~/.wisp/` and is shared with the Wisp TUI:
 
-| Setting | Default | Scope | Description |
-| --- | --- | --- | --- |
-| `wisp.provider` | `opencode-go` | Machine | The Active Provider id. |
-| `wisp.baseUrl` | `https://opencode.ai/zen/go/v1` | Machine | Base URL — **used only when `wisp.provider` is `custom`** (built-in providers use their own hardcoded URLs). |
-| `wisp.model` | `minimax-m3` | — | Bare model id (the endpoints reject provider-prefixed ids). |
-| `wisp.maxTokens` | `0` | — | Max output tokens; `0` = uncapped. |
-| `wisp.temperature` | `0.1` | — | Sampling temperature. |
-| `wisp.bridge.port` | `41184` | Machine | Port the Bridge listener binds on `127.0.0.1`. |
-| `wisp.bridge.aliasPickerShowsModel` | `true` | — | Show each alias's pinned model in Claude Code's `/model` picker (`sol — gpt-5`); off lists the bare alias name. Applies after Claude Code's next restart. |
+- `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`). Managed by the side panel; hand-editable (the extension picks up external edits live).
+- `~/.wisp/auth.json` — API keys and OAuth tokens, owner-only file permissions.
+
+Existing VS Code state (SecretStorage keys, provider/model/routing choices) is migrated into `~/.wisp/` once, on the first launch after upgrading.
+
+Only editor-local tuning remains under VS Code `wisp.*` settings:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `wisp.maxTokens` | `0` | Max output tokens; `0` = uncapped. |
+| `wisp.temperature` | `0.1` | Sampling temperature. |
 
 ---
 
 ## Security
 
-- **Keys live in the OS keychain** (VS Code SecretStorage) — never in plaintext settings. Per-provider environment-variable fallbacks exist (e.g. `OPENCODE_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_KEY`).
+- **Keys live in `~/.wisp/auth.json`** with owner-only permissions (the same posture as the Codex CLI, Claude Code, and opencode) — never in VS Code settings. Per-provider environment-variable fallbacks exist (e.g. `OPENCODE_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_KEY`).
 - **Keys are write-only to the UI** — the stored key value is never exposed back to the webview.
-- **No workspace key redirection.** Built-in provider base URLs are hardcoded in the extension and the provider selector is **machine-scoped**, so a malicious workspace can't redirect your Bearer key to an attacker's endpoint. Only the **Custom** provider's URL is user-supplied (also machine-scoped).
-- **OAuth tokens** (Codex and Claude) are stored in SecretStorage; sign-out writes a tombstone so a CLI login is not silently re-imported. You can import an existing Codex CLI login (`~/.codex/auth.json`).
+- **No workspace key redirection.** Built-in provider base URLs are hardcoded in the extension, and the Active Provider + Custom URL live in `~/.wisp/config.json` — outside any workspace's reach — so a malicious workspace can't redirect your Bearer key to an attacker's endpoint.
+- **OAuth tokens** (Codex and Claude) are stored in `auth.json`; sign-out writes a tombstone so a CLI login is not silently re-imported. You can import an existing Codex CLI login (`~/.codex/auth.json`).
 - **The Bridge binds `127.0.0.1` only** and every request must carry the generated access secret, compared in constant time.
 
 ---

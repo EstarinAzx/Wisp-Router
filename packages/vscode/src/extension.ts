@@ -2,18 +2,22 @@
 
 /*
  * Depends on:
- *   - vscode: editor host API — registers the Inquire command, reads settings, stores the key
- *     in the OS keychain (SecretStorage), drives the status-bar indicator and the cancellation token.
+ *   - vscode: editor host API — registers the Inquire command, drives the status-bar indicator and
+ *     the cancellation token; SecretStorage/globalState are read ONLY by the one-time migration.
  *   - openai: OpenAI-compatible client, pointed at the Active Provider's base URL — the exact pattern
  *     used by the reference llm-provider (`new OpenAI({ apiKey, baseURL })` → chat.completions.create).
  *   - ./sidePanelProvider: the side-panel webview. It receives the shared action helpers below
  *     (storeApiKey/clearApiKey/fetchModelIds/setModel/setProvider/setBaseUrl/getState) so panel and
  *     commands drive the exact same logic.
- *   - @wisp/core: vscode-free Provider-catalog data + the Inquire edit-prompt/reply helpers.
+ *   - @wisp/core: vscode-free Provider-catalog data + the Inquire edit-prompt/reply helpers + the
+ *     Wisp home store (~/.wisp/config.json + auth.json, ADR-0002) — the source of truth for keys,
+ *     OAuth bundles, Active Provider, models, Effort, Routing map, and Bridge settings, shared with
+ *     the TUI. VS Code keeps only editor-local tuning (wisp.maxTokens, wisp.temperature).
  *
  * Design decisions (settled in design review): chat-as-editor over the whole file (one confirmable
- * WorkspaceEdit replace, add and delete in one shot), non-streaming, key in SecretStorage (env-var
- * fallback), a per-Provider model memory, and a status-bar heartbeat because latency is user-visible.
+ * WorkspaceEdit replace, add and delete in one shot), non-streaming, key in the owner-only auth.json
+ * (env-var fallback), a per-Provider model memory, and a status-bar heartbeat because latency is
+ * user-visible.
  */
 
 import * as vscode from 'vscode';
@@ -35,18 +39,19 @@ import { CodexAuth } from './codexAuth';
 import { codexInquire } from '@wisp/core';
 import { AnthropicAuth } from './anthropicAuth';
 import { anthropicInquire } from '@wisp/core';
+import { WispHome, planSecretsMigration, seedConfigFromVsCode } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 
 const CONFIG_NS = 'wisp';
-// Legacy (pre-catalog) keychain slot. Per-Provider keys now live in `${SECRET_KEY}.<id>` slots;
-// this bare name is read once by migrateLegacyKey() then deleted. Not a literal key.
+// Legacy (pre-catalog) keychain slot. Keys live in ~/.wisp/auth.json since #59; the SecretStorage
+// slots below are read once by the migrations then deleted. Not literal keys.
 const SECRET_KEY = 'wisp.apiKey';
-
-// SecretStorage slot for the Bridge access secret — the Bearer the listener requires on every request.
-// Generated once on first start (never in plaintext settings) then reused, so a configured CLI stays valid.
+// Legacy SecretStorage slots for the OAuth bundles + the Bridge access secret — migration-only.
+const CODEX_SECRET_SLOT = 'wisp.codexAuth';
+const ANTHROPIC_SECRET_SLOT = 'wisp.anthropicAuth';
 const BRIDGE_SECRET_SLOT = 'wisp.bridge.secret';
-// Default Bridge port (overridable via wisp.bridge.port) — a fixed high port unlikely to clash.
+// Default Bridge port (overridable via config.json bridge.port) — a fixed high port unlikely to clash.
 const DEFAULT_BRIDGE_PORT = 41184;
 
 // ----------------------------- Provider catalog ----------------------------- //
@@ -102,19 +107,21 @@ const PROVIDERS: Provider[] = [
   { id: 'custom', label: 'Custom', baseUrl: '', defaultModel: '', apiKeyEnv: '' },
 ];
 
-// globalState key for the per-Provider model memory: { providerId: model }.
+// Legacy globalState keys — the older migrations still shuffle them, then the config.json seed
+// reads them once (#59); nothing else touches globalState anymore.
 const MODEL_MAP_KEY = 'wisp.models';
-// globalState key for the Codex reasoning Effort — one global value (not per-model), same store as models.
 const EFFORT_KEY = 'wisp.effort';
-// globalState key for the Bridge Routing map (#51): { families, aliases } — read live per Bridge request.
 const ROUTING_MAP_KEY = 'wisp.routingMap';
 
 // ----------------------------- Module state ----------------------------- //
 
 let output: vscode.OutputChannel;
-let secrets: vscode.SecretStorage;
-let globalState: vscode.Memento; // per-Provider model memory ({ providerId: model }) lives here
+let secrets: vscode.SecretStorage; // migration-only — the store below owns secrets since #59
+let globalState: vscode.Memento; // migration-only — old model/effort/routing homes, seeded into config.json
 let statusBar: vscode.StatusBarItem;
+
+// The Wisp home store (~/.wisp/) — config.json + auth.json, shared with the TUI (ADR-0002).
+let home: WispHome;
 
 // Reuse one client; rebuild only when key/baseURL change (construction is local, no network).
 let cachedClient: { key: string; baseURL: string; client: OpenAI } | undefined;
@@ -126,7 +133,7 @@ let lastError = false;
 // Side panel handle so key/config changes can push fresh state into the webview.
 let panel: WispPanelProvider | undefined;
 
-// Codex OAuth/token lifecycle (sign-in, store, import, refresh). Set in activate once SecretStorage
+// Codex OAuth/token lifecycle (sign-in, store, import, refresh). Set in activate once the home store
 // exists; the Inquire codex branch + the sign-in/out commands + the panel state all go through it.
 let codexAuth: CodexAuth;
 
@@ -137,7 +144,7 @@ let anthropicAuth: AnthropicAuth;
 // until toggled on (PRD: no local port open until the user deliberately enables it).
 let bridge: ReturnType<typeof createBridgeServer>;
 // The Bridge access secret, held in memory only while the Bridge runs (the listener reads it sync per
-// request, so it can't await SecretStorage). Loaded/generated on start, cleared to '' on stop.
+// request). Loaded/generated from auth.json on start, cleared to '' on stop.
 let bridgeSecret = '';
 // VS Code's env-var collection — terminals opened after start inherit the COPILOT_* BYOK vars (#35 finding),
 // pointing the Copilot CLI at the live Bridge with no user setup; cleared on stop.
@@ -155,48 +162,46 @@ const onDidChangeCodeLenses = new vscode.EventEmitter<void>();
 
 // ----------------------------- Configuration ----------------------------- //
 
+// Editor-local tuning only (maxTokens, temperature) — everything else lives in ~/.wisp/config.json.
 const cfg = () => vscode.workspace.getConfiguration(CONFIG_NS);
 
-// The Active Provider is the source of truth. Read wisp.provider; an unknown id falls back to the
-// default row (PROVIDERS[0]) so a stale/typo'd setting can never leave us provider-less.
+// The Active Provider is the source of truth. Read config.json; an unknown id falls back to the
+// default row (PROVIDERS[0]) so a stale/typo'd value can never leave us provider-less.
 const activeProvider = (): Provider =>
-  PROVIDERS.find((p) => p.id === cfg().get<string>('provider')) ?? PROVIDERS[0];
+  PROVIDERS.find((p) => p.id === home.readConfig().provider) ?? PROVIDERS[0];
 
-// SecretStorage slot for a Provider's key: `wisp.apiKey.<id>` (the bare SECRET_KEY is the
-// pre-catalog legacy slot, migrated once on activate).
+// Legacy SecretStorage slot for a Provider's key: `wisp.apiKey.<id>` — migration reads only.
 const keySlot = (id: string): string => `${SECRET_KEY}.${id}`;
 
-// The slot a Provider's key lives in — its own, unless it borrows a sibling's via keyId (OpenCode Zen
-// reads/writes Go's slot). All key get/store/delete/display routes through this so a shared credential
-// stays single-sourced.
-const keySlotFor = (p: Provider): string => keySlot(resolveKeyId(p));
-
-// Active model: the Provider's remembered model (globalState) else its native default. Each Provider
+// Active model: the Provider's remembered model (config.json) else its native default. Each Provider
 // keeps its own model — one global id is wrong across Providers (Zen minimax-m3 vs Groq llama-…).
 const activeModel = (): string =>
-  resolveModel(globalState.get<Record<string, string>>(MODEL_MAP_KEY) ?? {}, activeProvider());
+  resolveModel(home.readConfig().models ?? {}, activeProvider());
 
-// The reasoning Effort — one global value (globalState), defaulting to medium so existing behavior is
+// The reasoning Effort — one global value (config.json), defaulting to medium so existing behavior is
 // unchanged. Shared by Codex + Anthropic; ignored by every keyed Provider. Stored as the wider EffortLevel
 // (#32 'max'); each send site normalizes (standardEffortToCodex for Codex, the clamp for Anthropic).
-const activeEffort = (): EffortLevel => globalState.get<EffortLevel>(EFFORT_KEY) ?? DEFAULT_EFFORT;
+const activeEffort = (): EffortLevel => home.readConfig().effort ?? DEFAULT_EFFORT;
 
-// The Bridge Routing map (globalState) — empty (everything → Active Provider) until the panel sets rows.
-const activeRoutingMap = (): RoutingMap => globalState.get<RoutingMap>(ROUTING_MAP_KEY) ?? EMPTY_ROUTING_MAP;
+// The Bridge Routing map (config.json) — empty (everything → Active Provider) until the panel sets rows.
+const activeRoutingMap = (): RoutingMap => home.readConfig().routing ?? EMPTY_ROUTING_MAP;
 
 // Base URL for the Active Provider. Built-ins use their hardcoded catalog URL; only Custom reads the
-// user-supplied, machine-scoped wisp.baseUrl (every built-in ignores that setting entirely).
-const activeBaseUrl = (): string => resolveBaseUrl(activeProvider(), cfg().get<string>('baseUrl') ?? '');
+// user-supplied customBaseUrl (every built-in ignores that field entirely).
+const activeBaseUrl = (): string => resolveBaseUrl(activeProvider(), home.readConfig().customBaseUrl ?? '');
 
-// The Bridge listen port — wisp.bridge.port, or the fixed default when unset.
-const bridgePort = (): number => cfg().get<number>('bridge.port') ?? DEFAULT_BRIDGE_PORT;
+// The Bridge listen port — config.json bridge.port, or the fixed default when unset.
+const bridgePort = (): number => home.readConfig().bridge?.port ?? DEFAULT_BRIDGE_PORT;
 
-// Key resolution for a given Provider: its (possibly borrowed, via keyId) SecretStorage slot first,
+// The alias picker rows' pinned-model suffix toggle (#52) — config.json, on by default.
+const aliasPickerShowsModel = (): boolean => home.readConfig().bridge?.aliasPickerShowsModel ?? true;
+
+// Key resolution for a given Provider: its (possibly borrowed, via keyId) auth.json entry first,
 // then the row's own env var (OPENCODE_API_KEY for OpenCode, GROQ_API_KEY for Groq, …). Never read from
 // plaintext settings. Takes the Provider explicitly so the chat surface can resolve any catalog row, not
-// only the Active one.
+// only the Active one. Still async — callers predate the sync store and the seam stays put.
 const keyForProvider = async (p: Provider): Promise<string> => {
-  const stored = await secrets.get(keySlotFor(p));
+  const stored = home.readAuth().keys?.[resolveKeyId(p)];
   return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';
 };
 
@@ -209,7 +214,7 @@ const resolveApiKey = (): Promise<string> => keyForProvider(activeProvider());
 const clientForProvider = async (p: Provider): Promise<OpenAI | undefined> => {
   const key = await keyForProvider(p);
   if (!key) return undefined;
-  const baseURL = resolveBaseUrl(p, cfg().get<string>('baseUrl') ?? '');
+  const baseURL = resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '');
   if (!baseURL) return undefined;
   return new OpenAI({ apiKey: key, baseURL });
 };
@@ -254,16 +259,19 @@ const exitInFlight = () => { inFlight = Math.max(0, inFlight - 1); renderStatus(
 // Single source of truth for key/model/provider mutations — the Command Palette commands and the
 // side panel both call these, so the two surfaces can never drift apart.
 
-// Panel sync after key changes happens via the secrets.onDidChange listener in activate() —
-// it fires for our own store/delete too, and for changes made from other VS Code windows.
+// Key writes land in auth.json under the Provider's (possibly borrowed) key id. The explicit postState
+// keeps the panel instant; the ~/.wisp watcher covers other windows and external (TUI) edits.
 const storeApiKey = async (value: string): Promise<void> => {
-  await secrets.store(keySlotFor(activeProvider()), value.trim());
+  home.writeAuth({ keys: { ...home.readAuth().keys, [resolveKeyId(activeProvider())]: value.trim() } });
   cachedClient = undefined;
+  void panel?.postState();
 };
 
 const clearApiKey = async (): Promise<void> => {
-  await secrets.delete(keySlotFor(activeProvider()));
+  const { [resolveKeyId(activeProvider())]: _dropped, ...rest } = home.readAuth().keys ?? {};
+  home.writeAuth({ keys: rest });
   cachedClient = undefined;
+  void panel?.postState();
 };
 
 // Probe GET <baseUrl>/models for the ids the endpoint actually serves. Return them exactly
@@ -300,94 +308,85 @@ const providerModelIds = async (id: string): Promise<string[]> => {
   }
 };
 
-// Write to the narrowest scope that already defines the value — a Global write under a
-// workspace override changes nothing effective and the panel controls would just snap back.
-const targetFor = (key: string): vscode.ConfigurationTarget => {
-  const info = cfg().inspect(key);
-  if (info?.workspaceFolderValue !== undefined) return vscode.ConfigurationTarget.WorkspaceFolder;
-  if (info?.workspaceValue !== undefined) return vscode.ConfigurationTarget.Workspace;
-  return vscode.ConfigurationTarget.Global;
+// COPILOT_MODEL rides the process env into new terminals (#35) — keep it true when the Provider or its
+// model changes mid-run. Only the model var; BASE_URL stays bound to the port.
+const refreshCopilotModelEnv = (): void => {
+  if (bridge.isRunning()) envCollection.replace('COPILOT_MODEL', activeModel());
 };
 
-// Remember the chosen model under the Active Provider (globalState), then mirror it into wisp.model
-// (the config write re-syncs the panel and rebuilds the client via onDidChangeConfiguration).
+// Remember the chosen model under the Active Provider (config.json). Store writes fire no VS Code
+// event, so re-push the panel state explicitly — the pattern for every mutation below.
 const setModel = async (id: string): Promise<void> => {
   const p = activeProvider();
-  await globalState.update(MODEL_MAP_KEY, { ...(globalState.get<Record<string, string>>(MODEL_MAP_KEY) ?? {}), [p.id]: id });
-  await cfg().update('model', id, targetFor('model'));
-};
-
-// Persist the Codex reasoning Effort (one global value in globalState). Unlike setModel — which mirrors
-// into wisp.model and rides the config-change listener back to the panel — a globalState write fires NO
-// config event, so re-push the panel state explicitly or the select would not reflect the change.
-const setEffort = async (effort: EffortLevel): Promise<void> => {
-  await globalState.update(EFFORT_KEY, effort);
+  home.writeConfig({ models: { ...home.readConfig().models, [p.id]: id } });
+  cachedClient = undefined;
+  refreshCopilotModelEnv();
   void panel?.postState();
 };
 
-// Set or clear one Family route (#51). Same globalState-write pattern as setEffort: no config event
-// fires, so re-push the panel state explicitly. The Bridge reads the map live per request — the next
+// Persist the Codex reasoning Effort (one global value in config.json).
+const setEffort = async (effort: EffortLevel): Promise<void> => {
+  home.writeConfig({ effort });
+  void panel?.postState();
+};
+
+// Set or clear one Family route (#51). The Bridge reads the map live per request — the next
 // call picks the change up with no restart.
 const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Promise<void> => {
   // Only catalog Providers may be a Target — a malformed webview message can't persist a dangling id.
   if (target && !PROVIDERS.some((p) => p.id === target.providerId)) return;
   const map = activeRoutingMap();
-  await globalState.update(ROUTING_MAP_KEY, { ...map, families: { ...map.families, [family]: target } });
+  home.writeConfig({ routing: { ...map, families: { ...map.families, [family]: target } } });
   void panel?.postState();
 };
 
-// Add or retarget one Alias row (#52). Upsert by exact name; same live-read globalState pattern as
-// setFamilyRoute. The webview shows the collision message — this guard is the trust boundary that keeps
-// a bypassed/malformed message from persisting an alias that shadows a Provider id (the resolver checks
-// ids first, so a shadowing alias would be silently unreachable).
+// Add or retarget one Alias row (#52). Upsert by exact name. The webview shows the collision message —
+// this guard is the trust boundary that keeps a bypassed/malformed message from persisting an alias
+// that shadows a Provider id (the resolver checks ids first, so a shadowing alias would be silently
+// unreachable).
 const setAlias = async (name: string, target: Target): Promise<void> => {
   if (!name || PROVIDERS.some((p) => p.id === name)) return;
   if (!PROVIDERS.some((p) => p.id === target.providerId)) return;
   const map = activeRoutingMap();
   const rest = map.aliases.filter((a) => a.name !== name);
-  await globalState.update(ROUTING_MAP_KEY, { ...map, aliases: [...rest, { name, target }] });
+  home.writeConfig({ routing: { ...map, aliases: [...rest, { name, target }] } });
   void panel?.postState();
 };
 
-// Panel toggle for the alias picker rows' model-id suffix (#52). A plain config write — the wisp.*
-// config listener re-pushes the panel state, and the Bridge reads the setting live per list request.
+// Panel toggle for the alias picker rows' model-id suffix (#52). The Bridge reads it live per list request.
 const setAliasPickerShowsModel = async (on: boolean): Promise<void> => {
-  await cfg().update('bridge.aliasPickerShowsModel', on, targetFor('bridge.aliasPickerShowsModel'));
+  home.writeConfig({ bridge: { ...home.readConfig().bridge, aliasPickerShowsModel: on } });
+  void panel?.postState();
 };
 
 // Remove one Alias row by name (#52). Unknown names are a no-op.
 const removeAlias = async (name: string): Promise<void> => {
   const map = activeRoutingMap();
-  await globalState.update(ROUTING_MAP_KEY, { ...map, aliases: map.aliases.filter((a) => a.name !== name) });
+  home.writeConfig({ routing: { ...map, aliases: map.aliases.filter((a) => a.name !== name) } });
   void panel?.postState();
 };
 
-// Keep wisp.model honestly reflecting the Active Provider's model after a raw wisp.provider edit
-// (the panel has no part in Issue 4). Guarded against a write-loop: writes only when stale.
-const mirrorActiveModel = async (): Promise<void> => {
-  const m = activeModel();
-  if (cfg().get<string>('model') !== m) await cfg().update('model', m, targetFor('model'));
-};
-
-// Switch the Active Provider. Machine-scoped write — selecting a Provider selects where the bearer
-// key is sent. The config listener does the rest (invalidate client, re-mirror wisp.model, postState).
+// Switch the Active Provider — selecting a Provider selects where the bearer key is sent.
 const setProvider = async (id: string): Promise<void> => {
-  await cfg().update('provider', id, targetFor('provider'));
+  home.writeConfig({ provider: id });
   cachedClient = undefined;
+  refreshCopilotModelEnv();
+  void panel?.postState();
 };
 
-// Custom's base URL (machine-scoped — same key-redirect threat as the Provider selector). Built-ins
-// ignore wisp.baseUrl; only Custom resolves from it (activeBaseUrl). The config listener rebuilds.
+// Custom's base URL (same key-redirect threat as the Provider selector). Built-ins ignore it; only
+// Custom resolves from it (activeBaseUrl).
 const setBaseUrl = async (url: string): Promise<void> => {
-  await cfg().update('baseUrl', url, targetFor('baseUrl'));
+  home.writeConfig({ customBaseUrl: url });
   cachedClient = undefined;
+  void panel?.postState();
 };
 
 // Everything the panel is allowed to know — key presence and source only, never the key itself.
 // keySource keeps the UI honest when the key comes from the env var (Clear can't remove that).
 const getState = async (): Promise<PanelState> => {
   const p = activeProvider();
-  const stored = (await secrets.get(keySlotFor(p)))?.trim();
+  const stored = home.readAuth().keys?.[resolveKeyId(p)]?.trim();
   const keySource = stored ? 'stored' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env' : 'none';
   // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
   const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
@@ -430,7 +429,7 @@ const getState = async (): Promise<PanelState> => {
     // The Routing map's four Family rows (#51) + Alias rows (#52) — drive the panel's routing section.
     routingFamilies: activeRoutingMap().families,
     routingAliases: activeRoutingMap().aliases,
-    aliasPickerShowsModel: cfg().get<boolean>('bridge.aliasPickerShowsModel') ?? true,
+    aliasPickerShowsModel: aliasPickerShowsModel(),
     // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
     // they cross the boundary only while running, like bridgeSecret.
     claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
@@ -481,6 +480,54 @@ const migrateZenToGo = async (): Promise<void> => {
   if (plan.setModel) nextModels['opencode-go'] = plan.setModel;
   await globalState.update(MODEL_MAP_KEY, nextModels);
   await secrets.delete(zenSlot); // free the slot for the genuinely-new /zen/v1 provider
+};
+
+// One-time, silent (#59, ADR-0002): move everything into ~/.wisp. Two halves, each self-idempotent:
+// config.json is seeded from the old homes (settings + globalState) only while the file doesn't exist,
+// and secrets are COPIED into auth.json then DELETED from SecretStorage — so a second launch finds
+// empty slots and does nothing. Runs AFTER the two legacy migrations above so their results are what
+// gets copied. planSecretsMigration (pure, tested) owns the merge rules (never clobber auth.json).
+const migrateToWispHome = async (): Promise<void> => {
+  if (!home.configExists()) {
+    // USER-scope values only (inspect().globalValue, never the merged get()): these keys were
+    // machine-scoped precisely so a workspace can't redirect where the bearer key is sent, but scope
+    // enforcement died with their package.json registration — a merged read would let a repo's
+    // .vscode/settings.json seed provider/baseUrl into config.json permanently.
+    const userValue = <T>(key: string): T | undefined => cfg().inspect<T>(key)?.globalValue;
+    home.writeConfig(seedConfigFromVsCode({
+      provider: userValue<string>('provider'),
+      models: globalState.get<Record<string, string>>(MODEL_MAP_KEY),
+      effort: globalState.get<EffortLevel>(EFFORT_KEY),
+      routing: globalState.get<RoutingMap>(ROUTING_MAP_KEY),
+      customBaseUrl: userValue<string>('baseUrl'),
+      bridgePort: userValue<number>('bridge.port'),
+      aliasPickerShowsModel: userValue<boolean>('bridge.aliasPickerShowsModel'),
+    }));
+    // Retire the old homes so a later hand-deleted config.json reseeds near-empty instead of
+    // resurrecting this pre-#59 snapshot. (The orphaned settings.json entries stay — VS Code flags
+    // them "unknown", and updating unregistered keys is not reliably allowed.)
+    for (const key of [MODEL_MAP_KEY, EFFORT_KEY, ROUTING_MAP_KEY]) await globalState.update(key, undefined);
+  }
+
+  // Keys are read per key id (not per Provider) so a borrowed slot (Zen→Go) is read once.
+  const keys: Record<string, string> = {};
+  const foundSlots: string[] = [];
+  for (const id of new Set(PROVIDERS.map(resolveKeyId))) {
+    const value = await secrets.get(keySlot(id));
+    if (value === undefined) continue;
+    keys[id] = value;
+    foundSlots.push(keySlot(id));
+  }
+  const codexRaw = await secrets.get(CODEX_SECRET_SLOT);
+  const anthropicRaw = await secrets.get(ANTHROPIC_SECRET_SLOT);
+  const bridgeSecretSlot = await secrets.get(BRIDGE_SECRET_SLOT);
+  if (codexRaw !== undefined) foundSlots.push(CODEX_SECRET_SLOT);
+  if (anthropicRaw !== undefined) foundSlots.push(ANTHROPIC_SECRET_SLOT);
+  if (bridgeSecretSlot !== undefined) foundSlots.push(BRIDGE_SECRET_SLOT);
+
+  const next = planSecretsMigration({ auth: home.readAuth(), slots: { keys, codexRaw, anthropicRaw, bridgeSecret: bridgeSecretSlot } });
+  if (next) home.writeAuth(next); // throws → slots stay put, retried next launch
+  for (const slot of foundSlots) await secrets.delete(slot);
 };
 
 // ----------------------------- Inline diff (B2) ----------------------------- //
@@ -635,13 +682,13 @@ const anthropicSignOut = async (): Promise<void> => {
 // The Bridge's localhost address (no path) — shown in the panel and the base for the injected BASE_URL.
 const bridgeAddress = (): string => `http://127.0.0.1:${bridgePort()}`;
 
-// The access secret, from SecretStorage — generated once on first use (high-entropy random, base64url so
+// The access secret, from auth.json — generated once on first use (high-entropy random, base64url so
 // it's copy-paste safe) then reused so a configured CLI keeps working across restarts.
-const ensureBridgeSecret = async (): Promise<string> => {
-  const existing = (await secrets.get(BRIDGE_SECRET_SLOT))?.trim();
+const ensureBridgeSecret = (): string => {
+  const existing = home.readAuth().bridgeSecret?.trim();
   if (existing) return existing;
   const generated = randomBytes(32).toString('base64url');
-  await secrets.store(BRIDGE_SECRET_SLOT, generated);
+  home.writeAuth({ bridgeSecret: generated });
   return generated;
 };
 
@@ -662,7 +709,7 @@ const injectCopilotEnv = (): void => {
 // Start the Bridge: materialize the secret (so the listener can require it), bind the port, point new
 // terminals at it. Shared by the command and the panel switch — one lifecycle, never forked.
 const startBridge = async (): Promise<void> => {
-  bridgeSecret = await ensureBridgeSecret();
+  bridgeSecret = ensureBridgeSecret();
   await bridge.start();
   injectCopilotEnv();
 };
@@ -880,14 +927,28 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // BASE_URL + stale secret while nothing is listening.
   envCollection = context.environmentVariableCollection;
   envCollection.clear();
-  // Codex token lifecycle — browser open goes through vscode.env.openExternal; logs to the Wisp channel.
-  codexAuth = new CodexAuth(context.secrets, (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
+  // The shared ~/.wisp store — everything below (keys, OAuth bundles, config) reads/writes through it.
+  home = new WispHome();
+  // Codex token lifecycle — creds live in auth.json; browser open via vscode.env.openExternal.
+  codexAuth = new CodexAuth(
+    { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+    (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Anthropic (Claude.ai) token lifecycle — same injection as Codex.
-  anthropicAuth = new AnthropicAuth(context.secrets, (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
+  anthropicAuth = new AnthropicAuth(
+    { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+    (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
-  // Go key in the zen slot. Both are idempotent on the go slot, so the pair is a no-op after the first.
-  void (async () => { await migrateZenToGo(); await migrateLegacyKey(); })();
+  // Go key in the zen slot — then the whole result moves into ~/.wisp (#59). A migration failure must
+  // not kill activation: log it and run on what's already in the store.
+  void (async () => {
+    try {
+      await migrateZenToGo();
+      await migrateLegacyKey();
+      await migrateToWispHome();
+      void panel?.postState(); // the panel may have rendered off pre-migration state
+    } catch (err) { output.appendLine(`[error] store migration ${String(err)}`); }
+  })();
 
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBar.show();
@@ -931,8 +992,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // and model memory; keyed Providers only this slice (Codex #39 / Anthropic #40 later). OFF until toggled.
   bridge = createBridgeServer({
     providers: PROVIDERS,
-    modelMap: () => globalState.get<Record<string, string>>(MODEL_MAP_KEY) ?? {},
-    customBaseUrl: () => cfg().get<string>('baseUrl') ?? '',
+    modelMap: () => home.readConfig().models ?? {},
+    customBaseUrl: () => home.readConfig().customBaseUrl ?? '',
     keyFor: keyForProvider,
     clientFor: clientForProvider,
     // Codex over the Bridge (#39): no API key — the signed-in flag gates its /v1/models row, current()
@@ -946,7 +1007,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
-    aliasPickerShowsModel: () => cfg().get<boolean>('bridge.aliasPickerShowsModel') ?? true,
+    aliasPickerShowsModel,
     port: bridgePort,
     accessSecret: () => bridgeSecret,
     log: (m) => output.appendLine(m),
@@ -976,8 +1037,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // Ctrl+I picker. extension.ts owns key resolution; the provider module is pure vscode/openai glue.
     registerWispChatProvider({
       providers: PROVIDERS,
-      modelMap: () => globalState.get<Record<string, string>>(MODEL_MAP_KEY) ?? {},
-      customBaseUrl: () => cfg().get<string>('baseUrl') ?? '',
+      modelMap: () => home.readConfig().models ?? {},
+      customBaseUrl: () => home.readConfig().customBaseUrl ?? '',
       keyFor: keyForProvider,
       clientFor: clientForProvider,
       // Codex usability + creds for the chat surface: signed-in flag gates the row, current() returns the
@@ -993,26 +1054,14 @@ export const activate = (context: vscode.ExtensionContext): void => {
       anthropicCreds: () => anthropicAuth.current(),
       log: (m) => output.appendLine(m),
     }),
-    // Keep derived state in sync when settings change out from under us.
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      // Active Provider, its (Custom) base URL, or its mirrored model changed → rebuild the client.
-      if (e.affectsConfiguration('wisp.provider') || e.affectsConfiguration('wisp.baseUrl') || e.affectsConfiguration('wisp.model')) cachedClient = undefined;
-      // A raw wisp.provider edit (no panel in Issue 4) must re-mirror wisp.model to the new Provider.
-      if (e.affectsConfiguration('wisp.provider')) void mirrorActiveModel();
-      // COPILOT_MODEL = the Active Provider's resolved model (#b); keep it true if the Provider OR its model
-      // switches mid-run so new terminals get the current choice. Only the model var — BASE_URL stays bound to the port.
-      if ((e.affectsConfiguration('wisp.provider') || e.affectsConfiguration('wisp.model')) && bridge.isRunning()) envCollection.replace('COPILOT_MODEL', activeModel());
-      // Any of our settings may be on screen in the panel — mirror every change there.
-      if (e.affectsConfiguration(CONFIG_NS)) void panel?.postState();
-    }),
-    // Single sync point for key changes: fires for this window's store/delete and for changes made
-    // in other windows sharing SecretStorage. Any wisp.apiKey* slot (legacy or namespaced) → drop
-    // the cached client and re-sync the panel.
-    context.secrets.onDidChange((e) => {
-      if (e.key === SECRET_KEY || e.key.startsWith(`${SECRET_KEY}.`)) {
-        cachedClient = undefined;
-        void panel?.postState();
-      }
+    // Single sync point for store changes made OUTSIDE this window's own helpers — another VS Code
+    // window, a hand edit, or (soon) the TUI (#59 criteria: pick up external edits without a reload).
+    // Every value is re-read from disk per request anyway; this drops the cached client and re-syncs
+    // the surfaces that snapshot state (panel, COPILOT_MODEL env).
+    home.watch(() => {
+      cachedClient = undefined;
+      refreshCopilotModelEnv();
+      void panel?.postState();
     }),
   );
 };

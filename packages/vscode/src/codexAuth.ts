@@ -2,8 +2,9 @@
 
 /*
  * Depends on:
- *   - vscode: SecretStorage (token slot, never plaintext settings) + openExternal (system browser) —
- *     both injected via the constructor so this module isn't otherwise coupled to the editor host.
+ *   - injected store accessors: the codex slice of ~/.wisp/auth.json (ADR-0002) — extension.ts wires
+ *     them to its WispHome, so this module never touches the filesystem layout itself.
+ *   - injected openExternal (system browser) — keeps the module decoupled from the editor host.
  *   - node http/net: a one-shot localhost server that captures the OAuth redirect (NOT an OAuth server,
  *     just a redirect catcher).
  *   - node crypto: PKCE (S256) + CSRF state.
@@ -14,6 +15,8 @@
  * Data shapes:
  *   - CodexCreds (from @wisp/core): { accessToken?, refreshToken?, idToken?, accountId?, apiKey? } —
  *     the stored token bundle. The OAuth access token is the bearer for the subscription Codex backend.
+ *   - CodexCredsStore: { read, write } over that bundle — read undefined = never signed in (distinct
+ *     from the {} sign-out tombstone).
  *
  * Flow: published Codex-CLI OAuth app (client_id app_EMoamEEZ…, PKCE S256, loopback :1455 redirect,
  * originator codex_cli_rs). Sign-in opens the browser, captures the code on the loopback, exchanges it
@@ -21,7 +24,6 @@
  * refreshes when the token is within 60s of expiry.
  */
 
-import * as vscode from 'vscode';
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
 import { randomBytes, webcrypto } from 'crypto';
@@ -42,9 +44,6 @@ const CODEX_CALLBACK_PORT = 1455;
 const CODEX_CALLBACK_PATH = '/auth/callback';
 const CODEX_SCOPE = 'openid profile email offline_access api.connectors.read api.connectors.invoke';
 const CODEX_ORIGINATOR = 'codex_cli_rs';
-// SecretStorage slot — deliberately OUTSIDE the wisp.apiKey.<id> namespace so the token bundle never
-// collides with (or is treated as) a per-Provider API key.
-const CODEX_SECRET_SLOT = 'wisp.codexAuth';
 // Abandon a sign-in the user never completes, so the loopback server can't linger forever.
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
 
@@ -170,23 +169,21 @@ const runCodexOAuth = async (openExternal: (url: string) => Thenable<boolean>): 
 
 // ----------------------------- CodexAuth — store + import + refresh ----------------------------- //
 
-// Owns the Codex token lifecycle against one SecretStorage. extension.ts holds a single instance and
+// The codex slice of ~/.wisp/auth.json, as extension.ts exposes it. read() undefined = the field has
+// NEVER been written (truly first use); the {} tombstone means signed out.
+export type CodexCredsStore = {
+  read: () => CodexCreds | undefined;
+  write: (creds: CodexCreds) => void;
+};
+
+// Owns the Codex token lifecycle against one auth.json slice. extension.ts holds a single instance and
 // drives sign-in/out commands + the Inquire codex branch through it.
 export class CodexAuth {
   constructor(
-    private readonly secrets: vscode.SecretStorage,
+    private readonly store: CodexCredsStore,
     private readonly openExternal: (url: string) => Thenable<boolean>,
     private readonly log: (message: string) => void,
   ) {}
-
-  // Read the stored bundle; a corrupt slot reads as "no creds" rather than throwing.
-  private read = async (): Promise<CodexCreds | undefined> => {
-    const raw = await this.secrets.get(CODEX_SECRET_SLOT);
-    if (!raw) return undefined;
-    try { return JSON.parse(raw) as CodexCreds; } catch { return undefined; }
-  };
-
-  private store = (creds: CodexCreds): Thenable<void> => this.secrets.store(CODEX_SECRET_SLOT, JSON.stringify(creds));
 
   // Import an existing Codex CLI login (~/.codex/auth.json, or $CODEX_HOME) so a CLI user isn't forced
   // to sign in again. Missing/unreadable/garbage file → nothing to import.
@@ -195,61 +192,71 @@ export class CodexAuth {
     try { return parseCodexAuthJson(JSON.parse(await readFile(file, 'utf8'))); } catch { return undefined; }
   };
 
-  // Refresh the access token when it's within the skew window, persisting the new bundle. A failed
-  // refresh is non-fatal — keep the existing creds (they may still work; the live call surfaces a 401).
+  // Refresh the access token when it's within the skew window, persisting the new bundle. Two processes
+  // share auth.json (extension + TUI), so RE-READ before refreshing (#59): if the other process already
+  // rotated the token, use its bundle — firing our stale (possibly single-use) refresh token instead
+  // could invalidate the fresh one. A failed refresh is non-fatal — keep the existing creds (they may
+  // still work; the live call surfaces a 401).
   private refreshIfNeeded = async (creds: CodexCreds): Promise<CodexCreds> => {
     if (!creds.refreshToken || !shouldRefreshCodexToken({ accessToken: creds.accessToken, idToken: creds.idToken }, Date.now())) return creds;
+    const fresh = this.store.read() ?? creds;
+    if (!shouldRefreshCodexToken({ accessToken: fresh.accessToken, idToken: fresh.idToken }, Date.now())) return fresh;
+    if (!fresh.refreshToken) return fresh;
+    let next: CodexCreds;
     try {
       const res = await fetch(CODEX_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: CODEX_CLIENT_ID, grant_type: 'refresh_token', refresh_token: creds.refreshToken }),
+        body: new URLSearchParams({ client_id: CODEX_CLIENT_ID, grant_type: 'refresh_token', refresh_token: fresh.refreshToken }),
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) { this.log(`[codex] token refresh failed (${res.status})`); return creds; }
+      if (!res.ok) { this.log(`[codex] token refresh failed (${res.status})`); return fresh; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; id_token?: string };
-      const next: CodexCreds = {
-        accessToken: payload.access_token ?? creds.accessToken,
-        refreshToken: payload.refresh_token ?? creds.refreshToken,
-        idToken: payload.id_token ?? creds.idToken,
-        accountId: parseChatgptAccountId(payload.id_token) ?? creds.accountId,
+      next = {
+        accessToken: payload.access_token ?? fresh.accessToken,
+        refreshToken: payload.refresh_token ?? fresh.refreshToken,
+        idToken: payload.id_token ?? fresh.idToken,
+        accountId: parseChatgptAccountId(payload.id_token) ?? fresh.accountId,
       };
-      await this.store(next);
-      return next;
     } catch (err) {
       this.log(`[codex] token refresh error: ${String(err)}`);
-      return creds;
+      return fresh;
     }
+    // Persist OUTSIDE the fetch catch: the rotation already happened server-side (the old refresh token
+    // may be consumed), so a failed auth.json write must not discard the new bundle — keep using it in
+    // memory and let a later write retry.
+    try { this.store.write(next); } catch (err) { this.log(`[codex] token persist error: ${String(err)}`); }
+    return next;
   };
 
   // Sign in via the browser OAuth flow and persist the result.
   signIn = async (): Promise<CodexCreds> => {
     const creds = await runCodexOAuth(this.openExternal);
-    await this.store(creds);
+    this.store.write(creds);
     return creds;
   };
 
-  // Sign out by writing an empty TOMBSTONE rather than deleting the slot: a present-but-bearer-less blob
+  // Sign out by writing an empty TOMBSTONE rather than deleting the field: a present-but-bearer-less blob
   // reads as "signed out" AND suppresses the ~/.codex/auth.json re-import below. Deleting instead would
   // let the import immediately re-sign-in a Codex-CLI user, so sign-out could never stick.
-  signOut = (): Thenable<void> => this.store({});
+  signOut = (): void => this.store.write({});
 
-  // The credentials to use right now: the stored bundle, else — only when the slot has NEVER been
+  // The credentials to use right now: the stored bundle, else — only when the field has NEVER been
   // written (truly first use, not a sign-out tombstone) — a one-time import of the CLI's auth.json
   // (persisted so the next read is fast), refreshed if near expiry. undefined = not signed in.
   current = async (): Promise<CodexCreds | undefined> => {
-    let creds = await this.read();
+    let creds = this.store.read();
     if (creds === undefined) {
       creds = await this.importAuthJson();
-      if (creds) await this.store(creds);
+      if (creds) this.store.write(creds);
     }
     return creds ? this.refreshIfNeeded(creds) : undefined;
   };
 
   // Cheap signed-in check for UI/usability — read-only (no refresh round-trip). The stored bundle wins;
-  // only an unwritten slot (undefined, not a tombstone) falls back to an importable auth.json.
+  // only an unwritten field (undefined, not a tombstone) falls back to an importable auth.json.
   isSignedIn = async (): Promise<boolean> => {
-    const stored = await this.read();
+    const stored = this.store.read();
     return isCodexSignedIn(stored === undefined ? await this.importAuthJson() : stored);
   };
 }
