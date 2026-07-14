@@ -7,6 +7,7 @@ import {
   buildAnthropicModelsList,
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
+  buildClaudeLaunch,
 } from './bridgeAnthropic';
 import type { ChatModelInfo } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
@@ -360,5 +361,31 @@ describe('buildClaudeCodeSnippets', () => {
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
       },
     });
+  });
+});
+
+describe('buildClaudeLaunch', () => {
+  // The launcher's whole contract in one shape: the env trio pointing at the local Bridge, argv verbatim.
+  it('builds the env trio from port + secret', () => {
+    const launch = buildClaudeLaunch(8971, 's3cret_x', []);
+    expect(launch.env).toEqual({
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
+      ANTHROPIC_API_KEY: 's3cret_x',
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+    });
+  });
+
+  // Verbatim passthrough: flags, values with spaces, and things that look like our own flags all survive.
+  it('passes argv through untouched', () => {
+    const argv = ['--dangerously-skip-permissions', '-p', 'say hi there', '--port'];
+    expect(buildClaudeLaunch(8971, 's', argv).args).toEqual(argv);
+  });
+
+  // The returned args are a copy — a caller mutating them must not reach back into the argv it was given.
+  it('copies argv rather than aliasing it', () => {
+    const argv = ['-p'];
+    const launch = buildClaudeLaunch(8971, 's', argv);
+    launch.args.push('extra');
+    expect(argv).toEqual(['-p']);
   });
 });
