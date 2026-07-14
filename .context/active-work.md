@@ -41,7 +41,12 @@ deviation from the every-screen-to-input rule; header comment updated).
 ## Pick up here
 **#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, unblocked; the
 critical-path finale — ADR-0003: `bun build --compile` × 4 platforms + npm thin shell exposing bins
-`wisp` + `claude-wisp`). Suggested: `/preset scope 67`. Backlog: #68 (chat mode), #69 (copilot-wisp).
+`wisp` + `claude-wisp`). Suggested: `/preset scope 67`.
+**#67 bonus (user-requested 2026-07-14):** a toggleable filter so the user can choose that Claude
+Code's `/models` shows **only the set Aliases** (instead of Provider ids + aliases). Likely shape:
+a `bridge.*` config flag beside `aliasPickerShowsModel` (same live-read BridgeDeps pattern), applied
+in `buildAnthropicModelsList` (Anthropic door — that's what Claude Code lists); decide at scope time
+whether the OpenAI door mirrors it. Backlog: #68 (chat mode), #69 (copilot-wisp).
 
 ## Skills for next session
 - /preset scope — entry gate for #67.
@@ -51,8 +56,8 @@ critical-path finale — ADR-0003: `bun build --compile` × 4 platforms + npm th
   Codex strict-tools limit; routing-map rename migration — all deliberate skips.
 - (carried) Bridge client-tag heuristic mislabels some Claude Code requests as `(panel)` —
   cosmetic, worth a glance in a Bridge slice.
-- **TUI eyeball backlog:** the new `/routing` screens (#65) AND the `/test` border-title fix
-  (`f2efe18`) are compile+headless-verified only — eyeball both during the next interactive TUI run.
+- **`/routing` screens eyeballed by the user 2026-07-14 — confirmed working.** The `/test`
+  border-title fix (`f2efe18`) wasn't explicitly confirmed — glance at it on a future `/test` run.
 - Codex is still **signed out** on this machine (tombstone from #61) — `/signin codex` before any
   Codex live checks.
 

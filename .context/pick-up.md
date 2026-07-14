@@ -20,7 +20,12 @@ them. Suite **366/366**. Live-verified against a sandboxed `wisp serve`: alias a
 ## Next task
 **#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, the critical-path
 finale; ADR-0003: `bun build --compile` × 4 platforms + npm thin shell exposing bins `wisp` +
-`claude-wisp`). Suggested: **`/preset scope 67`**. Backlog: #68 (chat mode), #69 (copilot-wisp).
+`claude-wisp`). Suggested: **`/preset scope 67`**.
+**Plus a user-requested bonus:** a toggleable filter — user decides whether Claude Code's `/models`
+lists **only the set Aliases** (hide Provider ids). Pointers: `bridge.*` config flag beside
+`aliasPickerShowsModel` (same live BridgeDeps read), applied in `buildAnthropicModelsList`
+(Anthropic door = Claude Code's list); scope decides if the OpenAI door mirrors it, plus the
+toggle's surfaces (panel + TUI). Backlog: #68 (chat mode), #69 (copilot-wisp).
 
 ## Landmines
 - **ADR-0003 is the spec for #67** (`docs/adr/0003-tui-opentui-bun-compiled-binaries.md`) — read it
@@ -29,8 +34,8 @@ finale; ADR-0003: `bun build --compile` × 4 platforms + npm thin shell exposing
   (they'd shadow the npm-installed bins). Plain-ASCII + CRLF only if ever edited.
 - **opentui ships native per-platform binaries** (`core-win32-x64` etc.) — the compile matrix must
   pull the right one per target; cross-compiling from one runner may not work, hence CI matrix.
-- **TUI eyeball backlog:** the new `/routing` screens (#65) and the `/test` border-title fix
-  (`f2efe18`) are compile+headless-verified only — eyeball both on the next interactive TUI run.
+- `/routing` screens eyeballed by the user 2026-07-14 — working. `/test` border-title fix
+  (`f2efe18`) not explicitly confirmed yet — glance on a future `/test` run.
 - **Codex is signed out on this machine** (tombstone from #61) — `/signin codex` before Codex live
   checks; default `claude-wisp` run errors until then (use `--model haiku` → `opencode-go`).
 - Both faces share the Bridge port + secret — second host fails loud (intended); stop one first.
