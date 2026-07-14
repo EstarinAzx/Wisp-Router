@@ -1,0 +1,141 @@
+# Release pipeline (#67, ADR-0003): tag v* → compile the TUI on four native runners
+# (opentui ships per-platform native libs — no cross-compiling), attach the binaries to a
+# GitHub release, and publish npm `wisp-router` as a thin shell over four platform packages
+# (the esbuild/biome optionalDependencies pattern). Bins: wisp + claude-wisp.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win32-x64
+            os: windows-latest
+            binary: wisp.exe
+          - target: darwin-arm64
+            os: macos-latest
+            binary: wisp
+          - target: darwin-x64
+            os: macos-13
+            binary: wisp
+          - target: linux-x64
+            os: ubuntu-latest
+            binary: wisp
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      # The tag is the single version source — a binary whose baked-in package.json version
+      # disagrees would lie on the splash screen, so fail loud here.
+      - name: Verify tag matches packages/tui version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(bun -e "console.log((await Bun.file('packages/tui/package.json').json()).version)")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag $TAG_VERSION != packages/tui version $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      - run: bun install --frozen-lockfile
+
+      - name: Compile
+        working-directory: packages/tui
+        run: bun build --compile src/index.tsx --outfile dist/${{ matrix.binary }}
+
+      # Prove the standalone binary boots without Bun/Node: the claude-wisp path on a fresh
+      # HOME must fail loud with the Bridge guidance (exit 1) — a crash prints something else.
+      - name: Smoke test
+        working-directory: packages/tui
+        shell: bash
+        run: |
+          set +e
+          OUT=$(WISP_HOME="$RUNNER_TEMP/wisp-smoke" ./dist/${{ matrix.binary }} claude-wisp 2>&1)
+          CODE=$?
+          set -e
+          echo "$OUT"
+          [ "$CODE" -eq 1 ] && echo "$OUT" | grep -q "Bridge"
+          # And prove `wisp serve` boots the engine (no TTY needed): any HTTP answer counts —
+          # a secretless request is expected to 401 with the access-secret message.
+          WISP_HOME="$RUNNER_TEMP/wisp-smoke" ./dist/${{ matrix.binary }} serve &
+          SERVE_PID=$!
+          sleep 3
+          curl -s http://127.0.0.1:41184/v1/models | grep -q "access secret"
+          kill $SERVE_PID
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wisp-${{ matrix.target }}
+          path: packages/tui/dist/${{ matrix.binary }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release + upload assets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Stage each platform package: drop its compiled binary into bin/ and stamp the version.
+      - name: Stage platform packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for t in win32-x64 darwin-arm64 darwin-x64 linux-x64; do
+            BIN=wisp; [ "$t" = "win32-x64" ] && BIN=wisp.exe
+            DIR=packages/tui/npm/wisp-router-$t
+            mkdir -p "$DIR/bin"
+            cp "artifacts/wisp-$t/$BIN" "$DIR/bin/$BIN"
+            chmod +x "$DIR/bin/$BIN"
+            (cd "$DIR" && npm pkg set version="$VERSION")
+          done
+          # The thin shell pins every platform package to the SAME release version.
+          cd packages/tui/npm/wisp-router
+          npm pkg set version="$VERSION"
+          for t in win32-x64 darwin-arm64 darwin-x64 linux-x64; do
+            npm pkg set "optionalDependencies.wisp-router-$t=$VERSION"
+          done
+
+      # Platform packages first, thin shell last — an install mid-publish never resolves a
+      # shell whose optionalDependencies don't exist yet. Already-published versions are
+      # skipped so a re-run after a later step failed doesn't die here (publish isn't idempotent).
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for p in wisp-router-win32-x64 wisp-router-darwin-arm64 wisp-router-darwin-x64 wisp-router-linux-x64 wisp-router; do
+            if npm view "$p@$VERSION" version >/dev/null 2>&1; then
+              echo "$p@$VERSION already on npm — skipping"
+            else
+              (cd packages/tui/npm/$p && npm publish --access public)
+            fi
+          done
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          cp artifacts/wisp-win32-x64/wisp.exe "release/wisp-v$VERSION-win32-x64.exe"
+          cp artifacts/wisp-darwin-arm64/wisp "release/wisp-v$VERSION-darwin-arm64"
+          cp artifacts/wisp-darwin-x64/wisp "release/wisp-v$VERSION-darwin-x64"
+          cp artifacts/wisp-linux-x64/wisp "release/wisp-v$VERSION-linux-x64"
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "wisp-router $VERSION" \
+            --notes "Wisp TUI + Bridge + claude-wisp launcher. Install: \`npm i -g wisp-router\` — or grab the binary for your platform below (\`claude-wisp\` = \`wisp claude-wisp …\`)."

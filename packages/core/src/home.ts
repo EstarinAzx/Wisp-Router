@@ -21,7 +21,7 @@ import type { RoutingMap } from './routing';
 
 // ----------------------------- Types ----------------------------- //
 
-export type WispBridgeSettings = { port?: number; aliasPickerShowsModel?: boolean };
+export type WispBridgeSettings = { port?: number; aliasPickerShowsModel?: boolean; aliasOnlyModels?: boolean };
 
 export type WispConfig = {
   provider?: string;
@@ -96,6 +96,7 @@ export const parseWispConfig = (raw: string | undefined | null): WispConfig => {
       const bridge: WispBridgeSettings = { ...cfg.bridge };
       if ('port' in bridge && typeof bridge.port !== 'number') delete bridge.port;
       if ('aliasPickerShowsModel' in bridge && typeof bridge.aliasPickerShowsModel !== 'boolean') delete bridge.aliasPickerShowsModel;
+      if ('aliasOnlyModels' in bridge && typeof bridge.aliasOnlyModels !== 'boolean') delete bridge.aliasOnlyModels;
       cfg.bridge = bridge;
     } else delete cfg.bridge;
   }

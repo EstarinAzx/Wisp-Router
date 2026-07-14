@@ -73,6 +73,7 @@ export const createTuiBridge = (log: (message: string) => void) =>
     activeProviderId: () => activeProvider().id,
     routingMap: () => home.readConfig().routing ?? EMPTY_ROUTING_MAP,
     aliasPickerShowsModel: () => home.readConfig().bridge?.aliasPickerShowsModel ?? true,
+    aliasOnlyModels: () => home.readConfig().bridge?.aliasOnlyModels ?? false,
     port: bridgePort,
     accessSecret: ensureBridgeSecret,
     log,

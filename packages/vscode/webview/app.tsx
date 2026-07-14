@@ -44,6 +44,7 @@ type State = {
   routingFamilies?: Partial<Record<FamilyKey, { providerId: string; model: string }>>; // the Routing map's four Family rows (#51)
   routingAliases?: { name: string; target: { providerId: string; model: string } }[]; // the Routing map's Alias rows (#52)
   aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52)
+  aliasOnlyModels?: boolean; // Claude Code's /model list shows only Aliases (#67)
 };
 
 // The Routing map's four fixed Family routes (#51) — rendered as always-visible rows, in this order.
@@ -552,6 +553,18 @@ export const App = () => {
             }}
           />
           Show pinned model next to aliases in Claude Code's /model list
+        </label>
+        <label class="flex items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={state.aliasOnlyModels === true}
+            onChange={(e) => {
+              const on = e.currentTarget.checked;
+              setState({ ...state, aliasOnlyModels: on });
+              vscode.postMessage({ type: 'setAliasOnlyModels', value: on });
+            }}
+          />
+          List only aliases in Claude Code's /model list (hide provider rows)
         </label>
 
         {/* --------------------- Claude Code setup (#47) --------------------- */}

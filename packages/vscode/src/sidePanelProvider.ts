@@ -17,7 +17,8 @@
  *     | codexSignIn | codexSignOut
  *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
- *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
+ *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}
+ *     | setAliasOnlyModels{value:boolean}.
  *   - Ext → webview messages: state{state} | models{ids} | modelsError{message}
  *     | providerModels{providerId, ids} | activity{thinking}.
  */
@@ -49,6 +50,7 @@ export type PanelState = {
   routingFamilies?: { [K in FamilyKey]?: Target }; // the Routing map's four Family rows (#51)
   routingAliases?: { name: string; target: Target }[]; // the Routing map's Alias rows (#52)
   aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52) — drives the toggle
+  aliasOnlyModels?: boolean; // Claude Code's /model list shows only Aliases (#67) — drives the toggle
 };
 
 // Shared with extension.ts so the no-key failure is recognizable as webview-safe text.
@@ -73,6 +75,7 @@ export type PanelHost = {
   setAlias: (name: string, target: Target) => Promise<void>; // add/retarget one Routing map Alias row (#52)
   removeAlias: (name: string) => Promise<void>; // remove one Routing map Alias row by name (#52)
   setAliasPickerShowsModel: (on: boolean) => Promise<void>; // alias picker rows: pinned-model suffix on/off (#52)
+  setAliasOnlyModels: (on: boolean) => Promise<void>; // Claude Code's /model list: aliases only on/off (#67)
   toggleBridge: () => Promise<void>; // start/stop the Bridge — the same lifecycle the command drives
   copyBridgeSecret: () => Promise<void>; // copy the access secret to the clipboard (host-side, webview can't)
   copyBridgeAddress: () => Promise<void>;
@@ -226,6 +229,9 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
         }
         case 'setAliasPickerShowsModel':
           if (typeof msg.value === 'boolean') await this.host.setAliasPickerShowsModel(msg.value);
+          return;
+        case 'setAliasOnlyModels':
+          if (typeof msg.value === 'boolean') await this.host.setAliasOnlyModels(msg.value);
           return;
       }
     } catch (err) {

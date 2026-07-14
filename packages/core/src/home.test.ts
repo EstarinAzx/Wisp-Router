@@ -36,7 +36,7 @@ describe('parseWispConfig', () => {
       effort: 'xhigh',
       routing: { families: { opus: { providerId: 'anthropic', model: 'claude-opus-4-8' } }, aliases: [{ name: 'fast', target: { providerId: 'groq', model: 'llama' } }] },
       customBaseUrl: 'https://my.proxy/v1',
-      bridge: { port: 4242, aliasPickerShowsModel: false },
+      bridge: { port: 4242, aliasPickerShowsModel: false, aliasOnlyModels: true },
     };
     expect(parseWispConfig(serializeWispStore(cfg))).toEqual(cfg);
   });
@@ -48,7 +48,7 @@ describe('parseWispConfig', () => {
       effort: 'bogus',
       routing: { families: 'nope' },
       customBaseUrl: [],
-      bridge: { port: 'high', aliasPickerShowsModel: 'yes' },
+      bridge: { port: 'high', aliasPickerShowsModel: 'yes', aliasOnlyModels: 'sure' },
     });
     expect(parseWispConfig(raw)).toEqual({ bridge: {} });
   });

@@ -34,17 +34,19 @@ import {
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
+import pkg from '../package.json';
 
 // ----------------------------------------- Splash ----------------------------------------- //
 
 // Hand-rolled ASCII art instead of <ascii-font>: deterministic across font packs, zero API risk.
+// The trailing low block is a cursor-style underscore — the wordmark reads "Wisp_".
 const SPLASH = [
   '██╗    ██╗██╗███████╗██████╗ ',
   '██║    ██║██║██╔════╝██╔══██╗',
   '██║ █╗ ██║██║███████╗██████╔╝',
   '██║███╗██║██║╚════██║██╔═══╝ ',
-  '╚███╔███╔╝██║███████║██║     ',
-  ' ╚══╝╚══╝ ╚═╝╚══════╝╚═╝     ',
+  '╚███╔███╔╝██║███████║██║     ██████╗',
+  ' ╚══╝╚══╝ ╚═╝╚══════╝╚═╝     ╚═════╝',
 ].join('\n');
 
 const ACCENT = '#a78bfa';
@@ -424,6 +426,19 @@ export const App = () => {
           });
         return;
       }
+      case 'aliasonly': {
+        // Claude Code's /model list: aliases only on/off (#67). No arg toggles; the running
+        // Bridge reads the flag live per list request, so no restart is needed.
+        const arg = target.args[0]?.toLowerCase();
+        if (arg && arg !== 'on' && arg !== 'off') { setStatus('/aliasonly takes on or off'); return; }
+        const cfg = home.readConfig();
+        const on = arg ? arg === 'on' : !(cfg.bridge?.aliasOnlyModels ?? false);
+        // Refuse ON with zero aliases — it would blank Claude Code's picker with no hint why.
+        if (on && routingMap().aliases.length === 0) { setStatus('No aliases set — add one in /routing first.'); return; }
+        home.writeConfig({ bridge: { ...cfg.bridge, aliasOnlyModels: on } });
+        setStatus(on ? 'Claude Code /model list → aliases only.' : 'Claude Code /model list → Providers + aliases.');
+        return;
+      }
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
@@ -473,11 +488,12 @@ export const App = () => {
   return (
     <box flexDirection="column" padding={1}>
       <text fg={ACCENT}>{SPLASH}</text>
-      <text fg={DIM}>BYOK model router</text>
+      <text fg={DIM}>BYOK model router · v{pkg.version}</text>
 
       {mode.kind === 'input' && (
         <>
-          <box border title="wisp" marginTop={1}>
+          {/* no border title — the wordmark above already brands the box */}
+          <box border marginTop={1}>
             <input ref={inputRef} placeholder="Type / for commands" focused onInput={setLine} onSubmit={onSubmitText(runCommand)} />
           </box>
           {suggestions.map((c) => (
@@ -491,9 +507,12 @@ export const App = () => {
       {mode.kind === 'providers' && (
         <box border title="Active Provider" marginTop={1} flexDirection="column">
           {/* select collapses to zero rows without an explicit height; an option is 2 rows with description */}
+          {/* the built-in ▶ indicator is off on every select — the glyph is ambiguous-width (double-wide
+              on common Windows fonts, smearing into the label); the highlight bar already marks the row */}
           <select
             focused
             height={Math.min(PROVIDERS.length * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={PROVIDERS.map((p) => {
               const auth = oauthStatus(p);
@@ -517,6 +536,7 @@ export const App = () => {
           <select
             focused
             height={Math.min(keyedProviders().length * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={keyedProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
             onSelect={(_i, opt) => {
@@ -544,6 +564,7 @@ export const App = () => {
             focused
             height={Math.min(mode.options.length, 14)}
             showDescription={false}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={mode.options.map((id) => ({
               name: id === resolveModel(home.readConfig().models ?? {}, mode.provider) ? `${id} (current)` : id,
@@ -578,6 +599,7 @@ export const App = () => {
           <select
             focused
             height={Math.min(oauthProviders().length * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={oauthProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
             onSelect={(_i, opt) => {
@@ -619,6 +641,7 @@ export const App = () => {
           <select
             focused
             height={Math.min((FAMILY_KEYS.length + routingMap().aliases.length + 1) * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={[
               ...FAMILY_KEYS.map((f) => {
@@ -664,6 +687,7 @@ export const App = () => {
           <select
             focused
             height={Math.min((PROVIDERS.length + 1) * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={[
               ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
@@ -692,6 +716,7 @@ export const App = () => {
             focused
             height={Math.min(mode.options.length, 14)}
             showDescription={false}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={mode.options.map((id) => {
               const t = rowTarget(routingMap(), mode.row);
@@ -727,6 +752,7 @@ export const App = () => {
           <select
             focused
             height={Math.min(EFFORT_LADDER.length * 2, 16)}
+            showSelectionIndicator={false}
             showScrollIndicator
             options={EFFORT_LADDER.map((e) => ({
               name: e === (home.readConfig().effort ?? DEFAULT_EFFORT) ? `${e} (current)` : e,

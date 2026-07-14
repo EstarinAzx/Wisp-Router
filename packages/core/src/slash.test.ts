@@ -89,4 +89,8 @@ describe('SLASH_COMMANDS — the real palette', () => {
   it('carries the Routing map editor (#65)', () => {
     expect(SLASH_COMMANDS.map((c) => c.name)).toContain('routing');
   });
+
+  it('carries the alias-only list toggle (#67)', () => {
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain('aliasonly');
+  });
 });

@@ -4,6 +4,15 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`bridge.aliasOnlyModels`** setting (default off): Claude Code's `/model` list shows
+  **only** the Routing-map Aliases — the Provider rows are hidden. A checkbox in the
+  panel's Bridge section; the TUI's `/aliasonly` command flips the same flag. Anthropic
+  door only (the OpenAI door keeps its full list). (#67)
+
 ## [1.6.0] — 2026-07-14
 
 The Bridge Routing map: pin bridged model names to the backends you choose.

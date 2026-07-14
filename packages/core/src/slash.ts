@@ -27,6 +27,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'effort', args: '[level]', description: 'Set the shared reasoning Effort (Codex + Anthropic)' },
   { name: 'test', args: '<provider|alias>', description: 'Fire one canned prompt through a Provider or Alias' },
   { name: 'bridge', description: 'Toggle the Bridge listener (shows address + access secret)' },
+  { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },
   { name: 'quit', description: 'Exit the TUI' },
 ];
 

@@ -142,7 +142,7 @@ The Bridge is the **reverse** of the chat harness: instead of routing your backe
 By default every bridged request answers with your Active Provider. The **Routing map** (in the panel's Bridge section) pins bridged model names to backends you choose instead:
 
 - **Family routes.** Four fixed rows — `opus`, `sonnet`, `haiku`, `fable`. A bridged `claude-*` id of that family answers with the row's **Target** (the picked Provider + a pinned model). So Claude Code's own model names fan out the way you want: opus-grade traffic to a strong backend, haiku-grade traffic to a cheap one. Unmapped rows keep the Active-Provider default.
-- **Aliases.** Invent exact model names (e.g. `sol`) and point each at its own Target. Aliases are advertised in both dialects' model lists — they appear right in Claude Code's `/model` picker (optionally with their pinned model: `sol — gpt-5.6-terra`, toggleable via `bridge.aliasPickerShowsModel` in [`~/.wisp/config.json`](#settings)) — and `/model sol` routes to its Target. Names that would shadow a provider id are refused.
+- **Aliases.** Invent exact model names (e.g. `sol`) and point each at its own Target. Aliases are advertised in both dialects' model lists — they appear right in Claude Code's `/model` picker (optionally with their pinned model: `sol — gpt-5.6-terra`, toggleable via `bridge.aliasPickerShowsModel` in [`~/.wisp/config.json`](#settings)) — and `/model sol` routes to its Target. Names that would shadow a provider id are refused. Prefer a clean picker? `bridge.aliasOnlyModels` (panel checkbox, or `/aliasonly` in the TUI) hides the Provider rows so Claude Code lists **only** your aliases.
 - **Per-row model dropdowns.** Each row's model field is a real dropdown listing the picked Provider's models — the models.dev catalog for the OAuth kinds, a live `/models` fetch (with that provider's own key) for keyed kinds. If a list can't be fetched (offline, no key yet), the field falls back to free text — configuring a route is never blocked.
 
 Claude Code reads the model list at startup — restart it (or open a new session) after editing aliases to see them in the picker. Routes themselves apply live, per request.
@@ -177,7 +177,7 @@ Available from the Command Palette (and the editor chrome where noted):
 
 Wisp's state lives in the **Wisp home** at `~/.wisp/` and is shared with the Wisp TUI:
 
-- `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`). Managed by the side panel; hand-editable (the extension picks up external edits live).
+- `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`; `bridge.aliasOnlyModels`, default `false` — Claude Code's `/model` list shows only Aliases). Managed by the side panel; hand-editable (the extension picks up external edits live).
 - `~/.wisp/auth.json` — API keys and OAuth tokens, owner-only file permissions.
 
 Existing VS Code state (SecretStorage keys, provider/model/routing choices) is migrated into `~/.wisp/` once, on the first launch after upgrading.

@@ -146,6 +146,10 @@ const bridgePort = (): number => home.readConfig().bridge?.port ?? DEFAULT_BRIDG
 // The alias picker rows' pinned-model suffix toggle (#52) — config.json, on by default.
 const aliasPickerShowsModel = (): boolean => home.readConfig().bridge?.aliasPickerShowsModel ?? true;
 
+// The alias-only models-list toggle (#67) — config.json, off by default. On = Claude Code's
+// /model picker lists only the Aliases (Provider rows hidden). Anthropic door only.
+const aliasOnlyModels = (): boolean => home.readConfig().bridge?.aliasOnlyModels ?? false;
+
 // Key resolution for a given Provider: its (possibly borrowed, via keyId) auth.json entry first,
 // then the row's own env var (OPENCODE_API_KEY for OpenCode, GROQ_API_KEY for Groq, …). Never read from
 // plaintext settings. Takes the Provider explicitly so the chat surface can resolve any catalog row, not
@@ -307,6 +311,12 @@ const setAliasPickerShowsModel = async (on: boolean): Promise<void> => {
   void panel?.postState();
 };
 
+// Panel toggle for the alias-only models list (#67). Same live-read contract as the toggle above.
+const setAliasOnlyModels = async (on: boolean): Promise<void> => {
+  home.writeConfig({ bridge: { ...home.readConfig().bridge, aliasOnlyModels: on } });
+  void panel?.postState();
+};
+
 // Remove one Alias row by name (#52). Unknown names are a no-op (core's withoutAlias, #65).
 const removeAlias = async (name: string): Promise<void> => {
   home.writeConfig({ routing: withoutAlias(activeRoutingMap(), name) });
@@ -377,6 +387,7 @@ const getState = async (): Promise<PanelState> => {
     routingFamilies: activeRoutingMap().families,
     routingAliases: activeRoutingMap().aliases,
     aliasPickerShowsModel: aliasPickerShowsModel(),
+    aliasOnlyModels: aliasOnlyModels(),
     // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
     // they cross the boundary only while running, like bridgeSecret.
     claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
@@ -929,6 +940,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     setAlias, // Routing map Alias rows (#52) — add/retarget one
     removeAlias, // Routing map Alias rows (#52) — remove one by name
     setAliasPickerShowsModel, // alias picker rows: pinned-model suffix on/off (#52)
+    setAliasOnlyModels, // Claude Code's /model list: aliases only on/off (#67)
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,
@@ -955,6 +967,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
     aliasPickerShowsModel,
+    aliasOnlyModels,
     port: bridgePort,
     accessSecret: () => bridgeSecret,
     log: (m) => output.appendLine(m),
