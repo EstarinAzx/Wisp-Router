@@ -18,6 +18,10 @@ tags: [context, stack]
   - `preact` `^10.26` + `@preact/preset-vite` `^2.10` — side-panel UI (JSX → Preact).
   - `tailwindcss` `^4.1` + `@tailwindcss/vite` `^4.1` — styling (CSS-first, `@import "tailwindcss"`, no config file; theme via `--vscode-*` vars).
   - `vite` `^6` — bundles `webview/` → single unhashed `dist/webview/main.js` + `main.css`.
+- **TUI (`packages/tui` = `wisp-router`, #60):**
+  - `@opentui/core` + `@opentui/react` `0.4.3` — terminal renderer (native Zig core; per-platform npm binaries incl. `core-win32-x64`) + React reconciler. JSX via `jsxImportSource: @opentui/react`.
+  - `react` `^19.2` — the TUI's component model (peer of the reconciler).
+  - Runs on **Bun** directly (`bun run dev` → `src/index.tsx`, no build step); ships later as `bun build --compile` binaries (ADR-0003, #67).
 
 ## Build
 Monorepo since #58 (bun workspaces, root `bun.lock`; install with `bun install` at root).
@@ -31,13 +35,14 @@ Monorepo since #58 (bun workspaces, root `bun.lock`; install with `bun install` 
 - Package: `bun run package` in `packages/vscode` (= `vsce package --no-dependencies`, pinned devDep `@vscode/vsce` `^3.3`; runs `compile` via `vscode:prepublish`). Dev sources excluded by `.vscodeignore`.
 
 ## Testing
-- `vitest` `^4.1` (devDep of `@wisp/core`) — unit-test runner for the **vscode-free** pure logic (`packages/core/src/*.test.ts`, 304 tests). Run `bun run test` at root. No `@vscode/test-electron`: the tested functions are pure, so no Extension Development Host is needed. Core's `tsconfig.json` excludes `src/**/*.test.ts` from typecheck (mirrors the old build exclusion).
+- `vitest` `^4.1` (devDep of `@wisp/core`) — unit-test runner for the **vscode-free** pure logic (`packages/core/src/*.test.ts`, 344 tests). Run `bun run test` at root. No `@vscode/test-electron`: the tested functions are pure, so no Extension Development Host is needed. Core's `tsconfig.json` excludes `src/**/*.test.ts` from typecheck (mirrors the old build exclusion).
 
 ## Services
 - None (no DB/cache). Single external HTTP dependency: the OpenCode Zen provider — see [[api]].
 
 ## Env vars
-- `OPENCODE_API_KEY` — fallback API key when none is stored in SecretStorage. Key issued at https://opencode.ai/auth.
+- `OPENCODE_API_KEY` — fallback API key when none is stored in `~/.wisp/auth.json` (per-provider siblings: `OPENAI_API_KEY`, `GROQ_API_KEY`, …). Key issued at https://opencode.ai/auth.
+- `WISP_HOME` — overrides the `~/.wisp` store directory (tests/sandboxing; mirrors `CODEX_HOME`). Both faces honor it via `wispHomeDir()`.
 
 ## Related
 - [[overview]] — project shape
