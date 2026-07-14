@@ -1,8 +1,23 @@
 {
-  "name": "@wisp/tui",
-  "version": "0.0.0",
+  "name": "wisp-router",
+  "version": "0.1.0",
   "private": true,
+  "bin": {
+    "wisp": "./src/index.tsx"
+  },
+  "scripts": {
+    "dev": "bun src/index.tsx",
+    "compile": "tsc -p ./"
+  },
   "dependencies": {
-    "@wisp/core": "workspace:*"
+    "@opentui/core": "0.4.3",
+    "@opentui/react": "0.4.3",
+    "@wisp/core": "workspace:*",
+    "react": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.9.3"
   }
 }

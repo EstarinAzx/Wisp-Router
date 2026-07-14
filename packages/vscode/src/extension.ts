@@ -25,7 +25,7 @@ import { randomBytes } from 'crypto';
 import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
-  Provider, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
+  Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
   isAnthropicProvider, isAnthropicSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds,
@@ -56,56 +56,8 @@ const DEFAULT_BRIDGE_PORT = 41184;
 
 // ----------------------------- Provider catalog ----------------------------- //
 
-// A Provider is one OpenAI-chat-compatible backend, reached by swapping {baseUrl, key, model} on the
-// same `openai` SDK. Base URLs are HARDCODED here, never read from settings: choosing a Provider
-// chooses where the bearer key is sent, so a workspace-overridable URL would be a key-redirect vector.
-// The catalog is the ten built-ins below (OpenCode Go default) plus a user-defined Custom row whose
-// base URL alone comes from settings (machine-scoped wisp.baseUrl). No model-id transform — each
-// defaultModel is in the Provider's native form (re-adding Zen's `opencode/` prefix 401s the /go
-// endpoint, which wants the bare id /models serves). GitHub Copilot and Cursor are deliberately
-// absent (ban risk / shape-incompatible — see the 2026-06-15 multi-provider ADR + gotchas).
-// defaultModel for the first five is doc-verified and ollama-cloud is user-verified (2026-06-16); the
-// three still marked ⚠ are BEST-EFFORT presets — no key was available to verify them against each GET
-// /models, so the panel's model picker / type-field is the correction path. ⚠ Ollama Cloud is `/v1`,
-// NOT `/api/v1` (the `/api` prefix is Ollama's native protocol and breaks the OpenAI SDK — see gotchas.md).
-// Chat-surface context windows and vision are read LIVE for the active model from models.dev (via each
-// row's catalogKey). Fallback when a model isn't in models.dev or the fetch fails: context = a neutral
-// default (no guess table); vision = the conservative modelSupportsVision id heuristic.
-const PROVIDERS: Provider[] = [
-  { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', defaultModel: 'minimax-m3', apiKeyEnv: 'OPENCODE_API_KEY', catalogKey: 'opencode-go' },
-  // OpenCode Zen = the premium /zen/v1 catalog (Claude/GPT/Gemini), distinct from Go's budget /zen/go/v1.
-  // Shares the OPENCODE_API_KEY env fallback. Model ids are BARE (verified via GET /zen/v1/models,
-  // 2026-06-18) — no `opencode/` prefix. defaultModel is ⚠ best-effort: claude-haiku-4-5 is the cheapest
-  // verified-present model; the panel's model picker is the correction path. catalogKey 'opencode' for
-  // models.dev context/vision (absent there -> neutral default + the modelSupportsVision id heuristic).
-  // keyId 'opencode-go': same OpenCode account as Go (one key, two endpoints), so it borrows Go's stored
-  // key instead of demanding a second entry — otherwise it stays hidden from the picker until re-keyed.
-  { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', defaultModel: 'claude-haiku-4-5', apiKeyEnv: 'OPENCODE_API_KEY', catalogKey: 'opencode', keyId: 'opencode-go' },
-  // Codex = the subscription-backed ChatGPT Codex backend (Responses API, reached by OAuth, not an API
-  // key). kind:'codex' switches the Inquire/usability paths off the OpenAI-chat code. No apiKeyEnv — it
-  // is "usable when signed in". Base URL is the Codex backend; defaultModel is the Codex-tuned default.
-  // No catalogKey (not in models.dev) and it is intentionally absent from the native chat picker until
-  // the Responses tool-mapper lands (#15) — keyless rows are hidden there, which is correct for now.
-  { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.3-codex', apiKeyEnv: '', kind: 'codex' },
-  // Anthropic = the subscription-backed Claude backend (Messages API, reached by Claude.ai OAuth, not an
-  // API key). kind:'anthropic-oauth' switches the Inquire/usability paths off the OpenAI-chat code, like
-  // Codex. No apiKeyEnv — "usable when signed in". Base URL is api.anthropic.com (the client appends
-  // /v1/messages); defaultModel is the latest Opus. No catalogKey (not in models.dev) and absent from the
-  // native chat picker until the Messages adapter lands (slice #29) — keyless rows are hidden there.
-  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-4-8', apiKeyEnv: '', kind: 'anthropic-oauth' },
-  { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
-  { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
-  { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },
-  { id: 'openrouter', label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openai/gpt-4o-mini', apiKeyEnv: 'OPENROUTER_API_KEY', catalogKey: 'openrouter' },
-  { id: 'ollama', label: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', defaultModel: 'qwen2.5-coder' /* ⚠ best-effort: user must have pulled it */, apiKeyEnv: '' /* local models aren't in models.dev → table/default */ },
-  { id: 'ollama-cloud', label: 'Ollama Cloud', baseUrl: 'https://ollama.com/v1', defaultModel: 'gpt-oss:120b' /* verified working 2026-06-16 */, apiKeyEnv: 'OLLAMA_API_KEY', catalogKey: 'ollama-cloud' },
-  { id: 'kilocode', label: 'KiloCode', baseUrl: 'https://api.kilo.ai/api/gateway', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify namespace via /models */, apiKeyEnv: 'KILOCODE_API_KEY', catalogKey: 'kilo' },
-  { id: 'cline', label: 'Cline', baseUrl: 'https://api.cline.bot/api/v1', defaultModel: 'anthropic/claude-3.5-sonnet' /* ⚠ best-effort: verify via /models */, apiKeyEnv: 'CLINE_API_KEY' /* not in models.dev → table/default */ },
-  // Custom: the always-works escape hatch and the only Provider whose base URL + model are
-  // user-supplied (machine-scoped wisp.baseUrl + a typed model, resolved at runtime by
-  // activeBaseUrl()). No env fallback — its key lives only in the wisp.apiKey.custom slot.
-  { id: 'custom', label: 'Custom', baseUrl: '', defaultModel: '', apiKeyEnv: '' },
-];
+// The 12-built-ins + Custom data array moved to @wisp/core with #60 (shared with the TUI face);
+// imported below with the other core pieces. Everything here still reads the same PROVIDERS.
 
 // Legacy globalState keys — the older migrations still shuffle them, then the config.json seed
 // reads them once (#59); nothing else touches globalState anymore.
