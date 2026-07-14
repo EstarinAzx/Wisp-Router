@@ -12,7 +12,8 @@
  * Data shapes:
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
- *     'signin-wait' (browser flow pending). Every non-input mode returns to 'input' on Esc.
+ *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply).
+ *     Every non-input mode returns to 'input' on Esc.
  */
 
 import { spawn } from 'child_process';
@@ -23,6 +24,8 @@ import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
   CodexAuth, AnthropicAuth, DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
+  resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
+  chatCompletionTextDelta, standardEffortToCodex,
   WispHome, type Provider, type EffortLevel,
 } from '@wisp/core';
 
@@ -127,6 +130,55 @@ const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => 
   } catch { return undefined; }
 };
 
+// ----------------------------------------- /test ----------------------------------------- //
+
+// The wiring check's canned prompt — proves the round trip, nothing more (#62: not a chat).
+const TEST_PROMPT = 'Reply with one short sentence confirming you can hear me.';
+
+// Fire the canned prompt through one Provider and yield raw answer-text deltas. Dispatch mirrors the
+// Bridge's three kinds (bridgeServer.startProviderStream): Codex → Responses stream, Anthropic →
+// Messages stream, keyed → plain fetch on <base>/chat/completions. Failures throw with the Provider's
+// real message — the caller renders them loud, never falls back. Exported so the wiring check itself
+// can be exercised headless (no TTY) — the screen around it is plain state rendering.
+export async function* streamTestReply(p: Provider, model: string, signal: AbortSignal): AsyncGenerator<string> {
+  const cfg = home.readConfig();
+  const baseUrl = resolveBaseUrl(p, cfg.customBaseUrl ?? '');
+  const message = { role: 'user' as const, content: TEST_PROMPT };
+  if (isCodexProvider(p)) {
+    const creds = await codexAuth.current();
+    if (!creds) throw new Error(`${p.label} is not signed in — /signin codex.`);
+    for await (const ev of codexStream({ creds, baseUrl, model, messages: [message], effort: standardEffortToCodex(cfg.effort ?? DEFAULT_EFFORT), signal }))
+      if (ev.type === 'text') yield ev.value;
+    return;
+  }
+  if (isAnthropicProvider(p)) {
+    const creds = await anthropicAuth.current();
+    if (!creds) throw new Error(`${p.label} is not signed in — /signin anthropic.`);
+    for await (const ev of anthropicStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
+      if (ev.type === 'text') yield ev.value;
+    return;
+  }
+  if (!baseUrl) throw new Error('Custom has no base URL configured.');
+  // Keyless rows (local Ollama) send bare on purpose — a backend that wanted a key answers 401, and
+  // that status+body IS the loud error this check exists to surface. No local key gate.
+  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+    body: JSON.stringify({ model, messages: [message], stream: true }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${p.label} API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
+  }
+  if (!res.body) return;
+  for await (const block of sseBlocks(res.body)) {
+    const delta = chatCompletionTextDelta(block);
+    if (delta) yield delta;
+  }
+}
+
 // ----------------------------------------- App ----------------------------------------- //
 
 type Mode =
@@ -139,7 +191,8 @@ type Mode =
   | { kind: 'model-free'; provider: Provider }
   | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
   | { kind: 'signin-wait'; provider: Provider }
-  | { kind: 'effort-pick' };
+  | { kind: 'effort-pick' }
+  | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string };
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
@@ -148,6 +201,8 @@ export const App = () => {
   const [status, setStatus] = useState('');
   const inputRef = useRef<InputRenderable>(null);
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
+  const testSeq = useRef(0);   // same guard for /test — a late delta/finish can't touch a later screen
+  const testAbort = useRef<AbortController | null>(null);
   const renderer = useRenderer();
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
@@ -182,6 +237,35 @@ export const App = () => {
   const doSignOut = (p: Provider) => {
     (isCodexProvider(p) ? codexAuth : anthropicAuth).signOut();
     backToInput(`Signed out of ${p.label}.`);
+  };
+
+  // Stream the canned /test prompt onto the test screen. Unlike sign-in, Esc aborts the request
+  // itself (there's no browser flow to let finish) — the seq guard still gates every state write.
+  const startTest = (p: Provider, model: string) => {
+    const seq = ++testSeq.current;
+    const controller = new AbortController();
+    testAbort.current = controller;
+    setMode({ kind: 'test', provider: p, model, text: '', phase: 'streaming' });
+    (async () => {
+      let sawText = false;
+      for await (const delta of streamTestReply(p, model, controller.signal)) {
+        if (!delta) continue;
+        if (seq !== testSeq.current) return false;
+        sawText = true;
+        setMode((m) => m.kind === 'test' ? { ...m, text: m.text + delta } : m);
+      }
+      return sawText;
+    })().then(
+      // A stream that ends having yielded nothing proved nothing — that's a failure, not a pass
+      // (a 200 that ignored stream:true, an empty body, an error frame all land here).
+      (sawText) => {
+        if (seq !== testSeq.current) return;
+        setMode((m) => m.kind !== 'test' ? m
+          : sawText ? { ...m, phase: 'done' }
+          : { ...m, phase: 'error', error: 'Stream ended with no reply — nothing was received.' });
+      },
+      (err) => { if (seq === testSeq.current) setMode((m) => m.kind === 'test' ? { ...m, phase: 'error', error: err instanceof Error ? err.message : String(err) } : m); },
+    );
   };
 
   // ----- command dispatch (Enter in the palette) -----
@@ -247,6 +331,18 @@ export const App = () => {
         setMode({ kind: 'effort-pick' });
         return;
       }
+      case 'test': {
+        const name = target.args[0];
+        if (!name) { setStatus('Usage: /test <provider|alias>'); return; }
+        const cfg = home.readConfig();
+        // Empty active id on purpose: /test names its target explicitly, so an unknown name errors
+        // here instead of resolveRoute's silent Active-Provider fallback (#62 acceptance).
+        const route = resolveRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, '', name);
+        if (!route) { setStatus(`Unknown provider or alias: ${name}`); return; }
+        // An Alias Target's pinned model beats the Provider's remembered model — same rule as the Bridge.
+        startTest(route.provider, route.pinnedModel ?? resolveModel(cfg.models ?? {}, route.provider));
+        return;
+      }
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
@@ -259,7 +355,10 @@ export const App = () => {
       // ponytail: Esc detaches the UI only — the loopback waits out its own 5-min timeout, and a flow
       // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
       if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
-      mode.kind === 'input' ? exitTui() : backToInput('Cancelled.');
+      if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
+      mode.kind === 'input' ? exitTui()
+        : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
+        : backToInput('Cancelled.');
       return;
     }
     if (mode.kind !== 'key-entry') return;
@@ -406,6 +505,16 @@ export const App = () => {
 
       {mode.kind === 'signin-wait' && (
         <text fg={DIM} marginTop={1}>Browser opened — finish the {mode.provider.label} sign-in there. Esc to cancel.</text>
+      )}
+
+      {mode.kind === 'test' && (
+        <box border title={`/test — ${mode.provider.label} · ${mode.model}`} marginTop={1} flexDirection="column">
+          {/* raw reply text, streamed as-is — deliberately no markdown, no history (#62) */}
+          {mode.text !== '' && <text>{mode.text}</text>}
+          {mode.phase === 'streaming' && <text fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
+          {mode.phase === 'done' && <text fg={DIM}>Done — Esc to close.</text>}
+          {mode.phase === 'error' && <text fg="#f87171">{mode.error}</text>}
+        </box>
       )}
 
       {mode.kind === 'effort-pick' && (
