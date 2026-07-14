@@ -10,32 +10,29 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**#67 landed — wisp-router 2.0.1 is PUBLIC on npm** (main `c3155cc`, tag `v2.0.1`; #67 closed;
-critical path #58→#67 complete). `Release` workflow: tag `v*` → 4-target `bun build --compile`
-matrix → GitHub release with binaries → npm publish (thin shell `wisp-router` + scoped
-`@tsd47216/wisp-router-<target>` platform packages, shim falls back to the release download).
-Bonus shipped: `bridge.aliasOnlyModels` (panel checkbox + TUI `/aliasonly`) — Claude Code's
-`/model` list shows only Aliases. TUI polish shipped (no `▶` indicator, no input border title,
-`Wisp_` splash + version). Suite 367/367. Install verified (`npm i -g wisp-router`); dev shims
-in `~\.local\bin` **deleted** — the real npm bins now serve `wisp`/`claude-wisp`.
+**Housekeeping (commits 60c06d9 + fcc0eb0, pushed).** Root README rewritten around the
+`docs/wisp.png` banner (badges, install, highlights, layout, dev, release). `PRD.md`,
+`issues.md`, `CODEX-STREAM-CUTOFF-FINDINGS.md` deleted — GitHub issues + git history are the
+record now. Tests moved out of src: `packages/core/src/*.test.ts` → `packages/core/tests/`
+(imports rewritten to `../src/…`, tsconfig exclude dropped, vitest default glob covers it).
+Suite 367/367; typecheck clean. Mid-session repair: 60c06d9 had staged the test renames without
+the import rewrite (main briefly broken) — fcc0eb0 fixed and verified.
 
 ## Next task
-Critical path done — **user picks from backlog: #68 (chat mode) or #69 (copilot-wisp)**.
-Suggested: `/preset scope <picked>`. Small orphans available anytime: add LICENSE + `license`
-fields to `packages/tui/npm/*/package.json`; VS Code extension 1.7.0 release (CHANGELOG already
-has an Unreleased section with aliasOnlyModels).
+Unchanged from last session — **user picks from backlog: #68 (chat mode) or #69 (copilot-wisp)**.
+Suggested: `/preset scope <picked>`. Small orphans anytime: LICENSE + `license` fields in
+`packages/tui/npm/*/package.json`; VS Code extension 1.7.0 release (CHANGELOG Unreleased section
+ready); root `.vsix` pile (13 tracked files) — ask user before purging.
 
 ## Landmines
-- **npm spam filter:** the platform packages were REMOVED once minutes after a green publish
-  (unscoped names 403'd outright). Before blaming CI, probe the registry:
-  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`.
-  Fallback keeps installs working; reinstatement = npm support ticket (user action).
-- **Version numbers burn on contact:** 2.0.0 is deprecated and can never be republished. Release
-  flow: bump `packages/tui/package.json` → tag `v<same>` → push (workflow enforces tag==version;
-  re-runs skip already-published/existing steps).
-- **User should rotate the npm token** — it was pasted in-session; live copy is repo secret
-  `NPM_TOKEN`.
-- `macos-13` runner label is retired — darwin-x64 builds on `macos-15-intel` (until Aug 2027).
+- **`git mv` + sed ≠ staged:** sed after `git mv` leaves the rewrite unstaged — `git add` the
+  moved files again before committing (bit us this session).
+- **npm spam filter:** platform packages were REMOVED once post-publish. Probe
+  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`
+  before blaming CI; shim's release-download fallback keeps installs working.
+- **Version numbers burn on contact:** 2.0.0 deprecated, never republishable. Release flow: bump
+  `packages/tui/package.json` → tag `v<same>` → push (workflow enforces tag==version).
+- **User should rotate the npm token** (pasted in an earlier session; repo secret `NPM_TOKEN`).
 - Codex signed out on this machine — `/signin codex` before Codex live checks (`--model haiku` →
   `opencode-go` works meanwhile).
 - Both faces share Bridge port + secret — second host fails loud; stop one first. TUI dev writes
