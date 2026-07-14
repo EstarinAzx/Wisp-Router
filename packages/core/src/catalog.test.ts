@@ -644,4 +644,15 @@ describe('chatCompletionTextDelta', () => {
     expect(chatCompletionTextDelta('data: not-json')).toBe('');
     expect(chatCompletionTextDelta('data: {"object":"chat.completion.chunk"}')).toBe('');
   });
+
+  // A CRLF-framed backend never splits in sseBlocks (\n\n only), so the whole stream arrives as ONE
+  // block of many complete chunks — each data: line must then parse alone and the deltas concatenate.
+  it('recovers every delta from a mega-block of complete chunks', () => {
+    expect(chatCompletionTextDelta('data: {"choices":[{"delta":{"content":"a"}}]}\ndata: {"choices":[{"delta":{"content":"b"}}]}')).toBe('ab');
+  });
+
+  // A pseudo-streaming backend may send one data: line carrying a whole non-streamed completion.
+  it('falls back to message.content for a non-streamed completion shape', () => {
+    expect(chatCompletionTextDelta('data: {"choices":[{"message":{"content":"whole reply"}}]}')).toBe('whole reply');
+  });
 });

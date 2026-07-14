@@ -466,21 +466,30 @@ export const assembleToolCalls = (deltas: ToolCallDelta[]): AssembledToolCall[] 
   return [...byIndex.values()];
 };
 
-// One OpenAI chat-completions SSE block → its answer-text delta. Chat streams are data-only SSE
-// (no event: line, so parseSseBlock can't read them): each block is one JSON chunk with the text
-// under choices[0].delta.content. '' for anything else — role chunks (content:null), keep-alives,
-// the [DONE] sentinel, malformed JSON. The TUI's /test wiring check consumes this per block.
+// One OpenAI chat-completions SSE block → its answer text. Chat streams are data-only SSE (no
+// event: line, so parseSseBlock can't read them): normally one JSON chunk per block with the text
+// under choices[0].delta.content (message.content covers a pseudo-streamed whole completion).
+// '' for anything else — role chunks (content:null), keep-alives, the [DONE] sentinel, malformed
+// JSON. The TUI's /test wiring check consumes this per block.
 // ponytail: mid-stream `data: {"error":…}` frames on a 200 read as '' — surface them if a real
 // compat backend is seen emitting one.
 export const chatCompletionTextDelta = (block: string): string => {
   const dataLines = block.split('\n').map((l) => l.trim()).filter((l) => l.startsWith('data:'));
   if (dataLines.length === 0) return '';
-  const raw = dataLines.map((l) => l.slice('data:'.length).trim()).join('\n');
-  if (raw === '[DONE]') return '';
-  try {
-    const parsed = JSON.parse(raw) as { choices?: { delta?: { content?: string | null } }[] };
-    return parsed?.choices?.[0]?.delta?.content ?? '';
-  } catch { return ''; }
+  const parseOne = (raw: string): string => {
+    if (raw === '[DONE]') return '';
+    try {
+      const parsed = JSON.parse(raw) as { choices?: { delta?: { content?: string | null }; message?: { content?: string | null } }[] };
+      return parsed?.choices?.[0]?.delta?.content ?? parsed?.choices?.[0]?.message?.content ?? '';
+    } catch { return ''; }
+  };
+  const payloads = dataLines.map((l) => l.slice('data:'.length).trim());
+  // SSE allows one payload split across data: lines — try the joined parse first. A CRLF-framed
+  // backend (\r\n\r\n) never splits in sseBlocks (\n\n only), so its whole stream lands here as ONE
+  // block of many complete chunks: the joined parse fails, and the per-line fallback recovers every
+  // delta in order.
+  const joined = parseOne(payloads.join('\n'));
+  return joined || payloads.map(parseOne).join('');
 };
 
 // ----------------------------- Migration ----------------------------- //

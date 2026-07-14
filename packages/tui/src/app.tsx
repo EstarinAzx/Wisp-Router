@@ -246,12 +246,23 @@ export const App = () => {
     testAbort.current = controller;
     setMode({ kind: 'test', provider: p, model, text: '', phase: 'streaming' });
     (async () => {
+      let sawText = false;
       for await (const delta of streamTestReply(p, model, controller.signal)) {
-        if (seq !== testSeq.current) return;
+        if (!delta) continue;
+        if (seq !== testSeq.current) return false;
+        sawText = true;
         setMode((m) => m.kind === 'test' ? { ...m, text: m.text + delta } : m);
       }
+      return sawText;
     })().then(
-      () => { if (seq === testSeq.current) setMode((m) => m.kind === 'test' ? { ...m, phase: 'done' } : m); },
+      // A stream that ends having yielded nothing proved nothing — that's a failure, not a pass
+      // (a 200 that ignored stream:true, an empty body, an error frame all land here).
+      (sawText) => {
+        if (seq !== testSeq.current) return;
+        setMode((m) => m.kind !== 'test' ? m
+          : sawText ? { ...m, phase: 'done' }
+          : { ...m, phase: 'error', error: 'Stream ended with no reply — nothing was received.' });
+      },
       (err) => { if (seq === testSeq.current) setMode((m) => m.kind === 'test' ? { ...m, phase: 'error', error: err instanceof Error ? err.message : String(err) } : m); },
     );
   };
