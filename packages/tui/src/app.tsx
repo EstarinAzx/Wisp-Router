@@ -22,7 +22,7 @@ import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  CodexAuth, AnthropicAuth, DEFAULT_EFFORT,
+  CodexAuth, AnthropicAuth, DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
   WispHome, type Provider, type EffortLevel,
 } from '@wisp/core';
 
@@ -55,6 +55,13 @@ const keyedProviders = (): Provider[] =>
 
 const oauthProviders = (): Provider[] =>
   PROVIDERS.filter((p) => isCodexProvider(p) || isAnthropicProvider(p));
+
+// Sync signed-in read for display — the pure check over the stored bundle (skips codex's async
+// CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
+const oauthStatus = (p: Provider): string =>
+  isCodexProvider(p) ? (isCodexSignedIn(home.readAuth().codex) ? 'signed in' : 'signed out')
+  : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? 'signed in' : 'signed out')
+  : '';
 
 const saveKey = (p: Provider, key: string): void => {
   // Merge is shallow — spread the existing keys map or this write would drop sibling keys.
@@ -303,11 +310,14 @@ export const App = () => {
             focused
             height={Math.min(PROVIDERS.length * 2, 16)}
             showScrollIndicator
-            options={PROVIDERS.map((p) => ({
-              name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
-              description: p.id,
-              value: p.id,
-            }))}
+            options={PROVIDERS.map((p) => {
+              const auth = oauthStatus(p);
+              return {
+                name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
+                description: auth ? `${p.id} — ${auth}` : p.id,
+                value: p.id,
+              };
+            })}
             onSelect={(_i, opt) => {
               if (!opt) return;
               home.writeConfig({ provider: opt.value as string });
