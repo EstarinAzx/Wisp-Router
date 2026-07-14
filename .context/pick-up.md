@@ -10,26 +10,28 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**#58 landed — the repo is a bun-workspaces monorepo** (PR #70 merged, main `b0323ef`).
-`packages/core` (engine + 304 tests, private, raw-TS consumed, barrel `index.ts`) ·
-`packages/vscode` (extension; esbuild bundles `dist/extension.js` so vsce escapes
-`workspace:*`) · `packages/tui` (empty scaffold). All acceptance criteria verified incl.
-hand-checked F5. `.context/` overview/stack/gotchas re-anchored to the new layout.
+**#59 implemented — the Wisp home store** (`~/.wisp/config.json` + owner-only `auth.json`,
+ADR-0002). PR [#71](https://github.com/EstarinAzx/Wisp-Router/pull/71) open on branch
+`feat/tui-2-wisp-home` (162cdf1, pushed). Core gained `home.ts`/`homeStore.ts` + 27 tests
+(suite 331/331, compile clean); extension fully rewired (SecretStorage/globalState/state-settings
+retired, three ordered activate migrations, `~/.wisp` fs watcher); reviewer findings incl. a
+workspace-injection hole in the migration seed fixed.
 
 ## Next task
-**`/preset scope 59`** — TUI slice 2: Wisp home store (`~/.wisp/` + auth.json, ADR-0002).
-Read #59 body + ADR-0002 first. New branch off fresh main (e.g. `feat/tui-2-wisp-home`).
-Frontier after: #60 (TUI MVP) → fan-out #61/#62/#63/#65.
+**F5 eyeball PR #71, merge, then `/preset scope 60`.** F5 checklist (uninstall installed Wisp
+first — dup-panel trap): (1) set a key in the panel → lands in `~/.wisp/auth.json`, file owner-only
+on POSIX; (2) restart the dev host → provider/model/effort/routing/Bridge settings rehydrate;
+(3) an installed pre-#59 profile migrates once (SecretStorage slots emptied) and launch 2 no-ops;
+(4) hand-edit config.json while running → panel updates (watcher); (5) Bridge start reuses the
+migrated secret. Then merge #71 → `/preset scope 60` (TUI MVP + `wisp-router`/`claude-wisp` naming)
+off fresh main.
 
 ## Landmines
-- **Auth managers await #59:** `codexAuth.ts`/`anthropicAuth.ts` sit in `packages/vscode`
-  because they use `vscode.SecretStorage` — #59 moves secrets to auth.json; the managers'
-  pure token cores are already in core's `catalog.ts`. OAuth two-process refresh races:
-  atomic writes + re-read-before-refresh (acceptance criteria in #59).
-- **`tsc` no longer emits a runnable build** — typecheck-only; the bundle is esbuild
-  (`bun run compile` in `packages/vscode` before `Ctrl+R`, or stop→F5).
-- **Before any F5 / reinstall:** uninstall the installed Wisp first (dup-panel trap).
-- Wrap-up commit on main is local — push not done (preset rule); push when convenient.
+- **Seed reads user scope only** (`inspect().globalValue`) — never "fix" it back to merged
+  `cfg().get()`: workspace values could redirect the bearer key (see gotchas + 2026-07-14 decision).
+- `tsc` is typecheck-only — `bun run compile` in `packages/vscode` before `Ctrl+R`/F5.
+- Old `wisp.*` entries in settings.json are dead knobs now — don't debug them, state is `~/.wisp/`.
+- `WISP_HOME` env overrides the store dir (tests/sandboxing); #60's TUI should honor it too.
 
 ## Related
-- [[active-work]] · [[overview]] · [[decisions]] · [[happy-path]] · [[gotchas]]
+- [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[api]]

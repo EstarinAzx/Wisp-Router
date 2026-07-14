@@ -11,8 +11,8 @@
  *
  * Design: an ADDITIONAL surface only. Inquire stays the primary feature and is untouched; this just
  * exposes the same {baseUrl, key, model} backends through VS Code's native chat. extension.ts owns the
- * key handling (SecretStorage) and injects per-Provider resolvers, so this module reads no secrets and
- * adds no key-redirect surface — built-in base URLs stay hardcoded in the catalog.
+ * key handling (~/.wisp/auth.json) and injects per-Provider resolvers, so this module reads no secrets
+ * and adds no key-redirect surface — built-in base URLs stay hardcoded in the catalog.
  *
  * Data shapes:
  *   - ChatProviderDeps: the seam to extension.ts — the catalog, the current model-map/baseUrl getters,
@@ -37,8 +37,8 @@ import { getModelsDevCatalog } from '@wisp/core';
 
 // ----------------------------- Dependencies ----------------------------- //
 
-// The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is
-// handed the catalog plus pure getters so it never touches secrets or config directly.
+// The seam to extension.ts. Key/client resolution lives there (it reads the ~/.wisp store); this module
+// is handed the catalog plus pure getters so it never touches secrets or config directly.
 export type ChatProviderDeps = {
   providers: Provider[];
   modelMap: () => Record<string, string>;          // current per-Provider model memory
@@ -104,7 +104,7 @@ const toAnthropicMessages = (messages: readonly vscode.LanguageModelChatRequestM
 // Implements the three LanguageModelChatProvider methods over Wisp's catalog. The model `id` we
 // advertise IS the Provider id, so the response/token methods map it straight back to a Provider.
 const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => ({
-  // Advertise one model per usable Provider. Key presence is async (SecretStorage) so resolve it for
+  // Advertise one model per usable Provider. Key presence is async (the injected resolver) so resolve it for
   // every Provider first, then hand the plain facts to the pure builder, which owns the usability rules.
   provideLanguageModelChatInformation: async () => {
     const keyedPairs = await Promise.all(

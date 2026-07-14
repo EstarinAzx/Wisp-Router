@@ -56,12 +56,20 @@ OpenAI-compatible at `https://ollama.com/v1`. The `/api` prefix (`/api/chat`, `/
 **native** protocol and breaks the OpenAI SDK. Use `/v1` for the catalog row; key env var
 `OLLAMA_API_KEY` (Bearer). Local Ollama needs no key. Verified 2026-06-15 (multi-provider research).
 
-### The Provider selector is a key-redirect vector — keep `wisp.provider` machine-scoped
-`wisp.provider` selects which base URL the bearer API key is sent to, so it carries the exact threat
-`wisp.baseUrl` does: a workspace-overridable selector lets a hostile repo redirect the key to an
-attacker endpoint. `wisp.provider` MUST stay `"scope": "machine"`, and built-in base URLs MUST live in
-code (the `PROVIDERS` catalog), never in settings. Custom's `wisp.baseUrl` is the only user-supplied
-URL, also machine-scoped. Don't relax either without re-reading the 2026-06-15 multi-provider ADR.
+### The Provider selector is a key-redirect vector — keep it out of workspace reach
+The Active Provider selects which base URL the bearer API key is sent to, so it carries the exact
+threat the Custom base URL does: anything workspace-overridable lets a hostile repo redirect the key
+to an attacker endpoint. Pre-#59 the defense was `"scope": "machine"` on the settings; since #59 both
+live in `~/.wisp/config.json`, which no workspace can touch — and the one remaining settings read (the
+one-time migration seed) MUST use `inspect().globalValue`, never the merged `get()`, because scope
+enforcement died with the settings' registration. Built-in base URLs MUST stay in code (the
+`PROVIDERS` catalog). Don't relax any of this without re-reading the 2026-06-15 multi-provider ADR.
+
+### VS Code `wisp.*` settings are dead knobs (except maxTokens/temperature)
+Editing `wisp.provider`/`wisp.baseUrl`/`wisp.model`/`wisp.bridge.*` in settings.json does nothing
+since #59 — state lives in `~/.wisp/config.json` (hand-edit THAT; the extension watches it). Old
+entries linger in users' settings.json as "unknown setting" — harmless, deliberately not auto-removed
+(updating unregistered keys isn't reliably allowed).
 
 ### Cline ToS, and why Copilot/Cursor were dropped
 Cline's ToS §2.2 bars use "to develop competing products… or otherwise to our detriment." Ship the Cline
