@@ -1,5 +1,5 @@
 {
-  "name": "wisp-router-darwin-arm64",
+  "name": "@tsd47216/wisp-router-darwin-arm64",
   "version": "0.0.0-dev",
   "description": "wisp-router compiled binary for macOS arm64 (Apple Silicon)",
   "os": [

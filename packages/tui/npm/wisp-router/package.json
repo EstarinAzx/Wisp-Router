@@ -17,9 +17,9 @@
     "node": ">=16"
   },
   "optionalDependencies": {
-    "wisp-router-win32-x64": "0.0.0-dev",
-    "wisp-router-darwin-arm64": "0.0.0-dev",
-    "wisp-router-darwin-x64": "0.0.0-dev",
-    "wisp-router-linux-x64": "0.0.0-dev"
+    "@tsd47216/wisp-router-win32-x64": "0.0.0-dev",
+    "@tsd47216/wisp-router-darwin-arm64": "0.0.0-dev",
+    "@tsd47216/wisp-router-darwin-x64": "0.0.0-dev",
+    "@tsd47216/wisp-router-linux-x64": "0.0.0-dev"
   }
 }

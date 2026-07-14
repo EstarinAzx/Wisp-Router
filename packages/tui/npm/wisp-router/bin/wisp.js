@@ -15,10 +15,10 @@ const { spawnSync } = require('child_process');
 // ponytail: musl (Alpine) matches linux-x64 but the glibc-linked binary fails at dlopen —
 // add a musl probe with a plain error if it ever bites.
 const PLATFORM_PACKAGES = {
-  'win32-x64': 'wisp-router-win32-x64',
-  'darwin-arm64': 'wisp-router-darwin-arm64',
-  'darwin-x64': 'wisp-router-darwin-x64',
-  'linux-x64': 'wisp-router-linux-x64',
+  'win32-x64': '@tsd47216/wisp-router-win32-x64',
+  'darwin-arm64': '@tsd47216/wisp-router-darwin-arm64',
+  'darwin-x64': '@tsd47216/wisp-router-darwin-x64',
+  'linux-x64': '@tsd47216/wisp-router-linux-x64',
 };
 
 const resolveBinary = () => {

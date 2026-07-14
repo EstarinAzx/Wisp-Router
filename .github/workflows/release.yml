@@ -107,10 +107,13 @@ jobs:
           done
           # The thin shell pins every platform package to the SAME release version.
           cd packages/tui/npm/wisp-router
-          npm pkg set version="$VERSION"
-          for t in win32-x64 darwin-arm64 darwin-x64 linux-x64; do
-            npm pkg set "optionalDependencies.wisp-router-$t=$VERSION"
-          done
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = process.argv[1];
+            for (const k of Object.keys(p.optionalDependencies)) p.optionalDependencies[k] = process.argv[1];
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          " "$VERSION"
 
       # Platform packages first, thin shell last — an install mid-publish never resolves a
       # shell whose optionalDependencies don't exist yet. Already-published versions are
@@ -120,11 +123,14 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          for p in wisp-router-win32-x64 wisp-router-darwin-arm64 wisp-router-darwin-x64 wisp-router-linux-x64 wisp-router; do
-            if npm view "$p@$VERSION" version >/dev/null 2>&1; then
-              echo "$p@$VERSION already on npm — skipping"
+          # Directory names stay unscoped; the platform packages publish under the user scope
+          # (npm's spam heuristic 403'd the batch of fresh unscoped names) — read each real name.
+          for d in wisp-router-win32-x64 wisp-router-darwin-arm64 wisp-router-darwin-x64 wisp-router-linux-x64 wisp-router; do
+            NAME=$(node -p "require('./packages/tui/npm/$d/package.json').name")
+            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+              echo "$NAME@$VERSION already on npm — skipping"
             else
-              (cd packages/tui/npm/$p && npm publish --access public)
+              (cd packages/tui/npm/$d && npm publish --access public)
             fi
           done
 
