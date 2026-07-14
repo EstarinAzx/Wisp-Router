@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  resolveRoute, withFamilyRoute, withAlias, withoutAlias, EMPTY_ROUTING_MAP, type RoutingMap,
+  resolveRoute, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias, EMPTY_ROUTING_MAP, type RoutingMap,
 } from '../src/routing';
 import type { Provider } from '../src/catalog';
 
@@ -144,6 +144,20 @@ describe('edit operations (#65)', () => {
     expect(withAlias(EMPTY_ROUTING_MAP, providers, 'fast', { providerId: 'gone', model: 'x' })).toBeUndefined();
   });
 
+  it('withAliasRenamed keeps the Target and the row position', () => {
+    const next = withAliasRenamed(fullMap, providers, 'sol', 'luna');
+    expect(next?.aliases.map((a) => a.name)).toEqual(['luna', 'go', 'claude-opus-4-8']);
+    expect(next?.aliases[0].target).toEqual(fullMap.aliases[0].target);
+  });
+
+  // Same shadow rule as withAlias — plus a collision with ANOTHER alias is refused.
+  it('withAliasRenamed refuses Provider-id, taken, empty, and unknown-old names', () => {
+    expect(withAliasRenamed(fullMap, providers, 'sol', 'codex')).toBeUndefined();
+    expect(withAliasRenamed(fullMap, providers, 'sol', 'go')).toBeUndefined();
+    expect(withAliasRenamed(fullMap, providers, 'sol', '')).toBeUndefined();
+    expect(withAliasRenamed(fullMap, providers, 'ghost', 'luna')).toBeUndefined();
+  });
+
   it('withoutAlias removes by name; unknown names are a no-op', () => {
     const next = withoutAlias(fullMap, 'sol');
     expect(next.aliases.map((a) => a.name)).toEqual(['go', 'claude-opus-4-8']);
@@ -155,6 +169,7 @@ describe('edit operations (#65)', () => {
     const before = JSON.parse(JSON.stringify(fullMap));
     withFamilyRoute(fullMap, providers, 'haiku', undefined);
     withAlias(fullMap, providers, 'fast', target);
+    withAliasRenamed(fullMap, providers, 'sol', 'luna');
     withoutAlias(fullMap, 'sol');
     expect(fullMap).toEqual(before);
   });

@@ -113,6 +113,21 @@ export const withAlias = (
   return { ...map, aliases: [...map.aliases.filter((a) => a.name !== name), { name, target }] };
 };
 
+// Rename one Alias in place — Target and row position kept. Refused for an empty or Provider-id
+// new name (same shadow rule as withAlias), a new name already taken by ANOTHER alias, or an old
+// name not in the map — renaming nothing must not invent a row.
+export const withAliasRenamed = (
+  map: RoutingMap,
+  providers: Provider[],
+  oldName: string,
+  newName: string,
+): RoutingMap | undefined => {
+  if (!newName || providers.some((p) => p.id === newName)) return undefined;
+  if (newName !== oldName && map.aliases.some((a) => a.name === newName)) return undefined;
+  if (!map.aliases.some((a) => a.name === oldName)) return undefined;
+  return { ...map, aliases: map.aliases.map((a) => (a.name === oldName ? { ...a, name: newName } : a)) };
+};
+
 // Remove one Alias by name. An unknown name is a no-op, never an error.
 export const withoutAlias = (map: RoutingMap, name: string): RoutingMap => ({
   ...map,

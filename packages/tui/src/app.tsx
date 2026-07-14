@@ -14,7 +14,8 @@
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
  *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
  *     'bridge' (listener info: address + secret) | the /routing chain (#65): 'routing' (map
- *     overview) → 'alias-name' / 'route-provider' → 'route-model-*' (pick or free text). Every
+ *     overview) → 'alias-name' / 'alias-rename' / 'route-provider' → 'route-model-*' (pick or
+ *     free text). Every
  *     non-input mode returns to 'input' on Esc, except the routing sub-screens, which step back
  *     to the map overview first.
  *   - RouteRow: which Routing-map row is being edited — a fixed Family or a named Alias.
@@ -29,7 +30,7 @@ import {
   DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
-  FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
+  FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
   type Provider, type EffortLevel, type RoutingMap, type FamilyKey, type Target,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth } from './store';
@@ -200,8 +201,11 @@ type Mode =
   // and can write auth.json — a side effect that must not live in JSX).
   | { kind: 'bridge'; address: string; secret: string }
   // The /routing chain (#65): overview → name a new alias / pick a row's Provider → pick its model.
+  // 'alias-rename' edits an existing alias's NAME in place (Target kept) — reached from the row's
+  // Provider picker.
   | { kind: 'routing' }
   | { kind: 'alias-name' }
+  | { kind: 'alias-rename'; name: string }
   | { kind: 'route-provider'; row: RouteRow }
   | { kind: 'route-model-loading'; row: RouteRow; provider: Provider }
   | { kind: 'route-model-pick'; row: RouteRow; provider: Provider; options: string[] }
@@ -210,6 +214,7 @@ type Mode =
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
   const [line, setLine] = useState('');       // live palette input, drives suggestions
+  const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
   const [status, setStatus] = useState('');
   const inputRef = useRef<InputRenderable>(null);
@@ -444,16 +449,42 @@ export const App = () => {
     }
   };
 
+  // ----- palette submit (Enter) — with the suggestion list open, Enter fires the HIGHLIGHTED row,
+  // not the raw prefix (Up/Down picked it). A required-arg command (<…>) completes into the input
+  // instead of firing bare — it still owes an argument. Closed list falls through to runCommand. -----
+  const submitLine = (raw: string) => {
+    const open = suggestSlash(raw);
+    if (open.length === 0) { runCommand(raw); return; }
+    const pick = open[Math.min(selIdx, open.length - 1)];
+    setSelIdx(0);
+    if (pick.args?.startsWith('<')) {
+      // the value setter re-emits onInput, so `line` follows without an extra setLine here
+      if (inputRef.current) inputRef.current.value = `/${pick.name} `;
+      return;
+    }
+    runCommand(`/${pick.name}`);
+  };
+
   // ----- global keys: Esc backs out of any screen (exits from the palette); key-entry is hand-read
   // here because <input> has no masked variant — chars land in `secret`, never on screen. -----
   useKeyboard((key) => {
+    // Up/Down steer the palette highlight while the suggestion list is open (wraps at the ends).
+    if (mode.kind === 'input' && (key.name === 'up' || key.name === 'down')) {
+      const n = suggestSlash(line).length;
+      if (n === 0) return;
+      setSelIdx((i) => {
+        const cur = Math.min(i, n - 1); // typing may have shrunk the list under a stale index
+        return key.name === 'up' ? (cur + n - 1) % n : (cur + 1) % n;
+      });
+      return;
+    }
     if (key.name === 'escape') {
       // ponytail: Esc detaches the UI only — the loopback waits out its own 5-min timeout, and a flow
       // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
       if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
       // Routing sub-screens back out one level (to the map), not all the way to the palette.
-      const routingSub = mode.kind === 'alias-name' || mode.kind === 'route-provider'
+      const routingSub = mode.kind === 'alias-name' || mode.kind === 'alias-rename' || mode.kind === 'route-provider'
         || mode.kind === 'route-model-loading' || mode.kind === 'route-model-pick' || mode.kind === 'route-model-free';
       mode.kind === 'input' ? exitTui()
         : routingSub ? backToRouting('Cancelled.')
@@ -484,23 +515,35 @@ export const App = () => {
   });
 
   const suggestions = mode.kind === 'input' ? suggestSlash(line) : [];
+  // selIdx can outlive a shrinking list (typing filters it) — clamp at read; onInput resets it
+  const highlight = Math.min(selIdx, Math.max(suggestions.length - 1, 0));
 
   return (
-    <box flexDirection="column" padding={1}>
+    <box flexDirection="column" padding={2}>
       <text fg={ACCENT}>{SPLASH}</text>
-      <text fg={DIM}>BYOK model router · v{pkg.version}</text>
+      {/* the green badge is THIS face's own listener only — start/stop re-render via their setStatus */}
+      <text fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
 
       {mode.kind === 'input' && (
         <>
-          {/* no border title — the wordmark above already brands the box */}
-          <box border marginTop={1}>
-            <input ref={inputRef} placeholder="Type / for commands" focused onInput={setLine} onSubmit={onSubmitText(runCommand)} />
+          {/* no border title — the wordmark above already brands the box; inner padding = chunkier bar */}
+          <box border marginTop={1} padding={1}>
+            <input
+              ref={inputRef}
+              placeholder="Type / for commands"
+              focused
+              onInput={(value: string) => { setLine(value); setSelIdx(0); }}
+              onSubmit={onSubmitText(submitLine)}
+            />
           </box>
-          {suggestions.map((c) => (
-            <text key={c.name}>
-              {'  '}<span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
-            </text>
-          ))}
+          <box flexDirection="column" marginTop={1}>
+            {suggestions.map((c, i) => (
+              <text key={c.name} bg={i === highlight ? '#27272a' : undefined}>
+                {i === highlight ? <span fg={ACCENT}>{'> '}</span> : '  '}
+                <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
+              </text>
+            ))}
+          </box>
         </>
       )}
 
@@ -682,6 +725,25 @@ export const App = () => {
         </box>
       )}
 
+      {mode.kind === 'alias-rename' && (
+        <box border title={`Rename alias ${titleLabel({ kind: 'alias', name: mode.name })}`} marginTop={1}>
+          <input
+            focused
+            placeholder={mode.name}
+            onSubmit={onSubmitText((value) => {
+              const next = value.trim();
+              if (!next || next === mode.name) { backToRouting('Unchanged.'); return; }
+              // Split the two refusals so the message names the actual collision; input stays editable.
+              if (PROVIDERS.some((p) => p.id === next)) { setStatus(`"${next}" is a Provider id — pick another name.`); return; }
+              const renamed = withAliasRenamed(routingMap(), PROVIDERS, mode.name, next);
+              if (!renamed) { setStatus(`"${next}" is already an alias — pick another name.`); return; }
+              home.writeConfig({ routing: renamed });
+              backToRouting(`Alias ${mode.name} → ${next}.`);
+            })}
+          />
+        </box>
+      )}
+
       {mode.kind === 'route-provider' && (
         <box border title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
           <select
@@ -691,6 +753,10 @@ export const App = () => {
             showScrollIndicator
             options={[
               ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
+              // leading-space values can't collide with Provider ids (ids never start with a space)
+              ...(mode.row.kind === 'alias'
+                ? [{ name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' }]
+                : []),
               mode.row.kind === 'family'
                 ? { name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }
                 : { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
@@ -698,6 +764,7 @@ export const App = () => {
             onSelect={(_i, opt) => {
               if (!opt) return;
               if (opt.value === ' clear') { clearRow(mode.row); return; }
+              if (opt.value === ' rename' && mode.row.kind === 'alias') { setMode({ kind: 'alias-rename', name: mode.row.name }); return; }
               const p = PROVIDERS.find((x) => x.id === opt.value);
               if (p) startRouteModel(mode.row, p);
             }}
