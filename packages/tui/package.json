@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "wisp": "./src/index.tsx"
+    "wisp": "./src/index.tsx",
+    "claude-wisp": "./src/claude-wisp.ts"
   },
   "scripts": {
     "dev": "bun src/index.tsx",
