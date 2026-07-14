@@ -2,17 +2,17 @@
 
 /*
  * Depends on:
- *   - injected store accessors: the anthropic slice of ~/.wisp/auth.json (ADR-0002) — extension.ts
- *     wires them to its WispHome, so this module never touches the filesystem layout itself.
- *   - injected openExternal (system browser) — keeps the module decoupled from the editor host.
+ *   - injected store accessors: the anthropic slice of ~/.wisp/auth.json (ADR-0002) — each face (the
+ *     extension, the TUI) wires them to its WispHome, so this module never touches the fs layout itself.
+ *   - injected openExternal (system browser) — keeps the module decoupled from any host (#61: it runs
+ *     from VS Code and the terminal alike).
  *   - node http/net: a one-shot localhost server that captures the OAuth redirect (NOT an OAuth server,
  *     just a redirect catcher).
- *   - @wisp/core: the shared PKCE/state generators + the pure token cores (AnthropicCreds shape,
- *     tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn) —
- *     all unit-tested and vscode-free.
+ *   - ./catalog: the shared PKCE/state generators + the pure token cores (AnthropicCreds shape,
+ *     tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn).
  *
  * Data shapes:
- *   - AnthropicCreds (from @wisp/core): { accessToken?, refreshToken?, expiresAt? } — the stored token
+ *   - AnthropicCreds (from ./catalog): { accessToken?, refreshToken?, expiresAt? } — the stored token
  *     bundle. The OAuth access token is the bearer for the subscription Messages backend; expiresAt is
  *     an absolute epoch-ms deadline computed at exchange time (Anthropic tokens carry no JWT exp).
  *   - AnthropicCredsStore: { read, write } over that bundle — read undefined = never signed in.
@@ -28,7 +28,7 @@ import type { AddressInfo } from 'net';
 import {
   AnthropicCreds, codeVerifier, codeChallenge, oauthState,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn,
-} from '@wisp/core';
+} from './catalog';
 
 // ----------------------------- Constants ----------------------------- //
 
@@ -93,7 +93,7 @@ const exchangeCode = async (code: string, verifier: string, state: string, port:
 const SUCCESS_HTML =
   '<!doctype html><meta charset="utf-8"><title>Claude sign-in complete</title>' +
   '<body style="font-family:sans-serif;padding:32px;line-height:1.5"><h1>Claude sign-in complete</h1>' +
-  '<p>You can close this tab and return to VS Code.</p></body>';
+  '<p>You can close this tab and return to Wisp.</p></body>';
 
 // Start a one-shot localhost server that resolves with the auth code when the browser is redirected
 // back. Returns the bound port (so the authorize URL can use it) plus a promise for the code. The port
@@ -127,7 +127,7 @@ const startCallbackServer = (expectedState: string): Promise<{ port: number; cod
 
 // Run the full OAuth flow: stand up the loopback, open the browser, wait for the redirect (or time out),
 // then exchange the code. The server is always torn down.
-const runAnthropicOAuth = async (openExternal: (url: string) => Thenable<boolean>): Promise<AnthropicCreds> => {
+const runAnthropicOAuth = async (openExternal: (url: string) => PromiseLike<boolean>): Promise<AnthropicCreds> => {
   const verifier = codeVerifier();
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
@@ -146,18 +146,18 @@ const runAnthropicOAuth = async (openExternal: (url: string) => Thenable<boolean
 
 // ----------------------------- AnthropicAuth — store + refresh ----------------------------- //
 
-// The anthropic slice of ~/.wisp/auth.json, as extension.ts exposes it.
+// The anthropic slice of ~/.wisp/auth.json, as the host face exposes it.
 export type AnthropicCredsStore = {
   read: () => AnthropicCreds | undefined;
   write: (creds: AnthropicCreds) => void;
 };
 
-// Owns the Anthropic token lifecycle against one auth.json slice. extension.ts holds a single instance
-// and drives sign-in/out commands + the Inquire anthropic branch through it.
+// Owns the Anthropic token lifecycle against one auth.json slice. Each face holds a single instance
+// and drives sign-in/out + its anthropic send paths through it.
 export class AnthropicAuth {
   constructor(
     private readonly store: AnthropicCredsStore,
-    private readonly openExternal: (url: string) => Thenable<boolean>,
+    private readonly openExternal: (url: string) => PromiseLike<boolean>,
     private readonly log: (message: string) => void,
   ) {}
 

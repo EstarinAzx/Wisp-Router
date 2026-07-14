@@ -2,18 +2,18 @@
 
 /*
  * Depends on:
- *   - injected store accessors: the codex slice of ~/.wisp/auth.json (ADR-0002) — extension.ts wires
- *     them to its WispHome, so this module never touches the filesystem layout itself.
- *   - injected openExternal (system browser) — keeps the module decoupled from the editor host.
+ *   - injected store accessors: the codex slice of ~/.wisp/auth.json (ADR-0002) — each face (the
+ *     extension, the TUI) wires them to its WispHome, so this module never touches the fs layout itself.
+ *   - injected openExternal (system browser) — keeps the module decoupled from any host (#61: it runs
+ *     from VS Code and the terminal alike).
  *   - node http/net: a one-shot localhost server that captures the OAuth redirect (NOT an OAuth server,
  *     just a redirect catcher).
- *   - node crypto: PKCE (S256) + CSRF state.
  *   - node fs/os/path: import an existing Codex CLI login from ~/.codex/auth.json.
- *   - @wisp/core: the pure introspection cores (parseChatgptAccountId, shouldRefreshCodexToken,
- *     parseCodexAuthJson, isCodexSignedIn) + the CodexCreds shape — all unit-tested, vscode-free.
+ *   - ./catalog: the shared PKCE/state generators + the pure introspection cores (parseChatgptAccountId,
+ *     shouldRefreshCodexToken, parseCodexAuthJson, isCodexSignedIn) + the CodexCreds shape.
  *
  * Data shapes:
- *   - CodexCreds (from @wisp/core): { accessToken?, refreshToken?, idToken?, accountId?, apiKey? } —
+ *   - CodexCreds (from ./catalog): { accessToken?, refreshToken?, idToken?, accountId?, apiKey? } —
  *     the stored token bundle. The OAuth access token is the bearer for the subscription Codex backend.
  *   - CodexCredsStore: { read, write } over that bundle — read undefined = never signed in (distinct
  *     from the {} sign-out tombstone).
@@ -26,11 +26,13 @@
 
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
-import { randomBytes, webcrypto } from 'crypto';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import { CodexCreds, parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn } from '@wisp/core';
+import {
+  CodexCreds, codeVerifier, codeChallenge, oauthState,
+  parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn,
+} from './catalog';
 
 // ----------------------------- Constants ----------------------------- //
 
@@ -46,15 +48,6 @@ const CODEX_SCOPE = 'openid profile email offline_access api.connectors.read api
 const CODEX_ORIGINATOR = 'codex_cli_rs';
 // Abandon a sign-in the user never completes, so the loopback server can't linger forever.
 const OAUTH_TIMEOUT_MS = 5 * 60_000;
-
-// ----------------------------- PKCE + state ----------------------------- //
-
-// base64url without padding — the form OAuth PKCE + the authorize URL expect.
-const base64url = (buf: Buffer): string => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-const codeVerifier = (): string => base64url(randomBytes(32));
-const codeChallenge = async (verifier: string): Promise<string> =>
-  base64url(Buffer.from(await webcrypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))));
-const oauthState = (): string => base64url(randomBytes(32));
 
 // ----------------------------- Authorize URL + token exchange ----------------------------- //
 
@@ -113,7 +106,7 @@ const exchangeCode = async (code: string, verifier: string, port: number): Promi
 const SUCCESS_HTML =
   '<!doctype html><meta charset="utf-8"><title>Codex sign-in complete</title>' +
   '<body style="font-family:sans-serif;padding:32px;line-height:1.5"><h1>Codex sign-in complete</h1>' +
-  '<p>You can close this tab and return to VS Code.</p></body>';
+  '<p>You can close this tab and return to Wisp.</p></body>';
 
 // Start a one-shot localhost server that resolves with the auth code when the browser is redirected
 // back. Returns the bound port (so the authorize URL can use it) plus a promise for the code. Port 1455
@@ -150,7 +143,7 @@ const startCallbackServer = (expectedState: string): Promise<{ port: number; cod
 
 // Run the full OAuth flow: stand up the loopback, open the browser, wait for the redirect (or time out),
 // then exchange the code. The server is always torn down.
-const runCodexOAuth = async (openExternal: (url: string) => Thenable<boolean>): Promise<CodexCreds> => {
+const runCodexOAuth = async (openExternal: (url: string) => PromiseLike<boolean>): Promise<CodexCreds> => {
   const verifier = codeVerifier();
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
@@ -169,19 +162,19 @@ const runCodexOAuth = async (openExternal: (url: string) => Thenable<boolean>): 
 
 // ----------------------------- CodexAuth — store + import + refresh ----------------------------- //
 
-// The codex slice of ~/.wisp/auth.json, as extension.ts exposes it. read() undefined = the field has
+// The codex slice of ~/.wisp/auth.json, as the host face exposes it. read() undefined = the field has
 // NEVER been written (truly first use); the {} tombstone means signed out.
 export type CodexCredsStore = {
   read: () => CodexCreds | undefined;
   write: (creds: CodexCreds) => void;
 };
 
-// Owns the Codex token lifecycle against one auth.json slice. extension.ts holds a single instance and
-// drives sign-in/out commands + the Inquire codex branch through it.
+// Owns the Codex token lifecycle against one auth.json slice. Each face holds a single instance and
+// drives sign-in/out + its codex send paths through it.
 export class CodexAuth {
   constructor(
     private readonly store: CodexCredsStore,
-    private readonly openExternal: (url: string) => Thenable<boolean>,
+    private readonly openExternal: (url: string) => PromiseLike<boolean>,
     private readonly log: (message: string) => void,
   ) {}
 

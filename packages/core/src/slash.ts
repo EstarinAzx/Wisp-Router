@@ -21,6 +21,9 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'providers', description: 'List the Provider catalog and set the Active Provider' },
   { name: 'key', args: '[provider]', description: "Set an API-key Provider's key" },
   { name: 'model', args: '[provider]', description: "Pick a Provider's model" },
+  { name: 'signin', args: '[codex|anthropic]', description: 'Sign in to Codex (ChatGPT) or Anthropic (Claude.ai) via the browser' },
+  { name: 'signout', args: '[codex|anthropic]', description: 'Sign out of Codex or Anthropic' },
+  { name: 'effort', args: '[level]', description: 'Set the shared reasoning Effort (Codex + Anthropic)' },
   { name: 'quit', description: 'Exit the TUI' },
 ];
 

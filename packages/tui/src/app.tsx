@@ -5,20 +5,25 @@
  *   - @opentui/react: JSX intrinsics (box/text/input/select) + useKeyboard/usePaste hooks.
  *   - @opentui/core: InputRenderable — ref type for clearing the palette input after a command.
  *   - @wisp/core: PROVIDERS catalog + resolvers, WispHome (~/.wisp store), slash parse/suggest,
- *     oauthModelOptions + getModelsDevCatalog for the OAuth model lists.
+ *     oauthModelOptions + getModelsDevCatalog for the OAuth model lists, CodexAuth/AnthropicAuth
+ *     (#61: the browser OAuth flows, now host-free).
+ *   - node child_process: spawn the platform's open-browser command for the OAuth flows.
  *
  * Data shapes:
- *   - Mode: the screen state machine — 'input' (palette) | provider/key/model pickers | 'key-entry'
- *     (masked) | 'model-free' (typed model id). Every non-input mode returns to 'input' on Esc.
+ *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
+ *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
+ *     'signin-wait' (browser flow pending). Every non-input mode returns to 'input' on Esc.
  */
 
+import { spawn } from 'child_process';
 import { useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer } from '@opentui/react';
 import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  WispHome, type Provider,
+  CodexAuth, AnthropicAuth, DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
+  WispHome, type Provider, type EffortLevel,
 } from '@wisp/core';
 
 // ----------------------------------------- Splash ----------------------------------------- //
@@ -44,9 +49,19 @@ const home = new WispHome();
 const activeProvider = (): Provider =>
   PROVIDERS.find((p) => p.id === home.readConfig().provider) ?? PROVIDERS[0];
 
-// Keyed rows only — the OAuth kinds sign in, they don't take keys (/signin is a later slice).
+// Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
 const keyedProviders = (): Provider[] =>
   PROVIDERS.filter((p) => !isCodexProvider(p) && !isAnthropicProvider(p));
+
+const oauthProviders = (): Provider[] =>
+  PROVIDERS.filter((p) => isCodexProvider(p) || isAnthropicProvider(p));
+
+// Sync signed-in read for display — the pure check over the stored bundle (skips codex's async
+// CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
+const oauthStatus = (p: Provider): string =>
+  isCodexProvider(p) ? (isCodexSignedIn(home.readAuth().codex) ? 'signed in' : 'signed out')
+  : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? 'signed in' : 'signed out')
+  : '';
 
 const saveKey = (p: Provider, key: string): void => {
   // Merge is shallow — spread the existing keys map or this write would drop sibling keys.
@@ -58,6 +73,36 @@ const saveModel = (p: Provider, model: string): void => {
   const cfg = home.readConfig();
   home.writeConfig({ models: { ...cfg.models, [p.id]: model } });
 };
+
+// ----------------------------------------- Sign-in + effort ----------------------------------------- //
+
+// Open the system browser from a terminal process. win32 goes through rundll32's URL handler —
+// cmd.exe's `start` would need &-escaping inside the OAuth query string; rundll32 takes the URL verbatim.
+// A failed spawn REJECTS so signIn fails fast with a real message instead of the user waiting out the
+// 5-minute OAuth timeout on a browser that never opened.
+const openExternal = (url: string): Promise<boolean> =>
+  new Promise((resolve, reject) => {
+    const [cmd, ...args] =
+      process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url]
+      : process.platform === 'darwin' ? ['open', url]
+      : ['xdg-open', url];
+    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+    child.on('error', (e) => reject(new Error(`Could not open the browser: ${e.message}`)));
+    child.on('spawn', () => { child.unref(); resolve(true); });
+  });
+
+// Same auth.json slices the extension wires — log is dropped (no output channel in a raw-mode TUI;
+// sign-in failures surface on the wait screen instead).
+const codexAuth = new CodexAuth(
+  { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+  openExternal, () => {});
+const anthropicAuth = new AnthropicAuth(
+  { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+  openExternal, () => {});
+
+// The full stored ladder. 'max' is Anthropic-only on the wire, but the send-time clamps
+// (standardEffortToCodex, anthropicThinkingEffort) fold it, so offering it globally is safe.
+const EFFORT_LADDER: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // ----------------------------------------- Model lists ----------------------------------------- //
 
@@ -91,7 +136,10 @@ type Mode =
   | { kind: 'key-entry'; provider: Provider }
   | { kind: 'model-loading'; provider: Provider }
   | { kind: 'model-pick'; provider: Provider; options: string[] }
-  | { kind: 'model-free'; provider: Provider };
+  | { kind: 'model-free'; provider: Provider }
+  | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
+  | { kind: 'signin-wait'; provider: Provider }
+  | { kind: 'effort-pick' };
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
@@ -99,6 +147,7 @@ export const App = () => {
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
   const [status, setStatus] = useState('');
   const inputRef = useRef<InputRenderable>(null);
+  const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
   const renderer = useRenderer();
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
@@ -115,6 +164,24 @@ export const App = () => {
   // signature — take unknown and keep only the string opentui actually sends.
   const onSubmitText = (handle: (value: string) => void) => (value: unknown) => {
     if (typeof value === 'string') handle(value);
+  };
+
+  // Kick off the browser OAuth flow and park on the wait screen. The seq guard mirrors the model-fetch
+  // race fix: Esc bumps it, so an abandoned flow resolving minutes later can't rewrite the UI.
+  const startSignIn = (p: Provider) => {
+    const seq = ++signinSeq.current;
+    setMode({ kind: 'signin-wait', provider: p });
+    const auth = isCodexProvider(p) ? codexAuth : anthropicAuth;
+    auth.signIn().then(
+      () => { if (seq === signinSeq.current) backToInput(`Signed in — ${p.label} is ready.`); },
+      (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
+    );
+  };
+
+  // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
+  const doSignOut = (p: Provider) => {
+    (isCodexProvider(p) ? codexAuth : anthropicAuth).signOut();
+    backToInput(`Signed out of ${p.label}.`);
   };
 
   // ----- command dispatch (Enter in the palette) -----
@@ -139,7 +206,7 @@ export const App = () => {
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
         // OAuth rows sign in, they don't take keys — same filter the picker applies.
         if (p && (isCodexProvider(p) || isAnthropicProvider(p))) {
-          setStatus(`${p.label} uses OAuth sign-in, not an API key.`); return;
+          setStatus(`${p.label} uses OAuth — try /signin ${p.id}.`); return;
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
         if (target.args[1]) setStatus('Never paste keys in the palette — enter it masked below.');
@@ -157,6 +224,29 @@ export const App = () => {
             : { kind: 'model-free', provider: p }));
         return;
       }
+      case 'signin':
+      case 'signout': {
+        const arg = target.args[0]?.toLowerCase();
+        // Match by kind, not id, so the arg names the door (codex/anthropic) rather than a catalog row.
+        const p = arg
+          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)))
+          : undefined;
+        if (arg && !p) { setStatus(`/${command} takes codex or anthropic — got: ${target.args[0]}`); return; }
+        if (!p) { setMode({ kind: 'oauth-pick', action: command }); return; }
+        command === 'signin' ? startSignIn(p) : doSignOut(p);
+        return;
+      }
+      case 'effort': {
+        const arg = target.args[0]?.toLowerCase();
+        if (arg) {
+          if (!(EFFORT_LADDER as string[]).includes(arg)) { setStatus(`Effort is one of: ${EFFORT_LADDER.join(' / ')}`); return; }
+          home.writeConfig({ effort: arg as EffortLevel });
+          setStatus(`Effort → ${arg}`);
+          return;
+        }
+        setMode({ kind: 'effort-pick' });
+        return;
+      }
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
@@ -165,7 +255,13 @@ export const App = () => {
   // ----- global keys: Esc backs out of any screen (exits from the palette); key-entry is hand-read
   // here because <input> has no masked variant — chars land in `secret`, never on screen. -----
   useKeyboard((key) => {
-    if (key.name === 'escape') { mode.kind === 'input' ? exitTui() : backToInput('Cancelled.'); return; }
+    if (key.name === 'escape') {
+      // ponytail: Esc detaches the UI only — the loopback waits out its own 5-min timeout, and a flow
+      // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
+      if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
+      mode.kind === 'input' ? exitTui() : backToInput('Cancelled.');
+      return;
+    }
     if (mode.kind !== 'key-entry') return;
     if (key.name === 'return' || key.name === 'enter') {
       const value = secret.trim();
@@ -214,11 +310,14 @@ export const App = () => {
             focused
             height={Math.min(PROVIDERS.length * 2, 16)}
             showScrollIndicator
-            options={PROVIDERS.map((p) => ({
-              name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
-              description: p.id,
-              value: p.id,
-            }))}
+            options={PROVIDERS.map((p) => {
+              const auth = oauthStatus(p);
+              return {
+                name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
+                description: auth ? `${p.id} — ${auth}` : p.id,
+                value: p.id,
+              };
+            })}
             onSelect={(_i, opt) => {
               if (!opt) return;
               home.writeConfig({ provider: opt.value as string });
@@ -285,6 +384,46 @@ export const App = () => {
               if (id) { saveModel(mode.provider, id); backToInput(`${mode.provider.label} model → ${id}`); }
               else backToInput('Empty — model unchanged.');
             })}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'oauth-pick' && (
+        <box border title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
+          <select
+            focused
+            height={Math.min(oauthProviders().length * 2, 16)}
+            showScrollIndicator
+            options={oauthProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
+            onSelect={(_i, opt) => {
+              const p = oauthProviders().find((x) => x.id === opt?.value);
+              if (!p) return;
+              mode.action === 'signin' ? startSignIn(p) : doSignOut(p);
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'signin-wait' && (
+        <text fg={DIM} marginTop={1}>Browser opened — finish the {mode.provider.label} sign-in there. Esc to cancel.</text>
+      )}
+
+      {mode.kind === 'effort-pick' && (
+        <box border title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
+          <select
+            focused
+            height={Math.min(EFFORT_LADDER.length * 2, 16)}
+            showScrollIndicator
+            options={EFFORT_LADDER.map((e) => ({
+              name: e === (home.readConfig().effort ?? DEFAULT_EFFORT) ? `${e} (current)` : e,
+              description: e === 'max' ? 'Anthropic only — folds to xhigh on Codex' : '',
+              value: e,
+            }))}
+            onSelect={(_i, opt) => {
+              if (!opt) return;
+              home.writeConfig({ effort: opt.value as EffortLevel });
+              backToInput(`Effort → ${opt.value}`);
+            }}
           />
         </box>
       )}
