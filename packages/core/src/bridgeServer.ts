@@ -44,6 +44,10 @@ import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
 
+// One default port for every host of this engine (#63: extension + TUI + wisp serve) — a per-face
+// constant would let the faces drift onto different ports while sharing one config store.
+export const DEFAULT_BRIDGE_PORT = 41184;
+
 // The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is handed
 // the catalog plus pure getters so it never touches secrets or config directly.
 export type BridgeDeps = {

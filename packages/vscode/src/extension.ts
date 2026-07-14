@@ -33,7 +33,7 @@ import {
 import { getModelsDevCatalog } from '@wisp/core';
 import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
-import { createBridgeServer } from '@wisp/core';
+import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
 import { CodexAuth, AnthropicAuth } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
@@ -50,8 +50,7 @@ const SECRET_KEY = 'wisp.apiKey';
 const CODEX_SECRET_SLOT = 'wisp.codexAuth';
 const ANTHROPIC_SECRET_SLOT = 'wisp.anthropicAuth';
 const BRIDGE_SECRET_SLOT = 'wisp.bridge.secret';
-// Default Bridge port (overridable via config.json bridge.port) — a fixed high port unlikely to clash.
-const DEFAULT_BRIDGE_PORT = 41184;
+// Default Bridge port moved to @wisp/core with #63 — one constant for every face hosting the engine.
 
 // ----------------------------- Provider catalog ----------------------------- //
 

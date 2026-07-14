@@ -25,6 +25,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'signout', args: '[codex|anthropic]', description: 'Sign out of Codex or Anthropic' },
   { name: 'effort', args: '[level]', description: 'Set the shared reasoning Effort (Codex + Anthropic)' },
   { name: 'test', args: '<provider|alias>', description: 'Fire one canned prompt through a Provider or Alias' },
+  { name: 'bridge', description: 'Toggle the Bridge listener (shows address + access secret)' },
   { name: 'quit', description: 'Exit the TUI' },
 ];
 
