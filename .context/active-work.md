@@ -8,38 +8,41 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-14 by Fable 5 (auto)._
-_At commit: bd041c6 on `main` (PR #72 merged), pushed._
+_At commit: 997e033 on `main` (PR #73 merged), pushed._
 
 ## Current focus
-**TUI slice 3 landed.** #60 — the **TUI MVP** shipped as PR
-[#72](https://github.com/EstarinAzx/Wisp-Router/pull/72): `packages/tui` is now **`wisp-router`
-0.1.0** (bin `wisp`), opentui 0.4.3 + React on Bun. Splash + slash palette (live suggestions,
-unique-prefix completion), `/providers`, masked `/key`, `/model` (live list / curated / free-text),
-`/quit`. All state through the shared `WispHome`; user verified every acceptance criterion
-including the cross-face round-trip into VS Code's native picker.
+**TUI slice 4 landed.** #61 — **OAuth from the terminal** shipped as PR
+[#73](https://github.com/EstarinAzx/Wisp-Router/pull/73): `/signin codex|anthropic` runs the real
+browser OAuth flows from the TUI (tokens → `~/.wisp/auth.json`, extension picks them up live),
+`/signout` writes the tombstone, `/effort` persists the shared low→max ladder, and `/providers`
+now shows `signed in / signed out` on the OAuth rows. User verified all acceptance criteria
+end to end, including sign-out + re-sign-in round-trips.
 
 ## State
-- **Done this session (#60, PR #72, main @ bd041c6):**
-  - core: `slash.ts` (parseSlash/suggestSlash pures + `SLASH_COMMANDS`) + 13 tests → suite
-    **344/344**; **`PROVIDERS` moved verbatim** from `extension.ts` into `catalog.ts` (one
-    catalog, two faces — extension now imports it).
-  - tui: `src/index.tsx` (boot, shebang for the bin) + `src/app.tsx` (state-machine App:
-    palette / providers / key-pick / key-entry / model-loading / model-pick / model-free).
-  - Review (cavecrew) found + fixed: bare `process.exit` stranding the terminal in raw mode
-    (🔴 — always `renderer.destroy()` first), stale model-fetch race (guard by provider id),
-    `/key codex|anthropic` OAuth bypass, inline-key echo refusal. Deliberate skip: auth
-    read-then-write merge isn't atomic (`ponytail:` in `app.tsx` — WispHome merge-fn if it bites).
-  - Post-merge-review fix: opentui `<select>` renders **zero rows without an explicit height**
-    (probe-verified); heights set on all three pickers.
-  - Verified: tui + vscode `tsc` clean, bundles build, 344/344 Vitest, user eyeballed the full
-    TUI flow + F5 picker.
+- **Done this session (#61, PR #73, main @ 997e033):**
+  - core: `codexAuth.ts` + `anthropicAuth.ts` **moved from packages/vscode into core** — they were
+    already editor-free (injected `openExternal` + store slices); port = `Thenable`→`PromiseLike`,
+    `./catalog` imports (barrel = cycle), codexAuth's local PKCE helpers deduped against catalog's
+    byte-identical ones. Barrel-exported; extension imports from `@wisp/core`. Success page says
+    "return to Wisp".
+  - core: `slash.ts` palette + `signin` / `signout` / `effort`; suite **345/345**.
+  - tui: `openExternal` via spawn (**`rundll32 url.dll,FileProtocolHandler` on win32** — `cmd /c
+    start` would need `&`-escaping inside the OAuth query; `open`/`xdg-open` elsewhere; failed
+    spawn REJECTS so sign-in fails fast); `signin-wait` screen with a seq guard (same race pattern
+    as #60's model fetch); `oauth-pick` shared by signin/signout; `effort-pick` full ladder ('max'
+    offered globally — send-time clamps fold it for Codex); `/key` on OAuth rows points at `/signin`.
+  - Review (cavecrew) found + fixed: browser-spawn silent false → reject fast. Deliberate skip
+    (`ponytail:` in app.tsx): Esc detaches the UI only — the loopback lives out its own 5-min
+    timeout and a flow finished in the browser still lands tokens; cancel handle if it bites.
+  - Probe-verified: Bun's `child_process` emits `'spawn'` (no hang on the await).
 - **In flight:** nothing.
 - **Blocked:** nothing.
 
 ## Pick up here
-**The fan-out is open: #61 / #62 / #63 / #65.** Suggested next: `/preset scope 61`
-(OAuth from the terminal — `/signin codex|anthropic` + `/effort`; the product differentiators).
-#64 waits on #63; #67 (release) waits on #64.
+**Fan-out remaining: #62 / #63 / #65.** Suggested next: `/preset scope 62` (`/test` — one canned
+prompt through a Provider or Alias; natural follow-on that proves the freshly signed-in OAuth
+Providers actually answer from the terminal). #63 (`wisp serve`) is the critical path — it
+unblocks #64 (`claude-wisp`) → #67 (release).
 
 ## Skills for next session
 - /preset scope — entry gate for whichever fan-out ticket is picked.
@@ -48,22 +51,21 @@ including the cross-face round-trip into VS Code's native picker.
 - (carried) forced `tool_choice` + `temperature` not threaded on the OpenAI door; OpenAI-door
   Codex strict-tools limit; routing-map rename migration — all deliberate skips.
 - `claude-wisp` **bin is not declared yet** — deferred to #64 (a bin pointing at a missing file
-  breaks install linking); ADR-0003 naming otherwise done.
+  breaks install linking).
 - #63's title still says "extension host removed" — stale wording from before the #66
   amendment (the panel/extension Bridge host **stays**; `wisp serve` adds a terminal host).
   Re-read the body against decisions.md before scoping it.
 
 ## Recent context
-- Ticket shape: #58✅→#59✅→#60✅, fan-out #61/#62/#63/#65 now unblocked; #64 behind #63;
-  #66 cancelled (panel stays); #67 behind #64; backlog #68/#69.
+- Ticket shape: #58✅→#59✅→#60✅→#61✅; fan-out #62/#63/#65 open; #64 behind #63; #67 behind
+  #64; backlog #68/#69.
 - TUI dev run: `cd packages/tui; bun run dev` (real `~/.wisp`; set `WISP_HOME` to sandbox).
-- opentui facts that cost time: select needs explicit `height` (2 rows/option with description);
-  input has no masked mode (key entry is hand-rolled useKeyboard+usePaste); exit must
-  `renderer.destroy()` before `process.exit`.
+- Active ≠ signed-in: sign-out clears credentials, never the Active Provider selection (matches
+  the extension; see decisions.md 2026-07-14).
 
 ## Related
-- [[overview]] — layout re-anchored: tui is a real package now, PROVIDERS lives in core
-- [[stack]] — TUI stack section added (opentui/react/bun), test count bumped
-- [[decisions]] — 2026-07-14 TUI-MVP execution entry
-- [[gotchas]] — opentui select-height + raw-mode-exit traps added
+- [[overview]] — layout re-anchored: auth managers live in core now
+- [[stack]] — test count bumped
+- [[decisions]] — 2026-07-14 active-vs-signed-in entry
+- [[flows]] — anthropicAuth citations re-pathed to packages/core
 - [[pick-up]]
