@@ -32,14 +32,12 @@ const secret = home.readAuth().bridgeSecret?.trim() ?? '';
 
 // ----------------------------- Bridge probe ----------------------------- //
 
-// Any HTTP response proves a live listener — even a 401 means the Bridge is up. Only a refused /
-// timed-out connection is "down". Never auto-start: two hosts on the shared port is the #63 loud-fail.
+// Any HTTP response proves a live listener — even a 401 means the Bridge is up, so the probe sends
+// no secret (a squatter on the port must never see it). Only a refused / timed-out connection is
+// "down". Never auto-start: two hosts on the shared port is the #63 loud-fail.
 const bridgeUp = async (): Promise<boolean> => {
   try {
-    await fetch(`${address}/v1/models`, {
-      headers: secret ? { 'x-api-key': secret } : {},
-      signal: AbortSignal.timeout(2000),
-    });
+    await fetch(`${address}/v1/models`, { signal: AbortSignal.timeout(2000) });
     return true;
   } catch {
     return false;
@@ -67,10 +65,14 @@ const resolveClaude = (): { file: string; viaCmd: boolean } => {
   return { file: 'claude', viaCmd: false };
 };
 
-// ponytail: quote-if-needed with doubled inner quotes covers spaces + quotes through the cmd.exe hop;
-// exotic cmd metacharacters (^ % !) inside args may still misparse via an npm shim — the native
-// claude.exe path is fully verbatim. Upgrade to cross-spawn-style escaping if that ever bites.
-const quoteForCmd = (a: string): string => (/[\s"]/.test(a) || a === '' ? `"${a.replace(/"/g, '""')}"` : a);
+// ponytail: quote-if-needed covers spaces, quotes, and cmd metachars (& | < > ^) through the cmd.exe
+// hop — inner quotes doubled, trailing backslashes doubled so a closing `\"` isn't read as an escaped
+// quote. Remaining ceiling: %VAR% expands even inside quotes via an npm shim — the native claude.exe
+// path is fully verbatim. Upgrade to cross-spawn-style escaping if that ever bites.
+const quoteForCmd = (a: string): string =>
+  /[\s"&|<>^]/.test(a) || a === ''
+    ? `"${a.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`
+    : a;
 
 // ----------------------------- Launch ----------------------------- //
 
