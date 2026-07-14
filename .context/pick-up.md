@@ -10,38 +10,36 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**#65 landed — `/routing` in the TUI** (PR #77 merged, main `b554417`). The Routing map (4 Family
-routes + Aliases) is editable from the TUI with panel parity: overview → provider picker (incl.
-Clear/Remove) → live model list or free text. Edit ops extracted to core as pure fns
-(`withFamilyRoute`/`withAlias`/`withoutAlias`, refusal = `undefined`); the extension delegates to
-them. Suite **366/366**. Live-verified against a sandboxed `wisp serve`: alias advertised in
-`/v1/models` instantly, bridge log confirmed `route alias`/`route family` per the edited map.
+**#67 landed — wisp-router 2.0.1 is PUBLIC on npm** (main `c3155cc`, tag `v2.0.1`; #67 closed;
+critical path #58→#67 complete). `Release` workflow: tag `v*` → 4-target `bun build --compile`
+matrix → GitHub release with binaries → npm publish (thin shell `wisp-router` + scoped
+`@tsd47216/wisp-router-<target>` platform packages, shim falls back to the release download).
+Bonus shipped: `bridge.aliasOnlyModels` (panel checkbox + TUI `/aliasonly`) — Claude Code's
+`/model` list shows only Aliases. TUI polish shipped (no `▶` indicator, no input border title,
+`Wisp_` splash + version). Suite 367/367. Install verified (`npm i -g wisp-router`); dev shims
+in `~\.local\bin` **deleted** — the real npm bins now serve `wisp`/`claude-wisp`.
 
 ## Next task
-**#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, the critical-path
-finale; ADR-0003: `bun build --compile` × 4 platforms + npm thin shell exposing bins `wisp` +
-`claude-wisp`). Suggested: **`/preset scope 67`**.
-**Plus a user-requested bonus:** a toggleable filter — user decides whether Claude Code's `/models`
-lists **only the set Aliases** (hide Provider ids). Pointers: `bridge.*` config flag beside
-`aliasPickerShowsModel` (same live BridgeDeps read), applied in `buildAnthropicModelsList`
-(Anthropic door = Claude Code's list); scope decides if the OpenAI door mirrors it, plus the
-toggle's surfaces (panel + TUI). Backlog: #68 (chat mode), #69 (copilot-wisp).
+Critical path done — **user picks from backlog: #68 (chat mode) or #69 (copilot-wisp)**.
+Suggested: `/preset scope <picked>`. Small orphans available anytime: add LICENSE + `license`
+fields to `packages/tui/npm/*/package.json`; VS Code extension 1.7.0 release (CHANGELOG already
+has an Unreleased section with aliasOnlyModels).
 
 ## Landmines
-- **ADR-0003 is the spec for #67** (`docs/adr/0003-tui-opentui-bun-compiled-binaries.md`) — read it
-  before scoping; the npm name `wisp-router` goes public at first publish (one-way).
-- **Dev shims to delete when #67 lands:** `C:\Users\S.D\.local\bin\wisp.cmd` + `claude-wisp.cmd`
-  (they'd shadow the npm-installed bins). Plain-ASCII + CRLF only if ever edited.
-- **opentui ships native per-platform binaries** (`core-win32-x64` etc.) — the compile matrix must
-  pull the right one per target; cross-compiling from one runner may not work, hence CI matrix.
-- `/routing` screens eyeballed by the user 2026-07-14 — working. `/test` border-title fix
-  (`f2efe18`) not explicitly confirmed yet — glance on a future `/test` run.
-- **Codex is signed out on this machine** (tombstone from #61) — `/signin codex` before Codex live
-  checks; default `claude-wisp` run errors until then (use `--model haiku` → `opencode-go`).
-- Both faces share the Bridge port + secret — second host fails loud (intended); stop one first.
-- TUI dev writes the REAL `~/.wisp` — set `WISP_HOME` when testing destructive flows. If you seed a
-  sandbox config.json by hand, write it WITHOUT a BOM (PS 5.1 `Set-Content -Encoding utf8` adds one
-  and the lenient parser drops the whole config — port override silently ignored).
+- **npm spam filter:** the platform packages were REMOVED once minutes after a green publish
+  (unscoped names 403'd outright). Before blaming CI, probe the registry:
+  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`.
+  Fallback keeps installs working; reinstatement = npm support ticket (user action).
+- **Version numbers burn on contact:** 2.0.0 is deprecated and can never be republished. Release
+  flow: bump `packages/tui/package.json` → tag `v<same>` → push (workflow enforces tag==version;
+  re-runs skip already-published/existing steps).
+- **User should rotate the npm token** — it was pasted in-session; live copy is repo secret
+  `NPM_TOKEN`.
+- `macos-13` runner label is retired — darwin-x64 builds on `macos-15-intel` (until Aug 2027).
+- Codex signed out on this machine — `/signin codex` before Codex live checks (`--model haiku` →
+  `opencode-go` works meanwhile).
+- Both faces share Bridge port + secret — second host fails loud; stop one first. TUI dev writes
+  real `~/.wisp` — use `WISP_HOME` sandbox; hand-seeded config.json must be BOM-free.
 - `tsc` is typecheck-only — `bun run compile` in `packages/vscode` before F5.
 
 ## Related

@@ -303,6 +303,25 @@ must keep hoisting `tool_result`-embedded images (Read-on-image pixels ride INSI
 A model "describing" an image it never saw is a real failure mode — dimensions come from Read's text
 metadata and the rest is context-plausible bluff; don't accept a description as proof of vision.
 
+### npm spam filter: a green publish can vanish minutes later
+Observed on the #67 release (2026-07-14): `npm publish` printed `+ pkg@ver` (registry accepted it)
+and the four `@tsd47216/wisp-router-*` platform packages **404'd minutes later** — npm's spam
+system removes post-publish, silently (unscoped names had already been 403'd up front with
+"Package name triggered spam detection"). So: after any publish of these, verify with
+`curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`
+— a green CI run proves nothing about what's still on the registry. The shim's GitHub-release
+download fallback exists precisely for this; reinstatement needs an npm support ticket. Related:
+a burned version number can NEVER be republished (2.0.0 is dead forever, even after unpublish).
+
+### GitHub runners: macos-13 is a zombie label; opentui select's ▶ is ambiguous-width
+Two traps from the same release. **1)** `macos-13` (the last free Intel-mac label) retired
+Dec 2025 — a job using it doesn't fail, it **queues forever** (24h timeout) and blocks every
+`needs:` job. Intel macs = `macos-15-intel` (free, until Aug 2027). **2)** opentui 0.4.3 hardcodes
+the select indicator as `"▶ "` (no glyph option, only `showSelectionIndicator`); U+25B6 is an
+ambiguous-width char that renders double-wide on common Windows terminal fonts and smears into the
+label. Same family as the border-title non-ASCII drop: **on opentui surfaces, treat non-ASCII as
+hostile.** All 8 TUI selects run `showSelectionIndicator={false}` — don't reintroduce it.
+
 ## Related
 - [[api]]
 - [[decisions]]
