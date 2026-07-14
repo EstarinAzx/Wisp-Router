@@ -21,15 +21,14 @@ Bun-workspaces **monorepo** since #58 / PR #70 (ADR-0001): three packages, one r
 - `packages/tui/` — the **TUI face** (#60): **published on npm as `wisp-router` (2.0.1, #67)**, bins `wisp` + `claude-wisp` (#64). Delivery = `bun build --compile` per-platform binaries: `packages/tui/npm/wisp-router` is the thin JS shell (optionalDependencies on `@tsd47216/wisp-router-<target>`, GitHub-release download fallback), built + published by `.github/workflows/release.yml` on tag `v*` (tag must equal `packages/tui/package.json` version). The compiled entry dispatches on argv: `serve` / `claude-wisp` / else TUI. opentui 0.4.3 (`@opentui/core` + `@opentui/react`) + React 19 on Bun; no build step — `bun run dev` runs `src/index.tsx` + `src/app.tsx` (splash `Wisp_` + version, slash palette, `/providers` `/key` `/model` `/routing` `/aliasonly` `/signin` `/signout` `/effort` `/test` `/bridge` `/quit`; the OAuth commands drive core's `CodexAuth`/`AnthropicAuth`, and `/test` (#62) streams one canned prompt via the exported `streamTestReply`). Since #63 the TUI also **hosts the Bridge**: `src/store.ts` (shared `~/.wisp` handle + OAuth managers), `src/bridge.ts` (BridgeDeps wiring — twin of the extension's), `src/serve.ts` (`wisp serve`: the process without a face — no daemon, Ctrl+C stops). Both faces share the Bridge port + secret; a second host fails loud (EADDRINUSE), no port-hop. `src/claude-wisp.ts` (#64) is the **launcher** bin: probes the Bridge, then spawns `claude` with the env trio on the child only, argv verbatim, exit code mirrored (env assembly = core's pure `buildClaudeLaunch`).
 - `.vscode/` — `launch.json` (F5 → Extension Development Host, dev path `packages/vscode`) + `tasks.json` (build task = `bun run compile` in `packages/vscode`).
 - `packages/vscode/dist/` — esbuild bundle `extension.js` (core + openai inlined) + `webview/` Vite output (single unhashed `main.js` + `main.css`). Git-ignored. The old root `out/` is gone.
-- `PRD.md` — product requirements for the whole thing incl. the side panel.
 - `CONTEXT.md` — domain glossary (ubiquitous language); owns term definitions like **Activity = Thinking | Idle**.
-- `issues.md` — original local issue tracker, tracer-bullet slices. The repo is now git with remote `EstarinAzx/Wisp-Router` (renamed from `Wisp`; old URLs redirect); **current** work is tracked as GitHub issues. See [[active-work]].
+- Work is tracked as GitHub issues on remote `EstarinAzx/Wisp-Router` (renamed from `Wisp`; old URLs redirect). The old local `PRD.md`/`issues.md` were deleted 2026-07-14 (historical "PRD #N" refs point at them via git history). See [[active-work]].
 - Side-panel implementation plan (now executed) lives outside the repo at the agent plan path noted in [[active-work]].
 
 ## How to run
 - Install: `bun install` (root — one lockfile for all three packages).
 - Build: `bun run compile` (root, or in `packages/vscode`) = `tsc -p ./ && tsc -p webview` (typecheck-only) `&& esbuild bundle && vite build`.
-- Test: `bun run test` (root → 366 Vitest tests in `packages/core/src/*.test.ts`; no Electron host).
+- Test: `bun run test` (root → 367 Vitest tests in `packages/core/tests/*.test.ts`; no Electron host).
 - TUI: `cd packages/tui; bun run dev` (writes real `~/.wisp`; set `WISP_HOME` to sandbox). Headless Bridge: `bun src/index.tsx serve`. Claude Code through the Bridge: `bun src/claude-wisp.ts [claude args…]` (the `claude-wisp` bin once installed).
 - Dev: press **F5** in VS Code → Extension Development Host (the Wisp icon is in *that* window's activity bar).
 - Package: `bun run package` in `packages/vscode` (= `vsce package --no-dependencies`; deps are already bundled) → installable `.vsix`.
@@ -38,8 +37,7 @@ Bun-workspaces **monorepo** since #58 / PR #70 (ADR-0001): three packages, one r
 ## Where to look first
 - Entry point: `packages/vscode/src/extension.ts` — the Inquire command + commands, status bar, shared actions.
 - Side panel: `packages/vscode/src/sidePanelProvider.ts` + `packages/vscode/webview/app.tsx`.
-- Engine: `packages/core/src/` via the `index.ts` barrel (`@wisp/core`).
-- Product intent: `PRD.md`.
+- Engine: `packages/core/src/` via the `index.ts` barrel (`@wisp/core`); tests in `packages/core/tests/`.
 - What's next (tests, model tuning): [[active-work]].
 
 ## Conventions
