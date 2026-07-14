@@ -74,7 +74,8 @@ flowchart LR
   cc -->|coding task · POST /v1/messages → routing map → Target| done([Answer streams through the chosen Target — subscription, no key])
 ```
 
-**Note (two-surface rule, behind the spine):** the VS Code extension is absent
-from this spine on purpose — after the shrink it only reads the same `~/.wisp/`
-store to serve VS Code's native picker; a user who also has it installed gets
-identical Providers there with zero extra setup.
+**Note (two-face rule, behind the spine):** the VS Code extension is absent
+from this spine on purpose — it is the *other* full face (panel + Inquire +
+Bridge + native picker; the shrink was cancelled, #66), reading the same
+`~/.wisp/` store; a user who also has it installed gets identical Providers
+there with zero extra setup.
