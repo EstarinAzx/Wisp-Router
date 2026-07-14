@@ -8,52 +8,50 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-14 by Fable 5 (auto)._
-_At commit: c1f63dc on `main` (docs: TUI groundwork), pushed._
+_At commit: b0323ef on `main` (PR #70 merged), pushed._
 
 ## Current focus
-**The Wisp TUI arc is fully staged, zero code written.** `/preset init` ran end to end: grill →
-MVD → PRD [#57](https://github.com/EstarinAzx/Wisp-Router/issues/57) → tickets #58–#67
-(`ready-for-agent`) + #68/#69 backlog. The TUI (opentui + Bun) becomes the face + only config
-surface of Wisp; the extension shrinks to VS Code chat routing (v2.0.0); Bridge moves to
-`wisp serve`; `claude-wisp` launcher added.
+**TUI slice 1 landed.** Repo is now a bun-workspaces monorepo per ADR-0001:
+`packages/core` (engine + 304 tests + barrel `index.ts`, private, consumed as raw TS source —
+no core build step) · `packages/vscode` (extension; engine imports rewritten to `@wisp/core`;
+esbuild bundles `dist/extension.js` so vsce escapes `workspace:*`) · `packages/tui` (empty
+scaffold, real TUI lands in #60). PR [#70](https://github.com/EstarinAzx/Wisp-Router/pull/70)
+closed [#58](https://github.com/EstarinAzx/Wisp-Router/issues/58).
 
 ## State
-- **Done this session:**
-  - Grill settled every branch — see decisions.md 2026-07-14 entry + ADRs 0001–0003 (`docs/adr/`).
-  - `CONTEXT.md`: TUI-era terms (Wisp TUI, Wisp home, wisp serve, claude-wisp) + third Provider
-    kind (Anthropic) fixed.
-  - `.context/happy-path.md`: fourth MVD — "Wisp TUI — install to bridged Claude Code".
-  - PRD #57 published; tickets #58–#67 with real blocking edges; #68 (chat mode) + #69
-    (copilot-wisp) as unlabeled backlog.
-  - All docs committed to main (c1f63dc) and pushed.
+- **Done this session (#58, PR #70 → main b0323ef):**
+  - `git mv` restructure, history preserved; one root `bun.lock` (package-lock.json deleted).
+  - Build re-plumbed: `tsc` typecheck-only, esbuild bundle (core + openai inlined, 889 KB),
+    webview vite build unchanged; `.vscode/launch.json`/`tasks.json` → `packages/vscode`.
+  - Verified: 304/304 Vitest in core · `vsce package --no-dependencies` → clean 9-file .vsix ·
+    F5 hand-checked (panel, chat routing, Bridge, Inquire = v1.6.0).
+  - `codexAuth`/`anthropicAuth` stay in `packages/vscode` (they import `vscode.SecretStorage`) —
+    see decisions.md 2026-07-14 entry.
 - **In flight:** nothing.
 - **Blocked:** nothing.
 
 ## Pick up here
-**`/preset scope 58`** — TUI slice 1 (restructure: bun-workspaces monorepo, packages
-core / vscode / tui). The only unblocked ticket; frontier then runs #59 → #60 → fan-out.
-Read #58's body + ADR-0001 before planning.
+**`/preset scope 59`** — TUI slice 2: Wisp home store (`~/.wisp/` + auth.json). #58 unblocked it;
+frontier then #60 (TUI MVP) → fan-out #61/#62/#63/#65. Read #59 body first — OAuth two-process
+refresh races answered there (atomic writes + re-read-before-refresh).
 
 ## Skills for next session
-- /preset scope — entry gate for ticket #58.
-- superpowers:using-git-worktrees — restructure is a whole-repo move; isolate it on a branch.
+- /preset scope — entry gate for #59.
 
 ## Open questions
 - (carried) forced `tool_choice` + `temperature` not threaded on the OpenAI door; OpenAI-door
   Codex strict-tools limit; routing-map rename migration — all deliberate skips.
 
 ## Recent context
-- Ticket dependency shape: #58→#59→#60, then #61/#62/#63/#65 fan out from #60; #64 behind #63;
-  #66 (extension shrink) gated on #61+#63+#65 (TUI must reach full panel parity first — no
-  configuration gap); #67 (release) behind #64.
-- npm names checked: `wisp` + `wisp-cli` taken; package is `wisp-router`, bins `wisp` +
-  `claude-wisp`.
-- opentui-on-plain-Node deliberately left unresolved — compiled binaries (ADR-0003) make it moot.
-- OAuth two-process refresh races: spec answer is atomic writes + re-read-before-refresh on
-  auth.json (acceptance criteria in #59).
+- Ticket dependency shape: #58✅→#59→#60, then #61/#62/#63/#65 fan out from #60; #64 behind #63;
+  #66 (extension shrink) gated on #61+#63+#65; #67 (release) behind #64.
+- npm names: `wisp`/`wisp-cli` taken; package will be `wisp-router`, bins `wisp` + `claude-wisp`
+  (naming lands with #60 — tui package is placeholder `@wisp/tui` until then).
+- Dev-flow change: F5 preLaunchTask now runs `bun run compile` in `packages/vscode`; the
+  stale-build trap now reads "recompile → dist/, not out/" — gotchas.md updated.
 
 ## Related
-- [[overview]]
-- [[decisions]] — 2026-07-14 TUI-arc entry + ADR pointers
-- [[happy-path]] — the new TUI MVD embedded in PRD #57
-- [[gotchas]] — stale-build + dup-panel traps still apply while the extension is touched
+- [[overview]] — layout section rewritten for the monorepo
+- [[decisions]] — 2026-07-14 monorepo-execution entry
+- [[happy-path]] — TUI MVD in PRD #57
+- [[gotchas]] — stale-build + dup-panel traps re-anchored to packages/vscode

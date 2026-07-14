@@ -259,11 +259,13 @@ makes open terminals follow it, rather than staying pinned to their launch Provi
 specific Provider by its **id** (`codex`/`anthropic`/`opencode-go`).
 
 ### `Ctrl+R` in the Extension Dev Host runs the STALE build — recompile first (#46)
-The extension runs the compiled `out/**/*.js`, not the TS source. `Ctrl+R` (Reload Window) reloads the extension
-host against **whatever `out/` already holds** — it does NOT recompile. Only a full **stop → F5** re-runs the
-`preLaunchTask: npm: compile`. So after editing source, a bare `Ctrl+R` silently tests the OLD code (cost two demo
-rounds — the identical error reappeared byte-for-byte). Fix: run `npm run compile` (or `tsc -p ./` for backend-only)
-THEN `Ctrl+R`, or do a full stop+F5. The dup-panel trap makes recompile+`Ctrl+R` the safer combo (no fresh F5).
+The extension runs the compiled bundle (`packages/vscode/dist/extension.js` since #58; `out/` before), not the TS
+source. `Ctrl+R` (Reload Window) reloads the extension host against **whatever `dist/` already holds** — it does
+NOT recompile. Only a full **stop → F5** re-runs the `compile: vscode` preLaunchTask. So after editing source, a
+bare `Ctrl+R` silently tests the OLD code (cost two demo rounds — the identical error reappeared byte-for-byte).
+Fix: run `bun run compile` in `packages/vscode` THEN `Ctrl+R`, or do a full stop+F5. The dup-panel trap makes
+recompile+`Ctrl+R` the safer combo (no fresh F5). Note `tsc` alone no longer produces a runnable build — it's
+typecheck-only since #58; the bundle comes from esbuild (`bun run bundle`).
 
 ### The Bridge Anthropic door forwards Codex tools non-strict — external schemas can't be strict-coerced (#46)
 Codex strict Responses tools demand a fixed closed shape; Claude Code's built-in tools (esp. `AskUserQuestion`'s
