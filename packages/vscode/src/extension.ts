@@ -35,9 +35,8 @@ import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from 
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer } from '@wisp/core';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
-import { CodexAuth } from './codexAuth';
+import { CodexAuth, AnthropicAuth } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
-import { AnthropicAuth } from './anthropicAuth';
 import { anthropicInquire } from '@wisp/core';
 import { WispHome, planSecretsMigration, seedConfigFromVsCode } from '@wisp/core';
 

@@ -72,4 +72,9 @@ describe('SLASH_COMMANDS — the real palette', () => {
     const names = SLASH_COMMANDS.map((c) => c.name);
     for (const n of ['providers', 'key', 'model']) expect(names).toContain(n);
   });
+
+  it('carries the OAuth pair (#61)', () => {
+    const names = SLASH_COMMANDS.map((c) => c.name);
+    for (const n of ['signin', 'effort']) expect(names).toContain(n);
+  });
 });
