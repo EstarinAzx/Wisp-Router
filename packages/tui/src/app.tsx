@@ -138,8 +138,9 @@ const TEST_PROMPT = 'Reply with one short sentence confirming you can hear me.';
 // Fire the canned prompt through one Provider and yield raw answer-text deltas. Dispatch mirrors the
 // Bridge's three kinds (bridgeServer.startProviderStream): Codex → Responses stream, Anthropic →
 // Messages stream, keyed → plain fetch on <base>/chat/completions. Failures throw with the Provider's
-// real message — the caller renders them loud, never falls back.
-async function* streamTestReply(p: Provider, model: string, signal: AbortSignal): AsyncGenerator<string> {
+// real message — the caller renders them loud, never falls back. Exported so the wiring check itself
+// can be exercised headless (no TTY) — the screen around it is plain state rendering.
+export async function* streamTestReply(p: Provider, model: string, signal: AbortSignal): AsyncGenerator<string> {
   const cfg = home.readConfig();
   const baseUrl = resolveBaseUrl(p, cfg.customBaseUrl ?? '');
   const message = { role: 'user' as const, content: TEST_PROMPT };
