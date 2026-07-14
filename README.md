@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="wisp.png" alt="Wisp" width="560">
+  <img src="docs/wisp.png" alt="Wisp" width="560">
 </p>
 
 <p align="center">

@@ -3,8 +3,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveRoute, withFamilyRoute, withAlias, withoutAlias, EMPTY_ROUTING_MAP, type RoutingMap,
-} from './routing';
-import type { Provider } from './catalog';
+} from '../src/routing';
+import type { Provider } from '../src/catalog';
 
 // Minimal Provider builder — the resolver only reads `id`; the rest is filler.
 const p = (id: string): Provider => ({ id, label: id, baseUrl: '', defaultModel: `default-${id}`, apiKeyEnv: '' });

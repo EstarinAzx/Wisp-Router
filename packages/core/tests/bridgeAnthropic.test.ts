@@ -8,9 +8,9 @@ import {
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
   buildClaudeLaunch,
-} from './bridgeAnthropic';
-import type { ChatModelInfo } from './catalog';
-import type { BridgeStreamEvent } from './bridge';
+} from '../src/bridgeAnthropic';
+import type { ChatModelInfo } from '../src/catalog';
+import type { BridgeStreamEvent } from '../src/bridge';
 
 // Minimal ChatModelInfo builder — buildAnthropicModelsList only reads id + name, the rest is filler.
 const modelInfo = (id: string, name = `${id} model`): ChatModelInfo => ({

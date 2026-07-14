@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { WispHome, wispHomeDir } from './homeStore';
+import { WispHome, wispHomeDir } from '../src/homeStore';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wisp-home-')); });

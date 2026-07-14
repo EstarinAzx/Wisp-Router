@@ -9,8 +9,8 @@ import {
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor,
   type Provider, type SseEvent,
-} from './catalog';
-import { anthropicMessagesHeaders } from './anthropicClient';
+} from '../src/catalog';
+import { anthropicMessagesHeaders } from '../src/anthropicClient';
 
 const provider = (over: Partial<Provider> = {}): Provider => ({
   id: 'anthropic', label: 'Claude', baseUrl: 'https://api.anthropic.com',

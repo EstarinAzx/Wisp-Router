@@ -9,8 +9,8 @@ import {
   parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
   toCodexResponsesTools, reduceResponsesToolCalls,
   type Provider, type EditMessage, type CodexResponsesEvent,
-} from './catalog';
-import { codexStream } from './codexClient';
+} from '../src/catalog';
+import { codexStream } from '../src/codexClient';
 
 // A JWT is header.payload.signature; only the payload (base64url JSON) is read. Build one so the
 // parse/expiry/account-id helpers have a realistic token without a crypto signature.

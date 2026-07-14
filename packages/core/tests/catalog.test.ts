@@ -10,7 +10,7 @@ import {
   oauthModelOptions, CODEX_MODELS, ANTHROPIC_MODELS,
   chatCompletionTextDelta,
   CUSTOM_ID, type Provider,
-} from './catalog';
+} from '../src/catalog';
 
 // Minimal Provider builder so each test states only the fields it cares about.
 const provider = (over: Partial<Provider> = {}): Provider => ({

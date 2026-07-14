@@ -15,7 +15,7 @@ import {
   parseWispConfig, parseWispAuth, serializeWispStore,
   planSecretsMigration, seedConfigFromVsCode,
   type WispAuth, type WispConfig,
-} from './home';
+} from '../src/home';
 
 // ----------------------------- parseWispConfig ----------------------------- //
 

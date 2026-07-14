@@ -1,7 +1,7 @@
 // ---------------- slash.test.ts — slash-command parsing + palette suggestion ---------------- //
 
 import { describe, it, expect } from 'vitest';
-import { parseSlash, suggestSlash, SLASH_COMMANDS, type SlashCommandDef } from './slash';
+import { parseSlash, suggestSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
 
 // A fixed list so filter tests never churn when the real palette grows.
 const cmds: SlashCommandDef[] = [

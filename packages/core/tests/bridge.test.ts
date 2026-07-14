@@ -5,8 +5,8 @@ import {
   parseOpenAiChatRequest,
   textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
   buildModelsList,
-} from './bridge';
-import type { ChatModelInfo } from './catalog';
+} from '../src/bridge';
+import type { ChatModelInfo } from '../src/catalog';
 
 // Minimal ChatModelInfo builder — buildModelsList only reads `id`, so the rest is filler.
 const modelInfo = (id: string): ChatModelInfo => ({
