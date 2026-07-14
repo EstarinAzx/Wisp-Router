@@ -4,30 +4,31 @@
  * Depends on:
  *   - @opentui/react: JSX intrinsics (box/text/input/select) + useKeyboard/usePaste hooks.
  *   - @opentui/core: InputRenderable — ref type for clearing the palette input after a command.
- *   - @wisp/core: PROVIDERS catalog + resolvers, WispHome (~/.wisp store), slash parse/suggest,
- *     oauthModelOptions + getModelsDevCatalog for the OAuth model lists, CodexAuth/AnthropicAuth
- *     (#61: the browser OAuth flows, now host-free).
- *   - node child_process: spawn the platform's open-browser command for the OAuth flows.
+ *   - @wisp/core: PROVIDERS catalog + resolvers, slash parse/suggest, oauthModelOptions +
+ *     getModelsDevCatalog for the OAuth model lists, stream clients for /test.
+ *   - ./store: the shared ~/.wisp handle + OAuth managers (#63 — extracted so `wisp serve` shares them).
+ *   - ./bridge: the TUI's Bridge host wiring (#63).
  *
  * Data shapes:
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
- *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply).
- *     Every non-input mode returns to 'input' on Esc.
+ *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
+ *     'bridge' (listener info: address + secret). Every non-input mode returns to 'input' on Esc.
  */
 
-import { spawn } from 'child_process';
 import { useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer } from '@opentui/react';
 import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  CodexAuth, AnthropicAuth, DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
+  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
-  WispHome, type Provider, type EffortLevel,
+  type Provider, type EffortLevel,
 } from '@wisp/core';
+import { home, activeProvider, codexAuth, anthropicAuth } from './store';
+import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 
 // ----------------------------------------- Splash ----------------------------------------- //
 
@@ -46,11 +47,7 @@ const DIM = '#71717a';
 
 // ----------------------------------------- Store ----------------------------------------- //
 
-// One handle for the whole session — every command reads fresh and writes through it (ADR-0002).
-const home = new WispHome();
-
-const activeProvider = (): Provider =>
-  PROVIDERS.find((p) => p.id === home.readConfig().provider) ?? PROVIDERS[0];
+// The store handle + OAuth managers moved to store.ts with #63 (shared with `wisp serve`).
 
 // Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
 const keyedProviders = (): Provider[] =>
@@ -78,30 +75,6 @@ const saveModel = (p: Provider, model: string): void => {
 };
 
 // ----------------------------------------- Sign-in + effort ----------------------------------------- //
-
-// Open the system browser from a terminal process. win32 goes through rundll32's URL handler —
-// cmd.exe's `start` would need &-escaping inside the OAuth query string; rundll32 takes the URL verbatim.
-// A failed spawn REJECTS so signIn fails fast with a real message instead of the user waiting out the
-// 5-minute OAuth timeout on a browser that never opened.
-const openExternal = (url: string): Promise<boolean> =>
-  new Promise((resolve, reject) => {
-    const [cmd, ...args] =
-      process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url]
-      : process.platform === 'darwin' ? ['open', url]
-      : ['xdg-open', url];
-    const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
-    child.on('error', (e) => reject(new Error(`Could not open the browser: ${e.message}`)));
-    child.on('spawn', () => { child.unref(); resolve(true); });
-  });
-
-// Same auth.json slices the extension wires — log is dropped (no output channel in a raw-mode TUI;
-// sign-in failures surface on the wait screen instead).
-const codexAuth = new CodexAuth(
-  { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
-  openExternal, () => {});
-const anthropicAuth = new AnthropicAuth(
-  { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
-  openExternal, () => {});
 
 // The full stored ladder. 'max' is Anthropic-only on the wire, but the send-time clamps
 // (standardEffortToCodex, anthropicThinkingEffort) fold it, so offering it globally is safe.
@@ -179,6 +152,13 @@ export async function* streamTestReply(p: Provider, model: string, signal: Abort
   }
 }
 
+// ----------------------------------------- Bridge ----------------------------------------- //
+
+// One host instance for the session — /bridge toggles it. Log is dropped like the auth managers'
+// (no output channel in a raw-mode TUI); the bridge screen shows the state instead. The listener
+// dies with the process on /quit — headless hosting is `wisp serve`, not a TUI leftover.
+const bridge = createTuiBridge(() => {});
+
 // ----------------------------------------- App ----------------------------------------- //
 
 type Mode =
@@ -192,7 +172,10 @@ type Mode =
   | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
   | { kind: 'signin-wait'; provider: Provider }
   | { kind: 'effort-pick' }
-  | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string };
+  | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
+  // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
+  // and can write auth.json — a side effect that must not live in JSX).
+  | { kind: 'bridge'; address: string; secret: string };
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
@@ -203,6 +186,7 @@ export const App = () => {
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
   const testSeq = useRef(0);   // same guard for /test — a late delta/finish can't touch a later screen
   const testAbort = useRef<AbortController | null>(null);
+  const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
   const renderer = useRenderer();
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
@@ -343,6 +327,32 @@ export const App = () => {
         startTest(route.provider, route.pinnedModel ?? resolveModel(cfg.models ?? {}, route.provider));
         return;
       }
+      case 'bridge': {
+        if (bridge.isRunning()) { bridge.stop(); setStatus('Bridge stopped.'); return; }
+        // isRunning() stays false until the bind lands, so without this guard a double /bridge would
+        // race a second server onto the same port and orphan the first one's handle.
+        if (bridgeStarting.current) { setStatus('Bridge is starting…'); return; }
+        bridgeStarting.current = true;
+        bridge.start().then(
+          () => {
+            bridgeStarting.current = false;
+            const info = { kind: 'bridge' as const, address: bridgeAddress(), secret: ensureBridgeSecret() };
+            // Show the info screen only if the user is still on the palette (a slow bind must not yank a
+            // screen they navigated to) — the status line announces the start wherever they are.
+            setMode((m) => m.kind === 'input' ? info : m);
+            setStatus('Bridge started — /bridge again to stop.');
+          },
+          (err) => {
+            bridgeStarting.current = false;
+            const message = err instanceof Error ? err.message : String(err);
+            // Port collision = the other face (or another wisp) already hosts the shared port — loud, no
+            // port-hop. Bun's bind error says "in use" without an EADDRINUSE code, hence the message probe.
+            setStatus((err as { code?: string }).code === 'EADDRINUSE' || /EADDRINUSE|in use/i.test(message)
+              ? `Bridge port ${bridgePort()} is already in use — is VS Code (or another wisp) already hosting it?`
+              : `Bridge failed to start: ${message}`);
+          });
+        return;
+      }
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
@@ -358,6 +368,7 @@ export const App = () => {
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
       mode.kind === 'input' ? exitTui()
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
+        : mode.kind === 'bridge' ? backToInput() // closes the info screen only — the listener stays up
         : backToInput('Cancelled.');
       return;
     }
@@ -514,6 +525,15 @@ export const App = () => {
           {mode.phase === 'streaming' && <text fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
           {mode.phase === 'done' && <text fg={DIM}>Done — Esc to close.</text>}
           {mode.phase === 'error' && <text fg="#f87171">{mode.error}</text>}
+        </box>
+      )}
+
+      {mode.kind === 'bridge' && (
+        <box border title="Bridge" marginTop={1} flexDirection="column">
+          <text>OpenAI door:    <span fg={ACCENT}>{mode.address}/v1</span></text>
+          <text>Anthropic door: <span fg={ACCENT}>{mode.address}</span></text>
+          <text>Access secret:  <span fg={ACCENT}>{mode.secret}</span></text>
+          <text fg={DIM}>Esc closes this screen — the listener stays up. /bridge again to stop; /quit kills it (headless: wisp serve).</text>
         </box>
       )}
 

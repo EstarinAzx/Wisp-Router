@@ -81,4 +81,8 @@ describe('SLASH_COMMANDS — the real palette', () => {
   it('carries the wiring check (#62)', () => {
     expect(SLASH_COMMANDS.map((c) => c.name)).toContain('test');
   });
+
+  it('carries the Bridge toggle (#63)', () => {
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain('bridge');
+  });
 });

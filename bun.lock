@@ -25,6 +25,7 @@
         "@opentui/core": "0.4.3",
         "@opentui/react": "0.4.3",
         "@wisp/core": "workspace:*",
+        "openai": "^4.80.0",
         "react": "^19.2.7",
       },
       "devDependencies": {
