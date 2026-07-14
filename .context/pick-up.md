@@ -26,6 +26,9 @@ the parallel alternative.
 ## Landmines
 - **ADR-0003 is the spec for #67** (`docs/adr/0003-tui-opentui-bun-compiled-binaries.md`) — read
   it before scoping; the npm name `wisp-router` goes public at first publish (one-way).
+- **Dev shims to delete when #67 lands:** `C:\Users\S.D\.local\bin\wisp.cmd` + `claude-wisp.cmd`
+  (bun-over-source shims added post-#64; they'd shadow the npm-installed bins). Plain-ASCII + CRLF
+  only if ever edited — em-dash/LF in a .cmd misparses (same class as the opentui title trap).
 - **opentui ships native per-platform binaries** (`core-win32-x64` etc.) — the `bun build
   --compile` matrix must pull the right one per target; cross-compiling from one runner may not
   work, hence the CI matrix.
