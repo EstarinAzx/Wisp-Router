@@ -35,7 +35,7 @@ Monorepo since #58 (bun workspaces, root `bun.lock`; install with `bun install` 
 - Package: `bun run package` in `packages/vscode` (= `vsce package --no-dependencies`, pinned devDep `@vscode/vsce` `^3.3`; runs `compile` via `vscode:prepublish`). Dev sources excluded by `.vscodeignore`.
 
 ## Testing
-- `vitest` `^4.1` (devDep of `@wisp/core`) â€” unit-test runner for the **vscode-free** pure logic (`packages/core/src/*.test.ts`, 356 tests). Run `bun run test` at root. No `@vscode/test-electron`: the tested functions are pure, so no Extension Development Host is needed. Core's `tsconfig.json` excludes `src/**/*.test.ts` from typecheck (mirrors the old build exclusion).
+- `vitest` `^4.1` (devDep of `@wisp/core`) â€” unit-test runner for the **vscode-free** pure logic (`packages/core/src/*.test.ts`, 366 tests). Run `bun run test` at root. No `@vscode/test-electron`: the tested functions are pure, so no Extension Development Host is needed. Core's `tsconfig.json` excludes `src/**/*.test.ts` from typecheck (mirrors the old build exclusion).
 
 ## Services
 - None (no DB/cache). Single external HTTP dependency: the OpenCode Zen provider â€” see [[api]].

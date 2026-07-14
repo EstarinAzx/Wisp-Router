@@ -10,35 +10,33 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**#64 landed — `claude-wisp` launcher** (PR #76 merged, main `86007b7`, all seven acceptance
-criteria live-verified on Windows incl. a real round-trip: `claude-wisp --model haiku -p …` →
-Bridge routed `haiku → opencode-go` → `pong`, exit 0). Core gained pure `buildClaudeLaunch`
-(env trio + verbatim argv; suite **356/356**); the `claude-wisp` bin is now declared in
-`packages/tui/package.json`. Cavecrew review fixed pre-merge: secretless probe, cmd-metachar
-quoting, trailing-backslash doubling.
+**#65 landed — `/routing` in the TUI** (PR #77 merged, main `b554417`). The Routing map (4 Family
+routes + Aliases) is editable from the TUI with panel parity: overview → provider picker (incl.
+Clear/Remove) → live model list or free text. Edit ops extracted to core as pure fns
+(`withFamilyRoute`/`withAlias`/`withoutAlias`, refusal = `undefined`); the extension delegates to
+them. Suite **366/366**. Live-verified against a sandboxed `wisp serve`: alias advertised in
+`/v1/models` instantly, bridge log confirmed `route alias`/`route family` per the edited map.
 
 ## Next task
-**#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, its only
-blocker was #64 — now unblocked; ADR-0003: `bun build --compile` × 4 platforms + npm thin shell
-exposing bins `wisp` + `claude-wisp`). Suggested: **`/preset scope 67`**. #65 (/routing UI) is
-the parallel alternative.
+**#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, the critical-path
+finale; ADR-0003: `bun build --compile` × 4 platforms + npm thin shell exposing bins `wisp` +
+`claude-wisp`). Suggested: **`/preset scope 67`**. Backlog: #68 (chat mode), #69 (copilot-wisp).
 
 ## Landmines
-- **ADR-0003 is the spec for #67** (`docs/adr/0003-tui-opentui-bun-compiled-binaries.md`) — read
-  it before scoping; the npm name `wisp-router` goes public at first publish (one-way).
+- **ADR-0003 is the spec for #67** (`docs/adr/0003-tui-opentui-bun-compiled-binaries.md`) — read it
+  before scoping; the npm name `wisp-router` goes public at first publish (one-way).
 - **Dev shims to delete when #67 lands:** `C:\Users\S.D\.local\bin\wisp.cmd` + `claude-wisp.cmd`
-  (bun-over-source shims added post-#64; they'd shadow the npm-installed bins). Plain-ASCII + CRLF
-  only if ever edited — em-dash/LF in a .cmd misparses (same class as the opentui title trap).
-- **opentui ships native per-platform binaries** (`core-win32-x64` etc.) — the `bun build
-  --compile` matrix must pull the right one per target; cross-compiling from one runner may not
-  work, hence the CI matrix.
+  (they'd shadow the npm-installed bins). Plain-ASCII + CRLF only if ever edited.
+- **opentui ships native per-platform binaries** (`core-win32-x64` etc.) — the compile matrix must
+  pull the right one per target; cross-compiling from one runner may not work, hence CI matrix.
+- **TUI eyeball backlog:** the new `/routing` screens (#65) and the `/test` border-title fix
+  (`f2efe18`) are compile+headless-verified only — eyeball both on the next interactive TUI run.
 - **Codex is signed out on this machine** (tombstone from #61) — `/signin codex` before Codex live
-  checks; active provider IS codex, so a default `claude-wisp` run errors until sign-in (that's
-  why #64 verification used `--model haiku` → keyed `opencode-go`).
-- Both faces share the Bridge port + secret — a second host fails loud (intended); stop one first.
-- TUI dev writes the REAL `~/.wisp` — set `WISP_HOME` when testing destructive flows.
-- `/test` border-title fix (`f2efe18`) still not eyeballed in a terminal; opentui border titles
-  must stay plain ASCII (gotchas.md).
+  checks; default `claude-wisp` run errors until then (use `--model haiku` → `opencode-go`).
+- Both faces share the Bridge port + secret — second host fails loud (intended); stop one first.
+- TUI dev writes the REAL `~/.wisp` — set `WISP_HOME` when testing destructive flows. If you seed a
+  sandbox config.json by hand, write it WITHOUT a BOM (PS 5.1 `Set-Content -Encoding utf8` adds one
+  and the lenient parser drops the whole config — port override silently ignored).
 - `tsc` is typecheck-only — `bun run compile` in `packages/vscode` before F5.
 
 ## Related
