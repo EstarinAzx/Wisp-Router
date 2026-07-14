@@ -519,7 +519,8 @@ export const App = () => {
       )}
 
       {mode.kind === 'test' && (
-        <box border title={`/test — ${mode.provider.label} · ${mode.model}`} marginTop={1} flexDirection="column">
+        // plain-ASCII title on purpose — opentui border titles drop non-ASCII (em-dash/·), see gotchas
+        <box border title={`/test: ${mode.provider.label} (${mode.model})`} marginTop={1} flexDirection="column">
           {/* raw reply text, streamed as-is — deliberately no markdown, no history (#62) */}
           {mode.text !== '' && <text>{mode.text}</text>}
           {mode.phase === 'streaming' && <text fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
