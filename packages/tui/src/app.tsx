@@ -13,7 +13,11 @@
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
  *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
- *     'bridge' (listener info: address + secret). Every non-input mode returns to 'input' on Esc.
+ *     'bridge' (listener info: address + secret) | the /routing chain (#65): 'routing' (map
+ *     overview) → 'alias-name' / 'route-provider' → 'route-model-*' (pick or free text). Every
+ *     non-input mode returns to 'input' on Esc, except the routing sub-screens, which step back
+ *     to the map overview first.
+ *   - RouteRow: which Routing-map row is being edited — a fixed Family or a named Alias.
  */
 
 import { useRef, useState } from 'react';
@@ -25,7 +29,8 @@ import {
   DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
-  type Provider, type EffortLevel,
+  FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
+  type Provider, type EffortLevel, type RoutingMap, type FamilyKey, type Target,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
@@ -103,6 +108,22 @@ const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => 
   } catch { return undefined; }
 };
 
+// ----------------------------------------- /routing ----------------------------------------- //
+
+// Which Routing-map row a picker chain is editing — a fixed Family or a named Alias (#65).
+type RouteRow = { kind: 'family'; family: FamilyKey } | { kind: 'alias'; name: string };
+
+const routingMap = (): RoutingMap => home.readConfig().routing ?? EMPTY_ROUTING_MAP;
+
+const rowLabel = (row: RouteRow): string => (row.kind === 'family' ? row.family : row.name);
+
+// Border-title-safe label: opentui silently drops a whole title over one non-ASCII char, and alias
+// names are free text (the panel accepts anything) — replace the offenders, never lose the title.
+const titleLabel = (row: RouteRow): string => rowLabel(row).replace(/[^\x20-\x7e]/g, '?');
+
+const rowTarget = (map: RoutingMap, row: RouteRow): Target | undefined =>
+  row.kind === 'family' ? map.families[row.family] : map.aliases.find((a) => a.name === row.name)?.target;
+
 // ----------------------------------------- /test ----------------------------------------- //
 
 // The wiring check's canned prompt — proves the round trip, nothing more (#62: not a chat).
@@ -175,7 +196,14 @@ type Mode =
   | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
   // and can write auth.json — a side effect that must not live in JSX).
-  | { kind: 'bridge'; address: string; secret: string };
+  | { kind: 'bridge'; address: string; secret: string }
+  // The /routing chain (#65): overview → name a new alias / pick a row's Provider → pick its model.
+  | { kind: 'routing' }
+  | { kind: 'alias-name' }
+  | { kind: 'route-provider'; row: RouteRow }
+  | { kind: 'route-model-loading'; row: RouteRow; provider: Provider }
+  | { kind: 'route-model-pick'; row: RouteRow; provider: Provider; options: string[] }
+  | { kind: 'route-model-free'; row: RouteRow; provider: Provider };
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
@@ -197,6 +225,48 @@ export const App = () => {
     if (message) setStatus(message);
     setSecret('');
     setMode({ kind: 'input' });
+  };
+
+  // The /routing sub-screens step back HERE on Esc/apply, not to the palette — editing several
+  // rows in a row is the normal flow.
+  const backToRouting = (message?: string) => {
+    if (message) setStatus(message);
+    setMode({ kind: 'routing' });
+  };
+
+  // Persist one row's new Target through core's pure edits. A refusal (only reachable if a Provider
+  // id slipped past the alias-name precheck) persists nothing.
+  const applyRoute = (row: RouteRow, target: Target) => {
+    const map = routingMap();
+    const next = row.kind === 'family'
+      ? withFamilyRoute(map, PROVIDERS, row.family, target)
+      : withAlias(map, PROVIDERS, row.name, target);
+    if (next) home.writeConfig({ routing: next });
+    backToRouting(next ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
+  };
+
+  // The picker's last entry: clear a Family route / remove an Alias.
+  const clearRow = (row: RouteRow) => {
+    const map = routingMap();
+    if (row.kind === 'family') {
+      // Clearing can't be refused — withFamilyRoute only refuses a dangling Target.
+      home.writeConfig({ routing: withFamilyRoute(map, PROVIDERS, row.family, undefined)! });
+      backToRouting(`${row.family} route cleared.`);
+    } else {
+      home.writeConfig({ routing: withoutAlias(map, row.name) });
+      backToRouting(`Alias ${row.name} removed.`);
+    }
+  };
+
+  // Fetch the row Provider's model list, then land on pick or free text. The guard compares the row
+  // by REFERENCE — only the flow that set this loading mode may resolve it, so an Esc'd or replaced
+  // fetch is discarded (same race as /model, sharper check).
+  const startRouteModel = (row: RouteRow, p: Provider) => {
+    setMode({ kind: 'route-model-loading', row, provider: p });
+    void fetchModelOptions(p).then((options) =>
+      setMode((m) => m.kind !== 'route-model-loading' || m.row !== row ? m
+        : options ? { kind: 'route-model-pick', row, provider: p, options }
+        : { kind: 'route-model-free', row, provider: p }));
   };
 
   // opentui's JSX inherits React's DOM intrinsics, so onSubmit must also satisfy the DOM form
@@ -269,6 +339,7 @@ export const App = () => {
     const byId = (id?: string) => PROVIDERS.find((p) => p.id === id);
     switch (command) {
       case 'providers': setMode({ kind: 'providers' }); return;
+      case 'routing': setMode({ kind: 'routing' }); return;
       case 'key': {
         const p = target.args[0] ? byId(target.args[0]) : undefined;
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
@@ -366,7 +437,11 @@ export const App = () => {
       // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
       if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
+      // Routing sub-screens back out one level (to the map), not all the way to the palette.
+      const routingSub = mode.kind === 'alias-name' || mode.kind === 'route-provider'
+        || mode.kind === 'route-model-loading' || mode.kind === 'route-model-pick' || mode.kind === 'route-model-free';
       mode.kind === 'input' ? exitTui()
+        : routingSub ? backToRouting('Cancelled.')
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
         : mode.kind === 'bridge' ? backToInput() // closes the info screen only — the listener stays up
         : backToInput('Cancelled.');
@@ -535,6 +610,115 @@ export const App = () => {
           <text>Anthropic door: <span fg={ACCENT}>{mode.address}</span></text>
           <text>Access secret:  <span fg={ACCENT}>{mode.secret}</span></text>
           <text fg={DIM}>Esc closes this screen — the listener stays up. /bridge again to stop; /quit kills it (headless: wisp serve).</text>
+        </box>
+      )}
+
+      {mode.kind === 'routing' && (
+        <box border title="Routing map" marginTop={1} flexDirection="column">
+          {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
+          <select
+            focused
+            height={Math.min((FAMILY_KEYS.length + routingMap().aliases.length + 1) * 2, 16)}
+            showScrollIndicator
+            options={[
+              ...FAMILY_KEYS.map((f) => {
+                const t = routingMap().families[f];
+                return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
+              }),
+              ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
+              { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
+            ]}
+            onSelect={(_i, opt) => {
+              if (!opt) return;
+              const v = String(opt.value);
+              if (v === 'add') { setMode({ kind: 'alias-name' }); return; }
+              const key = v.slice(v.indexOf(':') + 1);
+              setMode({
+                kind: 'route-provider',
+                row: v.startsWith('family:') ? { kind: 'family', family: key as FamilyKey } : { kind: 'alias', name: key },
+              });
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'alias-name' && (
+        <box border title="New alias name" marginTop={1}>
+          <input
+            focused
+            placeholder="a bridged model name, e.g. fast"
+            onSubmit={onSubmitText((value) => {
+              const name = value.trim();
+              if (!name) { backToRouting('Empty — no alias added.'); return; }
+              // Precheck the shadow rule here so the collision message lands while the name is
+              // still editable (core's withAlias refuses it again at persist time).
+              if (PROVIDERS.some((p) => p.id === name)) { setStatus(`"${name}" is a Provider id — pick another name.`); return; }
+              setMode({ kind: 'route-provider', row: { kind: 'alias', name } });
+            })}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'route-provider' && (
+        <box border title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
+          <select
+            focused
+            height={Math.min((PROVIDERS.length + 1) * 2, 16)}
+            showScrollIndicator
+            options={[
+              ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
+              mode.row.kind === 'family'
+                ? { name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }
+                : { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
+            ]}
+            onSelect={(_i, opt) => {
+              if (!opt) return;
+              if (opt.value === ' clear') { clearRow(mode.row); return; }
+              const p = PROVIDERS.find((x) => x.id === opt.value);
+              if (p) startRouteModel(mode.row, p);
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'route-model-loading' && (
+        <text fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
+      )}
+
+      {mode.kind === 'route-model-pick' && (
+        <box border title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label}`} marginTop={1} flexDirection="column">
+          {/* "(current)" only when the row already targets THIS provider — two providers can list the same id */}
+          <select
+            focused
+            height={Math.min(mode.options.length, 14)}
+            showDescription={false}
+            showScrollIndicator
+            options={mode.options.map((id) => {
+              const t = rowTarget(routingMap(), mode.row);
+              return {
+                name: t?.providerId === mode.provider.id && t.model === id ? `${id} (current)` : id,
+                description: '',
+                value: id,
+              };
+            })}
+            onSelect={(_i, opt) => {
+              if (opt) applyRoute(mode.row, { providerId: mode.provider.id, model: String(opt.value) });
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'route-model-free' && (
+        <box border title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label} (no live list - type an id)`} marginTop={1}>
+          <input
+            focused
+            placeholder={mode.provider.defaultModel || 'model id'}
+            onSubmit={onSubmitText((value) => {
+              const id = value.trim();
+              if (id) applyRoute(mode.row, { providerId: mode.provider.id, model: id });
+              else backToRouting('Empty — route unchanged.');
+            })}
+          />
         </box>
       )}
 

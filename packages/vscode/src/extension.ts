@@ -31,7 +31,7 @@ import {
   type CodexCreds, type EffortLevel, type AnthropicCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
-import { EMPTY_ROUTING_MAP, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
+import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
@@ -281,25 +281,23 @@ const setEffort = async (effort: EffortLevel): Promise<void> => {
 };
 
 // Set or clear one Family route (#51). The Bridge reads the map live per request — the next
-// call picks the change up with no restart.
+// call picks the change up with no restart. The edit itself is core's pure withFamilyRoute (#65);
+// its refusal (dangling Provider id from a malformed webview message) persists nothing.
 const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Promise<void> => {
-  // Only catalog Providers may be a Target — a malformed webview message can't persist a dangling id.
-  if (target && !PROVIDERS.some((p) => p.id === target.providerId)) return;
-  const map = activeRoutingMap();
-  home.writeConfig({ routing: { ...map, families: { ...map.families, [family]: target } } });
+  const next = withFamilyRoute(activeRoutingMap(), PROVIDERS, family, target);
+  if (!next) return;
+  home.writeConfig({ routing: next });
   void panel?.postState();
 };
 
-// Add or retarget one Alias row (#52). Upsert by exact name. The webview shows the collision message —
-// this guard is the trust boundary that keeps a bypassed/malformed message from persisting an alias
-// that shadows a Provider id (the resolver checks ids first, so a shadowing alias would be silently
+// Add or retarget one Alias row (#52). The webview shows the collision message — core's withAlias
+// (#65) is the trust boundary that keeps a bypassed/malformed message from persisting an alias that
+// shadows a Provider id (the resolver checks ids first, so a shadowing alias would be silently
 // unreachable).
 const setAlias = async (name: string, target: Target): Promise<void> => {
-  if (!name || PROVIDERS.some((p) => p.id === name)) return;
-  if (!PROVIDERS.some((p) => p.id === target.providerId)) return;
-  const map = activeRoutingMap();
-  const rest = map.aliases.filter((a) => a.name !== name);
-  home.writeConfig({ routing: { ...map, aliases: [...rest, { name, target }] } });
+  const next = withAlias(activeRoutingMap(), PROVIDERS, name, target);
+  if (!next) return;
+  home.writeConfig({ routing: next });
   void panel?.postState();
 };
 
@@ -309,10 +307,9 @@ const setAliasPickerShowsModel = async (on: boolean): Promise<void> => {
   void panel?.postState();
 };
 
-// Remove one Alias row by name (#52). Unknown names are a no-op.
+// Remove one Alias row by name (#52). Unknown names are a no-op (core's withoutAlias, #65).
 const removeAlias = async (name: string): Promise<void> => {
-  const map = activeRoutingMap();
-  home.writeConfig({ routing: { ...map, aliases: map.aliases.filter((a) => a.name !== name) } });
+  home.writeConfig({ routing: withoutAlias(activeRoutingMap(), name) });
   void panel?.postState();
 };
 
