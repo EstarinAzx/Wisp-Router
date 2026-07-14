@@ -43,7 +43,8 @@ export const EMPTY_ROUTING_MAP: RoutingMap = { families: {}, aliases: [] };
 // ----------------------------- Resolver ----------------------------- //
 
 // Fixed probe order for the family fuzzy match (a claude-* id names at most one family in practice).
-const FAMILY_KEYS: FamilyKey[] = ['opus', 'sonnet', 'haiku', 'fable'];
+// Exported since #65 — the TUI's /routing screen lists the rows in this same order.
+export const FAMILY_KEYS: FamilyKey[] = ['opus', 'sonnet', 'haiku', 'fable'];
 
 // Resolve a requested model name to the Provider that must answer it. Lookup order (PRD #50, locked):
 // Provider id → Alias exact → Family fuzzy (claude-* ids only, any version/date suffix) → Active
@@ -81,3 +82,39 @@ export const resolveRoute = (
   const active = byId(activeProviderId);
   return active && { provider: active, matched: 'active' };
 };
+
+// ----------------------------- Edit operations ----------------------------- //
+
+// Pure map edits (#65) — each returns the next map, or undefined when the edit is refused. Both
+// faces persist only a returned map, so a malformed edit can never write a broken route.
+
+// Set or clear one Family route. Refused when the Target names a Provider outside the catalog.
+export const withFamilyRoute = (
+  map: RoutingMap,
+  providers: Provider[],
+  family: FamilyKey,
+  target: Target | undefined,
+): RoutingMap | undefined =>
+  target && !providers.some((p) => p.id === target.providerId)
+    ? undefined
+    : { ...map, families: { ...map.families, [family]: target } };
+
+// Add or retarget one Alias (upsert by exact name). Refused for an empty name, a dangling Target,
+// or a name matching a Provider id — ids win the resolver's lookup, so a same-named alias would be
+// silently unreachable.
+export const withAlias = (
+  map: RoutingMap,
+  providers: Provider[],
+  name: string,
+  target: Target,
+): RoutingMap | undefined => {
+  if (!name || providers.some((p) => p.id === name)) return undefined;
+  if (!providers.some((p) => p.id === target.providerId)) return undefined;
+  return { ...map, aliases: [...map.aliases.filter((a) => a.name !== name), { name, target }] };
+};
+
+// Remove one Alias by name. An unknown name is a no-op, never an error.
+export const withoutAlias = (map: RoutingMap, name: string): RoutingMap => ({
+  ...map,
+  aliases: map.aliases.filter((a) => a.name !== name),
+});

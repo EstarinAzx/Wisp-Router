@@ -1,7 +1,9 @@
 // ---------------- routing.test.ts — the Routing map resolver's full decision table ---------------- //
 
 import { describe, it, expect } from 'vitest';
-import { resolveRoute, EMPTY_ROUTING_MAP, type RoutingMap } from './routing';
+import {
+  resolveRoute, withFamilyRoute, withAlias, withoutAlias, EMPTY_ROUTING_MAP, type RoutingMap,
+} from './routing';
 import type { Provider } from './catalog';
 
 // Minimal Provider builder — the resolver only reads `id`; the rest is filler.
@@ -100,5 +102,60 @@ describe('resolveRoute — fail-loud edges', () => {
   // No Active Provider match either → undefined (the doors' existing 404 handles it).
   it('returns undefined when the Active fallback id is unknown', () => {
     expect(resolveRoute(EMPTY_ROUTING_MAP, providers, 'nope', 'anything')).toBeUndefined();
+  });
+});
+
+describe('edit operations (#65)', () => {
+  const target = { providerId: 'go', model: 'cheap-model' };
+
+  it('withFamilyRoute sets a family Target', () => {
+    const next = withFamilyRoute(EMPTY_ROUTING_MAP, providers, 'haiku', target);
+    expect(next?.families.haiku).toEqual(target);
+  });
+
+  it('withFamilyRoute clears a family with an undefined Target', () => {
+    const next = withFamilyRoute(fullMap, providers, 'haiku', undefined);
+    expect(next?.families.haiku).toBeUndefined();
+    expect(next?.families.opus).toEqual(fullMap.families.opus); // siblings untouched
+  });
+
+  it('withFamilyRoute refuses a Target with a dangling providerId', () => {
+    expect(withFamilyRoute(EMPTY_ROUTING_MAP, providers, 'opus', { providerId: 'gone', model: 'x' })).toBeUndefined();
+  });
+
+  it('withAlias adds a new alias', () => {
+    const next = withAlias(EMPTY_ROUTING_MAP, providers, 'fast', target);
+    expect(next?.aliases).toEqual([{ name: 'fast', target }]);
+  });
+
+  it('withAlias retargets an existing alias without duplicating it', () => {
+    const first = withAlias(EMPTY_ROUTING_MAP, providers, 'fast', target)!;
+    const next = withAlias(first, providers, 'fast', { providerId: 'codex', model: 'gpt-5.6' });
+    expect(next?.aliases).toEqual([{ name: 'fast', target: { providerId: 'codex', model: 'gpt-5.6' } }]);
+  });
+
+  // The acceptance rule: a name colliding with a Provider id is refused (it would be unreachable).
+  it('withAlias refuses a name that shadows a Provider id', () => {
+    expect(withAlias(EMPTY_ROUTING_MAP, providers, 'codex', target)).toBeUndefined();
+  });
+
+  it('withAlias refuses an empty name and a dangling Target', () => {
+    expect(withAlias(EMPTY_ROUTING_MAP, providers, '', target)).toBeUndefined();
+    expect(withAlias(EMPTY_ROUTING_MAP, providers, 'fast', { providerId: 'gone', model: 'x' })).toBeUndefined();
+  });
+
+  it('withoutAlias removes by name; unknown names are a no-op', () => {
+    const next = withoutAlias(fullMap, 'sol');
+    expect(next.aliases.map((a) => a.name)).toEqual(['go', 'claude-opus-4-8']);
+    expect(withoutAlias(EMPTY_ROUTING_MAP, 'ghost').aliases).toEqual([]);
+  });
+
+  // Purity: edits return fresh maps and never mutate the input.
+  it('edits leave the input map untouched', () => {
+    const before = JSON.parse(JSON.stringify(fullMap));
+    withFamilyRoute(fullMap, providers, 'haiku', undefined);
+    withAlias(fullMap, providers, 'fast', target);
+    withoutAlias(fullMap, 'sol');
+    expect(fullMap).toEqual(before);
   });
 });

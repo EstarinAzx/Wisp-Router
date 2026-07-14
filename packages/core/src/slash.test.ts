@@ -85,4 +85,8 @@ describe('SLASH_COMMANDS — the real palette', () => {
   it('carries the Bridge toggle (#63)', () => {
     expect(SLASH_COMMANDS.map((c) => c.name)).toContain('bridge');
   });
+
+  it('carries the Routing map editor (#65)', () => {
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain('routing');
+  });
 });
