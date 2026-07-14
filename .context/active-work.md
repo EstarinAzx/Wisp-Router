@@ -8,62 +8,63 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-14 by Fable 5 (auto)._
-_At commit: f2efe18 on `main` (PR #75 merged + title-nit fix), pushed._
+_At commit: 86007b7 on `main` (PR #76 merged), pushed._
 
 ## Current focus
-**TUI slice 6 landed.** #63 — **`/bridge` + `wisp serve`** shipped as PR
-[#75](https://github.com/EstarinAzx/Wisp-Router/pull/75): the Bridge engine (already in core) is now
-hosted by whichever face wants it. `wisp serve` runs it headless (argv branch in `index.tsx`, lazy
-imports — the native renderer is never touched); `/bridge` toggles it in the TUI with an
-address/secret info screen. Extension host stays (#66 cancelled); its only change is
-`DEFAULT_BRIDGE_PORT` moving to core. All six acceptance criteria verified live (real `claude -p`
-through the headless bridge, OpenAI door curl, effort both ways, loud port collision, headless
-toggle harness, user screenshot of the /bridge screen).
+**TUI slice 7 landed.** #64 — **`claude-wisp`** shipped as PR
+[#76](https://github.com/EstarinAzx/Wisp-Router/pull/76): the launcher bin that starts Claude Code
+pre-wired to the Bridge. It reads port + secret from `~/.wisp` (read-only — a missing secret means
+no Bridge ever ran), probes the Bridge (down → friendly "start `wisp serve`" message, exit 1, never
+auto-starts), spawns `claude` with the env trio on the **child only** (`ANTHROPIC_BASE_URL`,
+`ANTHROPIC_API_KEY`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`), passes argv through verbatim,
+and mirrors the child's exit code. All seven acceptance criteria live-verified on Windows, including
+a real round-trip: `claude-wisp --model haiku -p …` → Bridge routed `haiku → opencode-go` → `pong`.
 
 ## State
-- **Done this session (#63, PR #75, main @ f2efe18):**
-  - tui: new `store.ts` (shared `~/.wisp` handle + OAuth managers, extracted from app.tsx so serve
-    never imports the rendering module), `bridge.ts` (BridgeDeps wiring — twin of extension.ts's
-    createBridgeServer call), `serve.ts` (headless run, SIGINT/SIGTERM → stop). `openai` dep added.
-  - core: `DEFAULT_BRIDGE_PORT` exported from `bridgeServer.ts`; `slash.ts` gained `bridge`; suite
-    **353/353**.
-  - Issue #63 was rewritten pre-scoping (title said "extension host removed" — stale pre-#66 text).
-  - Review (cavecrew) found + fixed pre-merge: double-/bridge bind race (in-flight guard — Bun's
-    `isRunning()` is false until the bind lands), silent success off-palette, secret `trim()` drift
-    vs the extension, `ensureBridgeSecret()` disk-write in JSX render (address+secret now ride in
-    the mode object).
-  - Bonus on main (`f2efe18`): /test border title → plain ASCII. The /bridge screenshot proved
-    opentui border titles silently drop non-ASCII (em-dash/`·`) — see [[gotchas]].
+- **Done this session (#64, PR #76, main @ 86007b7):**
+  - core: `buildClaudeLaunch(port, secret, argv)` — the pure launch contract ({env trio, argv copy})
+    in `bridgeAnthropic.ts` next to `buildClaudeCodeSnippets` (same env trio). Suite **356/356**.
+  - tui: new `src/claude-wisp.ts` bin + `claude-wisp` declared in package.json (the install-linking
+    trap this slice was gated on). Windows resolution: `claude.exe` scanned on PATH first (direct,
+    fully verbatim spawn); npm `.cmd`/`.bat` shim falls back to `cmd.exe /d /s /c` with hand quoting
+    (node/Bun refuse `.cmd` without a shell — BatBadBut).
+  - Review (cavecrew) found + fixed pre-merge: probe no longer sends the secret (a port squatter
+    must never see it; any HTTP response — even 401 — proves the listener), `quoteForCmd` triggers
+    on cmd metachars (`& | < > ^`), trailing backslashes doubled before the closing quote.
 - **In flight:** nothing.
 - **Blocked:** nothing.
 
 ## Pick up here
-**#64 — `claude-wisp` launcher** (`ready-for-agent`, now unblocked by #63; critical path → #67
-release). Suggested: `/preset scope 64`. Declare the `claude-wisp` bin ONLY in this slice (a bin
-pointing at a missing file breaks install linking). #65 (/routing UI) is the parallel alternative.
+**#67 — Release: CI binary matrix + npm `wisp-router` publish** (`ready-for-agent`, now unblocked —
+its only blocker was #64). The critical-path finale: `bun build --compile` per-platform binaries +
+npm thin-shell publish exposing bins `wisp` + `claude-wisp` (ADR-0003). Suggested: `/preset scope 67`.
+**#65 (/routing UI)** is the parallel alternative. Backlog: #68 (chat mode), #69 (copilot-wisp).
 
 ## Skills for next session
-- /preset scope — entry gate for #64 (or #65).
+- /preset scope — entry gate for #67 (or #65).
 
 ## Open questions
 - (carried) forced `tool_choice` + `temperature` not threaded on the OpenAI door; OpenAI-door
   Codex strict-tools limit; routing-map rename migration — all deliberate skips.
-- `/test` title fix (`f2efe18`) is compile-verified but not yet eyeballed in a terminal — glance at
-  it during the next TUI slice.
+- Bridge client tag: the `claude-wisp --model haiku` run logged `messages opencode-go … (panel)`
+  while the default-model run logged `(claude code)` — the client-detection heuristic mislabels
+  some Claude Code requests. Cosmetic (log line only); worth a glance in a Bridge slice.
+- `/test` border-title fix (`f2efe18`) still compile-verified only — eyeball during the next TUI run.
 - Codex is currently **signed out** on this machine (tombstone from #61 testing) — sign in before
-  any Codex-path live checks.
+  any Codex-path live checks. This is why the #64 verification routed via `--model haiku`
+  (haiku family → keyed `opencode-go`) instead of the active provider (codex).
 
 ## Recent context
-- Ticket shape: #58✅→#59✅→#60✅→#61✅→#62✅→#63✅; open: #64 (unblocked), #65; #67 behind #64;
-  backlog #68/#69.
+- Ticket shape: #58✅→#59✅→#60✅→#61✅→#62✅→#63✅→#64✅; open: #67 (unblocked, critical path),
+  #65 (parallel); backlog #68/#69.
 - TUI dev run: `cd packages/tui; bun run dev` (real `~/.wisp`; set `WISP_HOME` to sandbox).
-  Headless: `bun src/index.tsx serve`.
+  Headless: `bun src/index.tsx serve`. Launcher: `bun src/claude-wisp.ts [args…]`.
 - Both faces share the Bridge port + secret — testing serve while VS Code hosts the Bridge hits the
   (intended) loud port collision; stop one first.
 
 ## Related
-- [[overview]] — TUI command list + serve entry re-anchored
+- [[overview]] — claude-wisp bin now real; run line added
 - [[stack]] — test count bumped
-- [[decisions]] — 2026-07-14 both-faces-host entry
-- [[gotchas]] — opentui border-title non-ASCII trap appended
+- [[decisions]] — 2026-07-14 launcher execution details entry
+- [[gotchas]]
 - [[pick-up]]
