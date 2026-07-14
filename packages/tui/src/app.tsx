@@ -10,9 +10,9 @@
  *   - node child_process: spawn the platform's open-browser command for the OAuth flows.
  *
  * Data shapes:
- *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/signin/effort pickers |
- *     'key-entry' (masked) | 'model-free' (typed model id) | 'signin-wait' (browser flow pending).
- *     Every non-input mode returns to 'input' on Esc.
+ *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
+ *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
+ *     'signin-wait' (browser flow pending). Every non-input mode returns to 'input' on Esc.
  */
 
 import { spawn } from 'child_process';
@@ -130,7 +130,7 @@ type Mode =
   | { kind: 'model-loading'; provider: Provider }
   | { kind: 'model-pick'; provider: Provider; options: string[] }
   | { kind: 'model-free'; provider: Provider }
-  | { kind: 'signin-pick' }
+  | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
   | { kind: 'signin-wait'; provider: Provider }
   | { kind: 'effort-pick' };
 
@@ -169,6 +169,12 @@ export const App = () => {
       () => { if (seq === signinSeq.current) backToInput(`Signed in — ${p.label} is ready.`); },
       (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
     );
+  };
+
+  // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
+  const doSignOut = (p: Provider) => {
+    (isCodexProvider(p) ? codexAuth : anthropicAuth).signOut();
+    backToInput(`Signed out of ${p.label}.`);
   };
 
   // ----- command dispatch (Enter in the palette) -----
@@ -211,14 +217,16 @@ export const App = () => {
             : { kind: 'model-free', provider: p }));
         return;
       }
-      case 'signin': {
+      case 'signin':
+      case 'signout': {
         const arg = target.args[0]?.toLowerCase();
         // Match by kind, not id, so the arg names the door (codex/anthropic) rather than a catalog row.
         const p = arg
           ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)))
           : undefined;
-        if (arg && !p) { setStatus(`Sign in to codex or anthropic — got: ${target.args[0]}`); return; }
-        if (p) startSignIn(p); else setMode({ kind: 'signin-pick' });
+        if (arg && !p) { setStatus(`/${command} takes codex or anthropic — got: ${target.args[0]}`); return; }
+        if (!p) { setMode({ kind: 'oauth-pick', action: command }); return; }
+        command === 'signin' ? startSignIn(p) : doSignOut(p);
         return;
       }
       case 'effort': {
@@ -370,8 +378,8 @@ export const App = () => {
         </box>
       )}
 
-      {mode.kind === 'signin-pick' && (
-        <box border title="Sign in to…" marginTop={1} flexDirection="column">
+      {mode.kind === 'oauth-pick' && (
+        <box border title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
           <select
             focused
             height={Math.min(oauthProviders().length * 2, 16)}
@@ -379,7 +387,8 @@ export const App = () => {
             options={oauthProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
             onSelect={(_i, opt) => {
               const p = oauthProviders().find((x) => x.id === opt?.value);
-              if (p) startSignIn(p);
+              if (!p) return;
+              mode.action === 'signin' ? startSignIn(p) : doSignOut(p);
             }}
           />
         </box>
