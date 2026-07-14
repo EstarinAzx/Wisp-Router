@@ -115,30 +115,18 @@ jobs:
             fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
           " "$VERSION"
 
-      # Platform packages first, thin shell last — an install mid-publish never resolves a
-      # shell whose optionalDependencies don't exist yet. Already-published versions are
-      # skipped so a re-run after a later step failed doesn't die here (publish isn't idempotent).
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # Directory names stay unscoped; the platform packages publish under the user scope
-          # (npm's spam heuristic 403'd the batch of fresh unscoped names) — read each real name.
-          for d in wisp-router-win32-x64 wisp-router-darwin-arm64 wisp-router-darwin-x64 wisp-router-linux-x64 wisp-router; do
-            NAME=$(node -p "require('./packages/tui/npm/$d/package.json').name")
-            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-              echo "$NAME@$VERSION already on npm — skipping"
-            else
-              (cd packages/tui/npm/$d && npm publish --access public)
-            fi
-          done
-
+      # The GitHub release goes FIRST: the npm shim's fallback downloads the binary from it,
+      # so it must exist before the thin shell is installable. Skipped when it already exists
+      # (re-run safety).
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists — skipping"
+            exit 0
+          fi
           mkdir -p release
           cp artifacts/wisp-win32-x64/wisp.exe "release/wisp-v$VERSION-win32-x64.exe"
           cp artifacts/wisp-darwin-arm64/wisp "release/wisp-v$VERSION-darwin-arm64"
@@ -147,3 +135,27 @@ jobs:
           gh release create "$GITHUB_REF_NAME" release/* \
             --title "wisp-router $VERSION" \
             --notes "Wisp TUI + Bridge + claude-wisp launcher. Install: \`npm i -g wisp-router\` — or grab the binary for your platform below (\`claude-wisp\` = \`wisp claude-wisp …\`)."
+
+      # Platform packages are BEST-EFFORT: npm's spam filter has 403'd and post-publish removed
+      # them before — the shim's release-download fallback covers installs either way. The thin
+      # shell itself must land, so it alone hard-fails. Already-published versions are skipped
+      # (publish isn't idempotent).
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for d in wisp-router-win32-x64 wisp-router-darwin-arm64 wisp-router-darwin-x64 wisp-router-linux-x64; do
+            NAME=$(node -p "require('./packages/tui/npm/$d/package.json').name")
+            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+              echo "$NAME@$VERSION already on npm — skipping"
+            else
+              (cd packages/tui/npm/$d && npm publish --access public) \
+                || echo "WARN: $NAME publish failed — the shim falls back to the release download"
+            fi
+          done
+          if npm view "wisp-router@$VERSION" version >/dev/null 2>&1; then
+            echo "wisp-router@$VERSION already on npm — skipping"
+          else
+            (cd packages/tui/npm/wisp-router && npm publish --access public)
+          fi
