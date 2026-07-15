@@ -6,6 +6,10 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-07-15
+
+Grok comes to the extension: sign in with a Grok subscription, no API key.
+
 ### Added
 
 - **Grok (xAI OAuth) provider** — sign in with a Grok subscription (no API key) and reach
