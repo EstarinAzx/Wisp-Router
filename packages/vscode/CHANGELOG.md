@@ -8,6 +8,11 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ### Added
 
+- **Grok (xAI OAuth) provider** — sign in with a Grok subscription (no API key) and reach
+  `grok-build` (default) / `grok-composer-2.5-fast` / `grok-4.5` in native chat, the side
+  panel, Inquire, and both Bridge doors. A Codex-twin on the Responses API; subscription
+  models route the Grok-CLI proxy, `grok-4.5` goes direct to api.x.ai. Not to be confused
+  with the existing **Groq** (Llama, API-key) provider. (#91)
 - **`bridge.aliasOnlyModels`** setting (default off): Claude Code's `/model` list shows
   **only** the Routing-map Aliases — the Provider rows are hidden. A checkbox in the
   panel's Bridge section; the TUI's `/aliasonly` command flips the same flag. Anthropic

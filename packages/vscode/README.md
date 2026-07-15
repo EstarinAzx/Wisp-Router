@@ -63,9 +63,9 @@ Wisp-routed models are **first-class** in the Copilot harness, not a degraded fa
 
 ## Providers
 
-Wisp ships a curated catalog of **12 built-in providers** plus a **Custom** escape hatch. Exactly one provider is the **Active Provider** at a time — it drives [Inquire](#inquire--ai-inline-code-edit) and the default routing — but the chat harness lists **every usable provider** as its own model row. Each provider remembers its own key and its own model.
+Wisp ships a curated catalog of **13 built-in providers** plus a **Custom** escape hatch. Exactly one provider is the **Active Provider** at a time — it drives [Inquire](#inquire--ai-inline-code-edit) and the default routing — but the chat harness lists **every usable provider** as its own model row. Each provider remembers its own key and its own model.
 
-There are three provider **kinds**.
+There are four provider **kinds**.
 
 ### API-key providers
 
@@ -99,6 +99,14 @@ Reach Codex by running **`Wisp: Sign in to Codex`** (OAuth with a ChatGPT accoun
 | **Anthropic** | Claude.ai account (OAuth) | No API key. Runs Claude on **your own Claude.ai subscription** (Max/Pro/Team) via the Messages API. Supports streaming, tool calling, vision, and the full **Effort** ladder (`low` → `max`). |
 
 Reach Claude by running **`Wisp: Sign in to Claude`** (OAuth with a Claude.ai account).
+
+### Grok provider
+
+| Provider | Auth | Notes |
+| --- | --- | --- |
+| **Grok** | xAI account (OAuth) | No API key. Runs Grok on **your own Grok subscription** via the Responses API — `grok-build` (default), `grok-composer-2.5-fast`, `grok-4.5`. Supports streaming, tool calling, and reasoning Effort. **Not** the API-key **Groq** (Llama) row above. |
+
+Reach Grok by running **`Wisp: Sign in to Grok`** (OAuth with an xAI account). An existing Grok CLI login (`~/.grok/auth.json`) is imported on first use.
 
 ### Custom
 
