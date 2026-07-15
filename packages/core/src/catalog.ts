@@ -1066,6 +1066,40 @@ export const xaiModelCaps = (model: string): ModelCaps & { maxOutput: number } =
   return { contextInput: 512_000, maxOutput: 30_000 }; // grok-build (default)
 };
 
+// Grok CLI's expires_at is an absolute deadline — epoch SECONDS in some builds, MS in others. Normalize to
+// ms by magnitude (~1e9 seconds vs ~1e12 ms); a wrong guess only forces one self-healing refresh.
+const grokExpiresAtMs = (raw: unknown): number | undefined =>
+  typeof raw === 'number' && isFinite(raw) ? (raw < 1e12 ? raw * 1000 : raw) : undefined;
+
+// Import an existing Grok CLI login (~/.grok/auth.json) so a CLI user isn't forced to sign in again (D6 —
+// parity with parseCodexAuthJson). The CLI nests the bundle under an "https://auth.x.ai::<client_id>" key
+// ({ key, refresh_token, expires_at }); a flatter legacy shape stores it at the root. `key` is the bearer.
+// Returns undefined when there is no usable bearer (nothing to import) — never throws.
+export const parseGrokAuthJson = (json: unknown): XaiCreds | undefined => {
+  if (!json || typeof json !== 'object') return undefined;
+  const root = json as Record<string, any>;
+  const nestedKey = Object.keys(root).find((k) => k.startsWith('https://auth.x.ai::'));
+  const slot = (nestedKey ? root[nestedKey] : root) as Record<string, any>;
+  if (!slot || typeof slot !== 'object') return undefined;
+  const accessToken = trimmedString(slot.key ?? slot.access_token);
+  const refreshToken = trimmedString(slot.refresh_token);
+  const expiresAt = grokExpiresAtMs(slot.expires_at);
+  if (!accessToken) return undefined;
+  return {
+    accessToken,
+    ...(refreshToken ? { refreshToken } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+  };
+};
+
+// A discovered OIDC endpoint is trusted only when its host is x.ai (or a subdomain) — the leading-dot guard
+// blocks look-alikes (evilx.ai, x.ai.evil.com); anything unparseable is rejected. Both endpoints from the
+// well-known doc pass through this before the bearer is ever sent (D7 security check, slice #93).
+export const isXaiEndpoint = (url: string): boolean => {
+  try { const h = new URL(url).hostname.toLowerCase(); return h === 'x.ai' || h.endsWith('.x.ai'); }
+  catch { return false; }
+};
+
 // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel
 // state and the per-row Routing-map lists (#53). Keyed kinds answer undefined: they have a live
 // /models route instead of a curated list.
