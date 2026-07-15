@@ -784,6 +784,14 @@ export const responsesIncompleteReason = (response: any): string | undefined => 
   return typeof reason === 'string' ? reason : undefined;
 };
 
+// The Messages message_delta stop_reason that means the reply was CUT SHORT — budget spent (max_tokens),
+// blocked (content_filter), or declined (refusal). The Anthropic analogue of responsesIncompleteReason:
+// unlike Codex it rides a live terminal frame, not a payload field. A clean close (end_turn / tool_use /
+// stop_sequence / pause_turn), an unknown string, or undefined all yield undefined — no truncation, no marker.
+// #87 surfaces the returned reason so a cut-short turn is diagnosable instead of relabeled a silent end_turn.
+export const anthropicTruncationReason = (stopReason: string | undefined): string | undefined =>
+  stopReason === 'max_tokens' || stopReason === 'content_filter' || stopReason === 'refusal' ? stopReason : undefined;
+
 // Reassemble streamed Responses function-call events into whole tool calls — the Responses analogue of
 // assembleToolCalls. A call is announced by response.output_item.added (its item carries id/call_id/name and
 // maybe an initial arguments fragment); its arguments then stream as response.function_call_arguments.delta
