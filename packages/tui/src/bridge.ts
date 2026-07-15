@@ -19,7 +19,7 @@ import { randomBytes } from 'crypto';
 import OpenAI from 'openai';
 import {
   PROVIDERS, createBridgeServer, DEFAULT_BRIDGE_PORT, resolveBaseUrl, resolveKeyId,
-  EMPTY_ROUTING_MAP, DEFAULT_EFFORT, type Provider,
+  EMPTY_ROUTING_MAP, DEFAULT_EFFORT, effectiveAliasOnly, type Provider,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth } from './store';
 
@@ -73,7 +73,7 @@ export const createTuiBridge = (log: (message: string) => void) =>
     activeProviderId: () => activeProvider().id,
     routingMap: () => home.readConfig().routing ?? EMPTY_ROUTING_MAP,
     aliasPickerShowsModel: () => home.readConfig().bridge?.aliasPickerShowsModel ?? true,
-    aliasOnlyModels: () => home.readConfig().bridge?.aliasOnlyModels ?? false,
+    aliasOnlyModels: () => effectiveAliasOnly(home.readConfig()),
     port: bridgePort,
     accessSecret: ensureBridgeSecret,
     log,

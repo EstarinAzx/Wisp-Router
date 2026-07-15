@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   parseWispConfig, parseWispAuth, serializeWispStore,
-  planSecretsMigration, seedConfigFromVsCode,
+  planSecretsMigration, seedConfigFromVsCode, effectiveAliasOnly,
   type WispAuth, type WispConfig,
 } from '../src/home';
 
@@ -63,6 +63,26 @@ describe('parseWispConfig', () => {
     const cfg = parseWispConfig(raw);
     expect((cfg as Record<string, unknown>).tuiTheme).toBe('dark');
     expect(parseWispConfig(serializeWispStore(cfg))).toEqual(cfg);
+  });
+});
+
+// ----------------------------- effectiveAliasOnly ----------------------------- //
+
+describe('effectiveAliasOnly', () => {
+  // The shared read-time default (#81): unset means ON — never a migration write. Every consumer
+  // (Bridge list, TUI echo, panel checkbox) reads through this one fn so they can't disagree.
+  test('unset resolves to on', () => {
+    expect(effectiveAliasOnly({})).toBe(true);
+    expect(effectiveAliasOnly({ bridge: {} })).toBe(true);
+  });
+
+  // An explicit stored false is a user choice — the default flip must not override it.
+  test('stored explicit false stays off', () => {
+    expect(effectiveAliasOnly({ bridge: { aliasOnlyModels: false } })).toBe(false);
+  });
+
+  test('stored explicit true stays on', () => {
+    expect(effectiveAliasOnly({ bridge: { aliasOnlyModels: true } })).toBe(true);
   });
 });
 

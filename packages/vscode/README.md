@@ -177,7 +177,7 @@ Available from the Command Palette (and the editor chrome where noted):
 
 Wisp's state lives in the **Wisp home** at `~/.wisp/` and is shared with the Wisp TUI:
 
-- `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`; `bridge.aliasOnlyModels`, default `false` — Claude Code's `/model` list shows only Aliases). Managed by the side panel; hand-editable (the extension picks up external edits live).
+- `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`; `bridge.aliasOnlyModels`, default `true` — Claude Code's `/model` list shows only Aliases; with zero Aliases it falls back to the Provider rows). Managed by the side panel; hand-editable (the extension picks up external edits live).
 - `~/.wisp/auth.json` — API keys and OAuth tokens, owner-only file permissions.
 
 Existing VS Code state (SecretStorage keys, provider/model/routing choices) is migrated into `~/.wisp/` once, on the first launch after upgrading.
