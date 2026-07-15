@@ -10,39 +10,34 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**Planned the Grok (xAI OAuth) provider and filed it as a self-promoting ticket chain — no code shipped.**
-- Ran the `init` funnel: studied `github.com/BlockedPath/pi-xai-oauth` (reference — extract the xAI OAuth
-  flow + payload rules only), locked decisions **D1–D7**, mapped ~60+ touch points.
-- Filed **epic #91** + slices **#92–#98** on `EstarinAzx/Wisp-Router`, dependency-ordered. Every slice
-  carries a "Loop protocol" footer (read blockers' breadcrumbs + committed code first; breadcrumb on
-  finish; promote unblocked dependents to `ready-for-agent`). Recorded in [[decisions]] (2026-07-15 "Grok
-  provider planned"). Target release **2.0.5**.
+**Built + live-verified the whole Grok (xAI OAuth) provider — epic #91, slices #92–#97 merged to `main`.**
+- `/loop /preset ticket-loop` (self-paced) walked the self-promoting chain #92→#97 in one session — PRs
+  #99–#104, all squash-merged. Tests **387 → 431**; vscode + webview + TUI `tsc` clean throughout.
+- **Live-verified** through `claude-wisp`: **grok-4.5** (public api.x.ai) AND **grok-build** (subscription
+  proxy + `x-grok-*` headers) both stream real replies → the best-effort header values
+  (`grok-cli`/`1.0.0`) are **confirmed working**. Recorded in
+  [[decisions]] (2026-07-15 "Grok … SHIPPED + live-verified").
 
 ## Next task
-**Run the Grok provider loop — self-paced, no fixed interval:**
+**Finish the release — `wisp-router 2.0.5`. Human-gated (irreversible npm publish); the prep is done.**
+
+Prep is in **PR #105** (branch `ticket/98-release-2.0.5`): version → 2.0.5, CHANGELOG, README 13 built-ins.
 
 ```
-/loop /preset ticket-loop
+1. Merge PR #105  →  git tag v2.0.5 && git push --tags
+2. gh run list --workflow release.yml   → wait for the v2.0.5 run to go GREEN
+3. npm view wisp-router version         → expect 2.0.5
+4. Close epic #91 (+ issue #98) on green.
 ```
-
-- Epic **#91**; **#92** (catalog foundation) is the only `ready-for-agent` ticket — the trunk. No code
-  dependencies: pure `catalog.ts` + `home.ts` + a new `xai.test.ts`.
-- The chain **self-promotes**: closing #92 labels #93 + #94 ready-for-agent, on down to #98 (release). One
-  loop walks the whole tree.
-- 7 tickets is long → wrap in `/relay N=6 /preset ticket-loop` for fresh sessions (relay = session
-  hygiene, not pacing). Do **not** set a fixed wall-clock interval — see [[prefers-dynamic-loop-pacing]];
-  ticket work advances on leg-finish, not a timer.
 
 ## Landmines
-- **Grok ≠ Groq.** New provider is `id:'xai'` (Grok, xAI, OAuth). Do NOT touch the existing `id:'groq'`
-  row (Llama, API-key).
-- The client is a **Codex-twin** (Responses API + `x-grok-*` headers + subscription proxy), NOT the plain
-  OpenAI-chat path — reference #94 against `codexClient.ts`.
-- xAI public constants (client id, scope, endpoints, model caps) live in the **epic #91 body** — copy from
-  there, don't re-derive.
-- **Deferred (carried, not blocking the loop):** 2.0.4 live-terminal checks — #87 residual live-confirm +
-  eyeball the fixed `/bridge` screen (see [[active-work]]); npm token rotation (`NPM_TOKEN`); Codex signed
-  out (`/signin codex` before Codex checks).
+- **npm publish is irreversible** — a burned `2.0.5` can never be republished. That's why the tag was left
+  for a human; the live checks are already done, so it's safe to proceed.
+- If the run/publish fails, **registry-probe before blaming CI**:
+  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`.
+- **Rotate `NPM_TOKEN`** (repo secret) if it hasn't been.
+- **Grok ≠ Groq** — Grok is `id:'xai'`; leave the `id:'groq'` row alone.
+- (carried) grok-4.5 works on the public lane, but its **billing** (SuperGrok vs metered) is unverified.
 
 ## Related
 - [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[stack]]
