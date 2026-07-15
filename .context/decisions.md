@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-15-catalog-ts-modularization-plan-deferred]] — catalog.ts modularization (DEFERRED): seam map (9-file end-state), 4-file peel first, shared-kernel rule, green-to-green
 - [[2026-07-15-grok-xai-oauth-provider-shipped-live-verified]] — Grok (xAI OAuth) provider SHIPPED + live-verified: #92–#97 merged, #98 release-prep in PR #105; proxy `x-grok-*` headers confirmed
 - [[2026-07-15-grok-xai-oauth-provider-planned-epic-91]] — Grok (xAI OAuth) provider planned: 4th kind `xai-oauth`, epic #91 / slices #92–#98, target 2.0.5
 - [[2026-07-15-87-88-fix-landed-anthropicstream-guards-content-less-turns-streaming]] — #87/#88 fix landed: anthropicStream guards content-less turns; streaming max_tokens = model ceiling

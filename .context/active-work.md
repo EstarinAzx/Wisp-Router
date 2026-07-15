@@ -35,6 +35,9 @@ Ready queue empty; no committed next task. Pick from the carried backlog (top ca
 1. **VS Code extension 1.7.0** — ship the Grok face to extension users. CHANGELOG `[Unreleased]` already holds the Grok entry; extension is still v1.6.0. Separate release path from the npm `wisp-router` TUI.
 2. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
 3. **Panel-side alias rename** — TUI-only follow-up.
+4. **catalog.ts modularization** (DEFERRED, owner will init) — split the ~1,300-line pure core into
+   per-concern files, barrel absorbs it. Approach decided: see
+   [[2026-07-15-catalog-ts-modularization-plan-deferred]] (4-file peel first, shared-kernel rule, green-to-green).
 
 ## Landmines
 - **Release rebase trap (bit us this release):** `/preset wrap-up` commits the `.context/` handoff locally but does **not** push it. Next session that context commit diverges from the PR's squash-merge on origin — **rebase local `main` onto `origin/main` and tag the release-prep commit** (the one with the bumped `packages/tui/package.json`), not the context commit. `release.yml` guards tag==version, so a wrong tag fails loud, but reconcile first.
