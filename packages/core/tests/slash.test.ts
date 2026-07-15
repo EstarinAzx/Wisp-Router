@@ -102,6 +102,12 @@ describe('SLASH_COMMANDS — the real palette', () => {
     expect(SLASH_COMMANDS.find((c) => c.name === 'modelids')?.args).toBe('[on|off]');
   });
 
+  // #96: /signin + /signout name the third OAuth door (Grok) alongside codex/anthropic.
+  it('lists xai in the /signin and /signout arg hints (#96)', () => {
+    expect(SLASH_COMMANDS.find((c) => c.name === 'signin')?.args).toBe('[codex|anthropic|xai]');
+    expect(SLASH_COMMANDS.find((c) => c.name === 'signout')?.args).toBe('[codex|anthropic|xai]');
+  });
+
   it('parses and suggests the #82 commands like their siblings', () => {
     expect(parseSlash('/modelids on')).toEqual({ command: 'modelids', args: ['on'] });
     expect(parseSlash('/help')).toEqual({ command: 'help', args: [] });
