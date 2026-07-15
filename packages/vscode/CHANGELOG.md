@@ -6,6 +6,15 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude Code `/model <alias>` no longer crashes validating a Wisp model.** The Bridge's
+  Anthropic door ignored `stream: false` and always replied with an SSE stream; Claude Code's
+  model-validation probe is a non-streaming request whose JSON body it reads `usage.input_tokens`
+  from — so it failed with `undefined is not an object (evaluating 'B.usage.input_tokens')`. The
+  door now honors `stream: false` with a proper JSON Messages reply (carrying a `usage` block), so
+  `/model` selection — and assigning a Wisp alias to a subagent — works.
+
 ## [1.7.0] — 2026-07-15
 
 Grok comes to the extension: sign in with a Grok subscription, no API key.

@@ -38,7 +38,7 @@ import {
   type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
 import {
-  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, anthropicErrorFrame,
+  parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
   type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
 import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
@@ -553,6 +553,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     try {
       const result = await startProviderStream(parsed, provider, route.pinnedModel, controller);
       if (!result.ok) return sendError(res, result.status, result.message);
+
+      // Non-streaming request (notably Claude Code's /model validation probe): buffer the provider stream
+      // into one JSON Messages object with a usage block. The door used to always stream — handing an SSE
+      // body to a client that parses usage.input_tokens is what crashed /model. A mid-stream error falls to
+      // the catch below with the head not yet sent, so a clean JSON error goes out, not a torn stream.
+      if (!parsed.stream) {
+        const events: BridgeStreamEvent[] = [];
+        for await (const ev of result.events) events.push(ev);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(buildAnthropicMessageResponse(events, meta)));
+        return;
+      }
 
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       const enc = createAnthropicSseEncoder(meta);

@@ -241,6 +241,54 @@ export const buildAnthropicSse = (events: BridgeStreamEvent[], meta: AnthropicSs
   return out + enc.finish();
 };
 
+// ----------------------------- Outbound: Wisp stream -> non-streaming Messages reply ----------------------------- //
+
+// One block of a non-streaming reply: assembled text, or a completed tool_use whose args are parsed back to
+// an object (the streaming path streams args as a raw partial_json string; the buffered object wants input).
+type AntReplyBlock = AntTextBlock | { type: 'tool_use'; id: string; name: string; input: unknown };
+
+// The non-streaming /v1/messages reply — the JSON Messages object Claude Code parses when it did NOT ask to
+// stream. Its `/model` validation probe is exactly this: a stream:false request whose body it reads
+// usage.input_tokens off — so a missing usage (or an SSE stream in its place) crashes model selection.
+export type AnthropicMessageResponse = {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  model: string;
+  content: AntReplyBlock[];
+  stop_reason: 'end_turn' | 'tool_use';
+  stop_sequence: null;
+  usage: { input_tokens: number; output_tokens: number };
+};
+
+// Reduce a whole ordered Wisp stream to one non-streaming Messages object — the buffered counterpart of
+// buildAnthropicSse. Consecutive text events merge into one text block (Anthropic groups them); each tool
+// call is its own tool_use block with argsJson parsed to an object (bad/partial JSON → {}). stop_reason is
+// tool_use when any tool ran, else end_turn — mirroring the encoder's finish().
+export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta: AnthropicSseMeta): AnthropicMessageResponse => {
+  const content: AntReplyBlock[] = [];
+  let sawTool = false;
+  for (const ev of events) {
+    if (ev.type === 'text') {
+      const last = content[content.length - 1];
+      if (last && last.type === 'text') last.text += ev.text;
+      else content.push({ type: 'text', text: ev.text });
+    } else {
+      sawTool = true;
+      let input: unknown = {};
+      try { input = ev.call.argsJson ? JSON.parse(ev.call.argsJson) : {}; } catch { input = {}; }
+      content.push({ type: 'tool_use', id: ev.call.id, name: ev.call.name, input });
+    }
+  }
+  return {
+    id: meta.id, type: 'message', role: 'assistant', model: meta.model,
+    content, stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null,
+    // Wisp doesn't meter tokens — zeroed, same as the streaming frames report. The field must exist and be
+    // numeric: Claude Code's /model validation reads usage.input_tokens, and a missing usage is the crash.
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+};
+
 // An Anthropic `error` SSE frame. When a backend fails AFTER the SSE head is out there is no HTTP status left
 // to set, so the door writes this instead of silently truncating the stream — Claude Code then surfaces the
 // real message rather than reporting an "empty or malformed" response.

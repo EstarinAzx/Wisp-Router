@@ -110,4 +110,21 @@ describe('Bridge — Grok dispatch (#95)', () => {
       expect(status).toBe(401);
     });
   });
+
+  // Non-streaming /v1/messages — Claude Code's `/model` validation probe. Must be a JSON Messages object
+  // carrying a usage block, NOT an SSE stream: reading usage.input_tokens off an event-stream body is what
+  // crashed /model with "undefined is not an object (evaluating 'B.usage.input_tokens')".
+  it('answers a non-streaming /v1/messages with a JSON Messages object carrying usage.input_tokens', async () => {
+    vi.stubGlobal('fetch', async () => grokSse());
+    await runServer(makeDeps({}), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'xai', max_tokens: 100, stream: false, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).not.toContain('event:'); // a JSON body, never an SSE stream
+      const parsed = JSON.parse(body);
+      expect(parsed.type).toBe('message');
+      expect(typeof parsed.usage.input_tokens).toBe('number');
+      expect(parsed.content).toEqual([{ type: 'text', text: 'Hello from Grok' }]);
+      expect(parsed.stop_reason).toBe('end_turn');
+    });
+  });
 });

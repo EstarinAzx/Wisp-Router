@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseAnthropicMessagesRequest,
   buildAnthropicSse,
+  buildAnthropicMessageResponse,
   buildAnthropicModelsList,
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
@@ -28,6 +29,33 @@ const frames = (sse: string) =>
     const [evLine, dataLine] = block.split('\n');
     return { event: evLine.replace('event: ', ''), data: JSON.parse(dataLine.replace('data: ', '')) };
   });
+
+// The non-streaming Messages reply: the reducer that fixes Claude Code's `/model` validation crash
+// (`undefined is not an object (evaluating 'B.usage.input_tokens')`) — a request with stream:false must
+// get a single JSON Messages object carrying a usage block, not the SSE stream.
+describe('buildAnthropicMessageResponse', () => {
+  // Consecutive text events collapse into one text block, and the reply carries a usage block (the field
+  // Claude Code's validation probe reads).
+  it('reduces text events to one text block with a numeric usage block', () => {
+    const events: BridgeStreamEvent[] = [{ type: 'text', text: 'Hello' }, { type: 'text', text: ' world' }];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.type).toBe('message');
+    expect(res.role).toBe('assistant');
+    expect(res.model).toBe(meta.model);
+    expect(res.content).toEqual([{ type: 'text', text: 'Hello world' }]);
+    expect(res.stop_reason).toBe('end_turn');
+    expect(typeof res.usage.input_tokens).toBe('number');
+    expect(typeof res.usage.output_tokens).toBe('number');
+  });
+
+  // A tool call becomes a tool_use block with its args parsed back to an object, and flips stop_reason.
+  it('emits a tool_use block with parsed input and a tool_use stop_reason', () => {
+    const events: BridgeStreamEvent[] = [{ type: 'tool_call', call: { id: 'toolu_1', name: 'read', argsJson: '{"path":"a.ts"}' } }];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([{ type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } }]);
+    expect(res.stop_reason).toBe('tool_use');
+  });
+});
 
 describe('parseAnthropicMessagesRequest', () => {
   // The inverse of buildAnthropicMessagesBody: a plain user string becomes one user NormalizedTurn.
