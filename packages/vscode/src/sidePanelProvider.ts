@@ -70,6 +70,8 @@ export type PanelHost = {
   codexSignOut: () => Promise<void>;
   anthropicSignIn: () => Promise<void>;
   anthropicSignOut: () => Promise<void>;
+  xaiSignIn: () => Promise<void>;
+  xaiSignOut: () => Promise<void>;
   setEffort: (effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') => Promise<void>;
   setFamilyRoute: (family: FamilyKey, target: Target | undefined) => Promise<void>; // set/clear one Routing map Family row (#51)
   setAlias: (name: string, target: Target) => Promise<void>; // add/retarget one Routing map Alias row (#52)
@@ -183,6 +185,12 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'anthropicSignOut':
           await this.host.anthropicSignOut();
+          return;
+        case 'xaiSignIn':
+          await this.host.xaiSignIn();
+          return;
+        case 'xaiSignOut':
+          await this.host.xaiSignOut();
           return;
         case 'selectEffort':
           // Constrain to the valid depths so a malformed message can't write a junk value ('max' added #32).

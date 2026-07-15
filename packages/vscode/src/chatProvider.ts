@@ -29,10 +29,12 @@ import {
   Provider, resolveModel, resolveBaseUrl, buildChatModelInfos, lookupModelsDevCaps,
   buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools, toCodexResponsesTools, isCodexProvider, codexModelCaps,
   isAnthropicProvider, anthropicModelCaps, toAnthropicTools, standardEffortToCodex,
-  type NormalizedTurn, type ToolCallDelta, type CodexCreds, type EffortLevel, type AnthropicCreds,
+  isXaiProvider, xaiModelCaps,
+  type NormalizedTurn, type ToolCallDelta, type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { codexStream } from '@wisp/core';
 import { anthropicStream } from '@wisp/core';
+import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 
 // ----------------------------- Dependencies ----------------------------- //
@@ -54,6 +56,10 @@ export type ChatProviderDeps = {
   // the row, current() returns the refreshed OAuth bundle for the streaming Messages call.
   anthropicSignedIn: () => Promise<boolean>;
   anthropicCreds: () => Promise<AnthropicCreds | undefined>;
+  // Grok (xAI) is the same "usable when signed in" shape — signed-in flag gates the row, current() returns
+  // the refreshed OAuth bundle for the streaming Responses call.
+  xaiSignedIn: () => Promise<boolean>;
+  xaiCreds: () => Promise<XaiCreds | undefined>;
   log: (message: string) => void;
 };
 
@@ -113,7 +119,8 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       deps.providers.map(async (p) => [p.id,
         isCodexProvider(p) ? await deps.codexSignedIn()
           : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
-            : !!(await deps.keyFor(p))] as const),
+            : isXaiProvider(p) ? await deps.xaiSignedIn()
+              : !!(await deps.keyFor(p))] as const),
     );
     const keyed = Object.fromEntries(keyedPairs);
     // Pull the real context/output/vision from models.dev. Race a timeout so a cold/slow fetch never
@@ -129,7 +136,8 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     const caps = (provider: Provider, model: string) =>
       isCodexProvider(provider) ? (lookupModelsDevCaps(catalog, 'openai', model) ?? codexModelCaps(model))
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
-          : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
+          : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
+            : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers, {
       keyed,
       modelMap: deps.modelMap(),
@@ -190,6 +198,30 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'any' : 'auto';
       try {
         for await (const ev of anthropicStream({ creds, baseUrl, model: modelId, messages: toAnthropicMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
+          if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
+          // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
+          let input: object = {};
+          try { input = ev.call.argsJson ? JSON.parse(ev.call.argsJson) : {}; } catch { /* keep {} */ }
+          progress.report(new vscode.LanguageModelToolCallPart(ev.call.id, ev.call.name, input));
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return; // user cancelled — normal, not a failure
+        deps.log(`[error] chat ${provider.id} ${String(err)}`);
+        throw err;
+      }
+      return;
+    }
+
+    // Grok (xAI) is a Codex twin on the Responses wire — stream it through xaiStream, reusing the Codex
+    // message shape + Responses tools. effort stays the shared EffortLevel (xaiReasoning gates per model).
+    if (isXaiProvider(provider)) {
+      const creds = await deps.xaiCreds();
+      if (!creds) return; // only signed-in Grok is advertised — rare sign-out race
+      const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+      const tools = toCodexResponsesTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
+      const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
+      try {
+        for await (const ev of xaiStream({ creds, baseUrl, model: modelId, messages: toCodexMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
           let input: object = {};

@@ -27,17 +27,18 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
-  type CodexCreds, type EffortLevel, type AnthropicCreds,
+  isAnthropicProvider, isAnthropicSignedIn, isXaiProvider, isXaiSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
-import { CodexAuth, AnthropicAuth } from '@wisp/core';
+import { CodexAuth, AnthropicAuth, XaiAuth } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
 import { anthropicInquire } from '@wisp/core';
+import { xaiRequest } from '@wisp/core';
 import { WispHome, planSecretsMigration, seedConfigFromVsCode, effectiveAliasOnly } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
@@ -89,6 +90,9 @@ let codexAuth: CodexAuth;
 
 // Anthropic (Claude.ai) OAuth/token lifecycle — same role as codexAuth for the kind:'anthropic-oauth' row.
 let anthropicAuth: AnthropicAuth;
+
+// Grok (xAI) OAuth/token lifecycle — same role for the kind:'xai-oauth' row.
+let xaiAuth: XaiAuth;
 
 // The Bridge listener handle — created in activate, started/stopped by the command AND the panel switch. OFF
 // until toggled on (PRD: no local port open until the user deliberately enables it).
@@ -348,11 +352,12 @@ const getState = async (): Promise<PanelState> => {
   // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
   const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
     : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
+    : isXaiProvider(p) ? await xaiAuth.isSignedIn()
     : false;
   // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
   // pattern as chatProvider) so a cold/slow models.dev can never stall panel open; undefined → curated
   // fallback inside the *ModelsFrom pures. Skipped entirely for the API-key kinds (live /models instead).
-  const catalog = isCodexProvider(p) || isAnthropicProvider(p)
+  const catalog = isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p)
     ? await Promise.race([
         getModelsDevCatalog(),
         new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
@@ -373,10 +378,10 @@ const getState = async (): Promise<PanelState> => {
     modelOptions: oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
-    effort: isCodexProvider(p) || isAnthropicProvider(p) ? activeEffort() : undefined,
+    effort: isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,
     // The option list backing that select — Anthropic shows the full low→max ladder (the wire clamps per
-    // model), Codex stops at xhigh; mirrors the first-party /effort slider (#32).
-    effortOptions: isCodexProvider(p) || isAnthropicProvider(p) ? effortOptionsFor(p) : undefined,
+    // model), Codex + Grok stop at xhigh; mirrors the first-party /effort slider (#32).
+    effortOptions: isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) ? effortOptionsFor(p) : undefined,
     // Bridge surface: the running/stopped indicator + the address/secret the user copies into the CLI. The
     // secret crosses the boundary only while running (it's the Bridge's own localhost secret, meant to be
     // copied — not a Provider key); '' in memory while stopped, so it stays hidden then.
@@ -637,6 +642,25 @@ const anthropicSignOut = async (): Promise<void> => {
   void panel?.postState();
 };
 
+// Grok sign-in: run the xAI OAuth flow, store the tokens, refresh the panel.
+const xaiSignIn = async (): Promise<void> => {
+  try {
+    await xaiAuth.signIn();
+    vscode.window.showInformationMessage('Wisp: signed in to Grok.');
+    void panel?.postState();
+  } catch (err) {
+    output.appendLine(`[error] xai sign-in ${String(err)}`);
+    vscode.window.showErrorMessage(`Wisp: Grok sign-in failed — ${String(err)}`);
+  }
+};
+
+// Grok sign-out: clear the stored token bundle and refresh the panel.
+const xaiSignOut = async (): Promise<void> => {
+  await xaiAuth.signOut();
+  vscode.window.showInformationMessage('Wisp: signed out of Grok.');
+  void panel?.postState();
+};
+
 // The Bridge's localhost address (no path) — shown in the panel and the base for the injected BASE_URL.
 const bridgeAddress = (): string => `http://127.0.0.1:${bridgePort()}`;
 
@@ -766,8 +790,10 @@ const inquire = async (): Promise<void> => {
   const provider = activeProvider();
   const codex = isCodexProvider(provider);
   const anthropic = isAnthropicProvider(provider);
+  const xai = isXaiProvider(provider);
   let creds: CodexCreds | undefined;
   let anthropicCreds: AnthropicCreds | undefined;
+  let xaiCreds: XaiCreds | undefined;
   if (codex) {
     creds = await codexAuth.current();
     if (!isCodexSignedIn(creds)) {
@@ -780,12 +806,18 @@ const inquire = async (): Promise<void> => {
       vscode.window.showWarningMessage("Sign in to Claude first (command: 'Wisp: Sign in to Claude').");
       return;
     }
+  } else if (xai) {
+    xaiCreds = await xaiAuth.current();
+    if (!isXaiSignedIn(xaiCreds)) {
+      vscode.window.showWarningMessage("Sign in to Grok first (command: 'Wisp: Sign in to Grok').");
+      return;
+    }
   } else if (!(await resolveApiKey())) {
     vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
     return;
   }
-  const client = codex || anthropic ? undefined : await getClient();
-  if (!codex && !anthropic && !client) return;
+  const client = codex || anthropic || xai ? undefined : await getClient();
+  if (!codex && !anthropic && !xai && !client) return;
 
   const model = activeModel();
   const original = document.getText();
@@ -807,6 +839,9 @@ const inquire = async (): Promise<void> => {
           reply = await codexInquire({ creds: creds!, baseUrl: activeBaseUrl(), model, messages, effort: standardEffortToCodex(activeEffort()), signal: controller.signal });
         } else if (anthropic) {
           reply = await anthropicInquire({ creds: anthropicCreds!, baseUrl: activeBaseUrl(), model, messages, effort: activeEffort(), signal: controller.signal });
+        } else if (xai) {
+          // Grok's non-stream Inquire reply (xaiRequest, the Responses client). effort stays the shared level.
+          reply = await xaiRequest({ creds: xaiCreds!, baseUrl: activeBaseUrl(), model, messages, effort: activeEffort(), signal: controller.signal });
         } else {
           const maxTokens = cfg().get<number>('maxTokens') ?? 0;
           const res = await client!.chat.completions.create(
@@ -895,6 +930,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
   anthropicAuth = new AnthropicAuth(
     { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
+  // Grok (xAI) token lifecycle — same injection as Codex/Anthropic.
+  xaiAuth = new XaiAuth(
+    { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
+    (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
   // Go key in the zen slot — then the whole result moves into ~/.wisp (#59). A migration failure must
@@ -935,6 +974,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     codexSignOut,
     anthropicSignIn,
     anthropicSignOut,
+    xaiSignIn,
+    xaiSignOut,
     setEffort,
     setFamilyRoute, // Routing map Family rows (#51) — set/clear one row
     setAlias, // Routing map Alias rows (#52) — add/retarget one
@@ -963,6 +1004,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // refreshed OAuth bundle for the Messages stream.
     anthropicSignedIn: () => anthropicAuth.isSignedIn(),
     anthropicCreds: () => anthropicAuth.current(),
+    // Grok over the Bridge (#95): signed-in flag gates its /v1/models row, current() returns the refreshed
+    // OAuth bundle for the Responses stream.
+    xaiSignedIn: () => xaiAuth.isSignedIn(),
+    xaiCreds: () => xaiAuth.current(),
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
@@ -986,6 +1031,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     vscode.commands.registerCommand('wisp.codexSignOut', codexSignOut),
     vscode.commands.registerCommand('wisp.anthropicSignIn', anthropicSignIn),
     vscode.commands.registerCommand('wisp.anthropicSignOut', anthropicSignOut),
+    vscode.commands.registerCommand('wisp.xaiSignIn', xaiSignIn),
+    vscode.commands.registerCommand('wisp.xaiSignOut', xaiSignOut),
     // Internal — invoked by the inline-diff CodeLenses, not contributed to the palette.
     vscode.commands.registerCommand('wisp.acceptEdit', () => resolvePreview(true)),
     vscode.commands.registerCommand('wisp.rejectEdit', () => resolvePreview(false)),
@@ -1012,6 +1059,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
       // refreshed OAuth bundle for the streaming Messages call.
       anthropicSignedIn: () => anthropicAuth.isSignedIn(),
       anthropicCreds: () => anthropicAuth.current(),
+      // Grok chat surface: same shape — signed-in flag gates the row, current() returns the refreshed OAuth
+      // bundle for the streaming Responses call.
+      xaiSignedIn: () => xaiAuth.isSignedIn(),
+      xaiCreds: () => xaiAuth.current(),
       log: (m) => output.appendLine(m),
     }),
     // Single sync point for store changes made OUTSIDE this window's own helpers — another VS Code
