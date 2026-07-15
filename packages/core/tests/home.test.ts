@@ -100,6 +100,7 @@ describe('parseWispAuth', () => {
       keys: { groq: 'gk-123', 'opencode-go': 'oc-456' },
       codex: { accessToken: 'at', refreshToken: 'rt', accountId: 'acc' },
       anthropic: { accessToken: 'at2', refreshToken: 'rt2', expiresAt: 1234 },
+      xai: { accessToken: 'at3', refreshToken: 'rt3', expiresAt: 5678, tokenEndpoint: 'https://auth.x.ai/token' },
       bridgeSecret: 'sec',
     };
     expect(parseWispAuth(serializeWispStore(auth))).toEqual(auth);
@@ -123,6 +124,14 @@ describe('parseWispAuth', () => {
       codex: { refreshToken: 'rt', accountId: 'acc' },
       anthropic: { accessToken: 'at' },
     });
+  });
+
+  test('the xai slot sanitizes like its twins — string bearer/endpoint, numeric expiry, tombstone kept (#92)', () => {
+    // A number in a Bearer field or a string in the expiry compare must be dropped; the endpoint stays a string.
+    const raw = JSON.stringify({ xai: { accessToken: 'at', refreshToken: 42, expiresAt: 'later', tokenEndpoint: 'https://auth.x.ai/token' } });
+    expect(parseWispAuth(raw)).toEqual({ xai: { accessToken: 'at', tokenEndpoint: 'https://auth.x.ai/token' } });
+    // The `{}` sign-out tombstone survives (suppresses the ~/.grok/auth.json re-import), like codex/anthropic.
+    expect(parseWispAuth(JSON.stringify({ xai: {} }))).toEqual({ xai: {} });
   });
 });
 

@@ -2,13 +2,13 @@
 
 /*
  * Depends on:
- *   - ./catalog: CodexCreds/AnthropicCreds/EffortLevel shapes stored in the two files.
+ *   - ./catalog: CodexCreds/AnthropicCreds/XaiCreds/EffortLevel shapes stored in the two files.
  *   - ./routing: the RoutingMap shape stored in config.json.
  *
  * Data shapes:
  *   - WispConfig: parsed ~/.wisp/config.json — Active Provider id, per-Provider model memory,
  *     Effort, Routing map, Custom base URL, Bridge settings. All fields optional; absent = default.
- *   - WispAuth: parsed ~/.wisp/auth.json — per-Provider API keys, the Codex + Anthropic OAuth
+ *   - WispAuth: parsed ~/.wisp/auth.json — per-Provider API keys, the Codex + Anthropic + Grok OAuth
  *     bundles, the Bridge access secret. Owner-only file (ADR-0002).
  *
  * Everything here is pure (no fs) — the I/O layer is homeStore.ts. Parsers are lenient: corrupt
@@ -16,7 +16,7 @@
  * keys are preserved so a TUI-era field survives an extension read-modify-write.
  */
 
-import type { AnthropicCreds, CodexCreds, EffortLevel } from './catalog';
+import type { AnthropicCreds, CodexCreds, XaiCreds, EffortLevel } from './catalog';
 import type { RoutingMap } from './routing';
 
 // ----------------------------- Types ----------------------------- //
@@ -36,6 +36,7 @@ export type WispAuth = {
   keys?: Record<string, string>;
   codex?: CodexCreds;
   anthropic?: AnthropicCreds;
+  xai?: XaiCreds;
   bridgeSecret?: string;
 };
 
@@ -77,6 +78,7 @@ const sanitizeCreds = (v: unknown, fields: Record<string, 'string' | 'number'>):
 
 const CODEX_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', idToken: 'string', accountId: 'string', apiKey: 'string' } as const;
 const ANTHROPIC_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number' } as const;
+const XAI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', tokenEndpoint: 'string' } as const;
 
 // ----------------------------- parseWispConfig ----------------------------- //
 
@@ -130,6 +132,10 @@ export const parseWispAuth = (raw: string | undefined | null): WispAuth => {
   if ('anthropic' in auth) {
     const anthropic = sanitizeCreds(auth.anthropic, ANTHROPIC_CRED_FIELDS);
     if (anthropic) auth.anthropic = anthropic; else delete auth.anthropic;
+  }
+  if ('xai' in auth) {
+    const xai = sanitizeCreds(auth.xai, XAI_CRED_FIELDS);
+    if (xai) auth.xai = xai; else delete auth.xai;
   }
   if ('bridgeSecret' in auth && typeof auth.bridgeSecret !== 'string') delete auth.bridgeSecret;
   return auth as WispAuth;

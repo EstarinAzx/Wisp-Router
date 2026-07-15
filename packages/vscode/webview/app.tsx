@@ -32,7 +32,7 @@ type State = {
   providerId?: string;
   providers: { id: string; label: string }[];
   isCustom: boolean;
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth';
   signedIn?: boolean;
   modelOptions?: string[];
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';

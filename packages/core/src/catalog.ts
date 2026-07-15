@@ -32,7 +32,7 @@ export type Provider = {
   // subscription-backed Codex Responses backend, reached by ChatGPT OAuth), or 'anthropic-oauth' (the
   // subscription-backed Claude Messages backend, reached by Claude.ai OAuth). Absent == 'openai-chat',
   // so the ten existing rows need no edit; the Inquire/key/usability paths branch on it.
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth';
   // Note: context/vision carry no per-row hints — both come from the ACTIVE model via models.dev
   // (catalogKey), else context = neutral default and vision = the modelSupportsVision heuristic.
 };
@@ -83,6 +83,13 @@ export const PROVIDERS: Provider[] = [
   // /v1/messages); defaultModel is the latest Opus. No catalogKey (not in models.dev) and absent from the
   // native chat picker until the Messages adapter lands (slice #29) — keyless rows are hidden there.
   { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-4-8', apiKeyEnv: '', kind: 'anthropic-oauth' },
+  // Grok = the subscription-backed xAI backend (Responses API, reached by xAI OAuth, not an API key) — a
+  // Codex-twin. kind:'xai-oauth' switches the Inquire/usability paths off the OpenAI-chat code, like
+  // Codex/Anthropic. No apiKeyEnv — "usable when signed in". ⚠️ NOT the existing Groq row (Llama, API-key):
+  // distinct id 'xai'. Base URL is the subscription proxy — the default grok-build routes there; grok-4.5
+  // overrides to api.x.ai in the client (slice #94). No catalogKey; keyless rows stay hidden from the chat
+  // picker until the Responses adapter lands.
+  { id: 'xai', label: 'Grok', baseUrl: 'https://cli-chat-proxy.grok.com/v1', defaultModel: 'grok-build', apiKeyEnv: '', kind: 'xai-oauth' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },
@@ -985,11 +992,88 @@ export const anthropicModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
   return ids.length ? sortByReleaseDesc(models, ids) : ANTHROPIC_MODELS;
 };
 
+// ----------------------------- Grok (xAI OAuth) Provider (pure cores) ----------------------------- //
+
+// Grok's credential bundle — a Codex-twin reached by xAI OAuth (no API key). Like Anthropic the token
+// carries no JWT exp (xAI returns expires_in), so the deadline is computed at exchange time and stored as an
+// absolute epoch-ms expiresAt. tokenEndpoint caches the once-discovered OIDC token endpoint (D7) so a
+// refresh needn't re-run discovery. The impure xaiAuth.ts (slice #93) owns the OAuth/IO; this module only
+// reasons about an already-parsed blob.
+export type XaiCreds = {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;     // epoch ms; absent when the token response carried no expires_in
+  tokenEndpoint?: string; // discovered OIDC token endpoint, cached across refreshes (D7)
+};
+
+// Whether a catalog row is the Grok backend. Absent kind == 'openai-chat', so this is false for the
+// OpenAI-compatible rows — including the API-key Groq row Grok must never be confused with — and Codex/Anthropic.
+export const isXaiProvider = (provider: Provider): boolean => provider.kind === 'xai-oauth';
+
+// Grok is "usable when signed in" — no API key, so usability is the presence of a bearer access token. The
+// `{}` sign-out tombstone and a refresh-only blob both read as signed-out.
+export const isXaiSignedIn = (creds: XaiCreds | undefined): boolean =>
+  !!creds && !!creds.accessToken;
+
+// Turn an xAI OAuth token response into XaiCreds. expires_in (seconds, relative) becomes an absolute
+// expiresAt against the injected clock — `now` is a parameter so this stays pure and testable.
+export const tokensToXaiCreds = (
+  payload: { access_token?: string; refresh_token?: string; expires_in?: number },
+  now: number,
+): XaiCreds => ({
+  ...(payload.access_token ? { accessToken: payload.access_token } : {}),
+  ...(payload.refresh_token ? { refreshToken: payload.refresh_token } : {}),
+  ...(typeof payload.expires_in === 'number' ? { expiresAt: now + payload.expires_in * 1000 } : {}),
+});
+
+// Refresh the access token 2 minutes BEFORE it expires (xAI's skew — tighter than Anthropic's 5min), so an
+// in-flight request can't have it die under it. No expiresAt → false: can't prove staleness, so don't force
+// a refresh that might block a working token. The skew lives HERE at the check (the twin pattern), not baked
+// into expiresAt — so it is applied exactly once.
+const XAI_TOKEN_REFRESH_SKEW_MS = 2 * 60_000;
+export const shouldRefreshXaiToken = (creds: { expiresAt?: number }, now: number): boolean =>
+  creds.expiresAt !== undefined && creds.expiresAt <= now + XAI_TOKEN_REFRESH_SKEW_MS;
+
+// Parse a stored auth.json slice into XaiCreds. An absent/empty/corrupt slot reads as undefined rather than
+// throwing; the `{}` tombstone parses to an empty object (isXaiSignedIn then reads signed-out).
+export const parseXaiCreds = (raw: string | undefined): XaiCreds | undefined => {
+  if (!raw) return undefined;
+  try { return JSON.parse(raw) as XaiCreds; } catch { return undefined; }
+};
+
+// Curated Grok model ids — the OFFLINE FALLBACK for xaiModelsFrom and the OAuth-only lineup. The xai row's
+// defaultModel (grok-build) must stay a member.
+export const XAI_MODELS: string[] = ['grok-build', 'grok-composer-2.5-fast', 'grok-4.5'];
+
+// Live Grok dropdown ids from models.dev — undated aliases only (dated -YYYYMMDD snapshots duplicate them).
+// No family whitelist: a brand-new Grok id must appear, never be filtered out. Catalog absent/filter-empty →
+// curated fallback.
+export const xaiModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
+  const models = catalog?.xai?.models;
+  if (!models) return XAI_MODELS;
+  const ids = Object.keys(models).filter((id) => !/-\d{8}$/.test(id));
+  return ids.length ? sortByReleaseDesc(models, ids) : XAI_MODELS;
+};
+
+// Real Grok model windows — the OAuth path has no models.dev catalogKey, so without this the picker would
+// show the neutral default. grok-build (512K/30K) + grok-composer (200K/30K) route the subscription proxy;
+// grok-4.5 is 500K/131K reasoning on api.x.ai. maxOutput is pinned present (every branch sets it) so the
+// client slice (#94) reads it as the request's max_tokens without a fallback — mirrors anthropicModelCaps.
+export const xaiModelCaps = (model: string): ModelCaps & { maxOutput: number } => {
+  const m = model.toLowerCase();
+  if (m.includes('composer')) return { contextInput: 200_000, maxOutput: 30_000 };
+  if (/grok-[4-9]/.test(m)) return { contextInput: 500_000, maxOutput: 131_000 }; // grok-4.5+ reasoning family
+  return { contextInput: 512_000, maxOutput: 30_000 }; // grok-build (default)
+};
+
 // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel
 // state and the per-row Routing-map lists (#53). Keyed kinds answer undefined: they have a live
 // /models route instead of a curated list.
 export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): string[] | undefined =>
-  isCodexProvider(p) ? codexModelsFrom(catalog) : isAnthropicProvider(p) ? anthropicModelsFrom(catalog) : undefined;
+  isCodexProvider(p) ? codexModelsFrom(catalog)
+    : isAnthropicProvider(p) ? anthropicModelsFrom(catalog)
+    : isXaiProvider(p) ? xaiModelsFrom(catalog)
+    : undefined;
 
 // ----------------------------- Anthropic client attestation ----------------------------- //
 
@@ -1087,12 +1171,16 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 // The effort levels the panel offers for a Provider. Mirrors the first-party Claude Code /effort slider:
 // every effort-capable Claude shows the FULL low→max ladder regardless of model — the wire clamps to the
 // model's ceiling (anthropicThinkingEffort), so an offered xhigh/max degrades, never 400s. Codex omits 'max'
-// (its wire tops at xhigh; standardEffortToCodex folds a stray 'max'→xhigh). Only Codex + Anthropic call
-// this — every other Provider hides the select. Not model-gated: capability lives in the clamp, not here.
+// (its wire tops at xhigh; standardEffortToCodex folds a stray 'max'→xhigh). Grok is a Codex-twin on the
+// Responses wire → same low→xhigh ladder (its per-model reasoning gate — build/composer none, 4.5 reasoning —
+// lands in the client slice #94, not here). Only Codex, Anthropic, and Grok call this — every other Provider
+// hides the select. Not model-gated: capability lives in the clamp, not here.
 export const effortOptionsFor = (provider: Provider): EffortLevel[] =>
   isAnthropicProvider(provider)
     ? ['low', 'medium', 'high', 'xhigh', 'max']
-    : ['low', 'medium', 'high', 'xhigh'];
+    : isXaiProvider(provider)
+      ? ['low', 'medium', 'high', 'xhigh']
+      : ['low', 'medium', 'high', 'xhigh'];
 
 export const buildAnthropicMessagesBody = (args: {
   model: string; messages: AnthropicMessage[]; maxTokens: number; version: string; stream?: boolean;
