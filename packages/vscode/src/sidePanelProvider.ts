@@ -38,7 +38,7 @@ export type PanelState = {
   providerId?: string; // Active Provider id (drives the dropdown's selected value)
   providers: { id: string; label: string }[]; // the catalog, for the dropdown
   isCustom: boolean; // active Provider is Custom → the panel reveals the editable base-URL field (Issue 7)
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth'; // the OAuth kinds swap the API-key field for sign-in/out
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth'; // the OAuth kinds swap the API-key field for sign-in/out (Grok wiring lands in #97)
   signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
   modelOptions?: string[]; // OAuth kinds only: models.dev-sourced ids for the dropdown (curated fallback; no live /models route)
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // Codex + Anthropic: the reasoning-effort knob (governs every call)

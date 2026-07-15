@@ -9,7 +9,7 @@ import {
   parseModelsDevEntry, lookupModelsDevCaps,
   oauthModelOptions, CODEX_MODELS, ANTHROPIC_MODELS,
   chatCompletionTextDelta,
-  CUSTOM_ID, type Provider,
+  CUSTOM_ID, PROVIDERS, type Provider,
 } from '../src/catalog';
 
 // Minimal Provider builder so each test states only the fields it cares about.
@@ -619,6 +619,26 @@ describe('oauthModelOptions', () => {
   // Keyed kinds answer undefined — they have a live /models route, not a curated list.
   it('is undefined for keyed kinds', () => {
     expect(oauthModelOptions(provider(), undefined)).toBeUndefined();
+  });
+});
+
+describe('PROVIDERS — Grok row (#92)', () => {
+  // The 13th built-in: Grok (xAI OAuth), a Codex-twin reached over the subscription proxy. Its default is
+  // grok-build; kind:'xai-oauth' branches it off the OpenAI-chat/key paths, like Codex + Anthropic.
+  it('registers Grok as a built-in with kind xai-oauth and the proxy baseUrl', () => {
+    const grok = PROVIDERS.find((p) => p.id === 'xai');
+    expect(grok).toMatchObject({
+      id: 'xai', label: 'Grok', defaultModel: 'grok-build',
+      baseUrl: 'https://cli-chat-proxy.grok.com/v1', apiKeyEnv: '', kind: 'xai-oauth',
+    });
+  });
+
+  // The naming trap: Grok (xAI, OAuth) must never disturb the pre-existing Groq row (Llama, API-key). Its
+  // id, key env, and absent (openai-chat) kind stay exactly as they were.
+  it('leaves the existing Groq row untouched — distinct id, API-key kind', () => {
+    const groq = PROVIDERS.find((p) => p.id === 'groq');
+    expect(groq).toMatchObject({ id: 'groq', label: 'Groq', apiKeyEnv: 'GROQ_API_KEY' });
+    expect(groq?.kind).toBeUndefined();
   });
 });
 
