@@ -13,7 +13,8 @@
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
  *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
- *     'bridge' (listener info: address + secret) | the /routing chain (#65, sectioned #79):
+ *     'bridge' (listener info: address + secret) | 'help' (the command list, #82) | the
+ *     /routing chain (#65, sectioned #79):
  *     'routing' (overview: two sections) → 'routing-section' (Claude Code families / Custom
  *     aliases) → 'alias-name' / 'alias-rename' / 'route-provider' → 'route-model-*' (pick or
  *     free text). Every non-input mode returns to 'input' on Esc, except the routing screens,
@@ -200,6 +201,7 @@ type Mode =
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
   // and can write auth.json — a side effect that must not live in JSX).
   | { kind: 'bridge'; address: string; secret: string }
+  | { kind: 'help' }
   // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new
   // alias / pick a row's Provider → pick its model. 'alias-rename' edits an existing alias's NAME
   // in place (Target kept) — reached from the row's Provider picker.
@@ -337,14 +339,17 @@ export const App = () => {
     const parsed = parseSlash(raw);
     if (!parsed) { setStatus(raw.trim() ? 'Not a command — type / for the palette.' : ''); return; }
     // A unique partial match completes on Enter — that IS the autocomplete contract (/pr → /providers).
+    const exact = SLASH_COMMANDS.some((c) => c.name === parsed.command);
     const unique = suggestSlash(`/${parsed.command}`);
-    const command = SLASH_COMMANDS.some((c) => c.name === parsed.command)
-      ? parsed.command
-      : unique.length === 1 ? unique[0].name : parsed.command;
+    const command = exact ? parsed.command : unique.length === 1 ? unique[0].name : parsed.command;
     const target = parsed;
 
     if (inputRef.current) inputRef.current.value = '';
     setLine('');
+
+    // /modelids made some prefixes ambiguous (#82: /mode ↔ /model, /modelids) — name the
+    // candidates instead of the misleading "Unknown command".
+    if (!exact && unique.length > 1) { setStatus(`Ambiguous — did you mean ${unique.map((c) => `/${c.name}`).join(' or ')}?`); return; }
 
     const byId = (id?: string) => PROVIDERS.find((p) => p.id === id);
     switch (command) {
@@ -450,6 +455,18 @@ export const App = () => {
           : 'Claude Code /model list → aliases only.');
         return;
       }
+      case 'modelids': {
+        // Alias rows' pinned-model-id suffix on/off (#82) — exact twin of /aliasonly; the Bridge
+        // reads the preference live per list request, so no restart is needed.
+        const arg = target.args[0]?.toLowerCase();
+        if (arg && arg !== 'on' && arg !== 'off') { setStatus('/modelids takes on or off'); return; }
+        const cfg = home.readConfig();
+        const on = arg ? arg === 'on' : !(cfg.bridge?.aliasPickerShowsModel ?? true);
+        home.writeConfig({ bridge: { ...cfg.bridge, aliasPickerShowsModel: on } });
+        setStatus(on ? 'Alias rows show their pinned model id.' : 'Alias rows show bare names.');
+        return;
+      }
+      case 'help': setMode({ kind: 'help' }); return;
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
@@ -496,7 +513,7 @@ export const App = () => {
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
         : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
-        : mode.kind === 'bridge' ? backToInput() // closes the info screen only — the listener stays up
+        : mode.kind === 'bridge' || mode.kind === 'help' ? backToInput() // info screens just close — nothing to cancel
         : backToInput('Cancelled.');
       return;
     }
@@ -699,6 +716,24 @@ export const App = () => {
           ))}
           <text fg={DIM} marginTop={1}>Both routes need the Bridge up — with the env block set, plain <span fg={ACCENT}>claude</span> dials it on every start and errors while it's down (remove the block to detach).</text>
           <text fg={DIM}>Esc closes this screen — the listener stays up. /bridge again to stop; /quit kills it (headless: wisp serve).</text>
+        </box>
+      )}
+
+      {mode.kind === 'help' && (
+        <box border title="Commands" marginTop={1} flexDirection="column">
+          {/* rendered FROM the shared registry (#82) — the palette's autocomplete and this list
+              can never disagree. A select, not plain rows: 13+ commands clip a 24-row terminal,
+              and the select brings the same height cap + scroll the other pickers use. Enter
+              only closes — firing (or toggling!) a command from a help list would surprise. */}
+          <select
+            focused
+            height={Math.min(SLASH_COMMANDS.length * 2, 12)}
+            showSelectionIndicator={false}
+            showScrollIndicator
+            options={SLASH_COMMANDS.map((c) => ({ name: `/${c.name}${c.args ? ` ${c.args}` : ''}`, description: c.description, value: c.name }))}
+            onSelect={() => backToInput()}
+          />
+          <text fg={DIM} marginTop={1}>Enter or Esc closes.</text>
         </box>
       )}
 

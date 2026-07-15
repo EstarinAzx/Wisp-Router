@@ -28,6 +28,8 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'test', args: '<provider|alias>', description: 'Fire one canned prompt through a Provider or Alias' },
   { name: 'bridge', description: 'Toggle the Bridge listener (shows address + access secret)' },
   { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },
+  { name: 'modelids', args: '[on|off]', description: "Alias rows in Claude Code's /model list carry their pinned model id" },
+  { name: 'help', description: 'List every command with its arguments' },
   { name: 'quit', description: 'Exit the TUI' },
 ];
 

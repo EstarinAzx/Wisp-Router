@@ -93,4 +93,22 @@ describe('SLASH_COMMANDS — the real palette', () => {
   it('carries the alias-only list toggle (#67)', () => {
     expect(SLASH_COMMANDS.map((c) => c.name)).toContain('aliasonly');
   });
+
+  // #82: /help renders FROM this registry (no second source of truth) and /modelids is the
+  // exact twin of /aliasonly — same optional on|off argument shape.
+  it('carries /help and /modelids (#82)', () => {
+    const names = SLASH_COMMANDS.map((c) => c.name);
+    expect(names).toContain('help');
+    expect(SLASH_COMMANDS.find((c) => c.name === 'modelids')?.args).toBe('[on|off]');
+  });
+
+  it('parses and suggests the #82 commands like their siblings', () => {
+    expect(parseSlash('/modelids on')).toEqual({ command: 'modelids', args: ['on'] });
+    expect(parseSlash('/help')).toEqual({ command: 'help', args: [] });
+    expect(suggestSlash('/he').map((c) => c.name)).toContain('help');
+    // '/mode' must offer BOTH /model and /modelids — prefix filtering, not exact match — and
+    // /model must come FIRST: the palette's Enter fires the top row, so registry order is behavior.
+    expect(suggestSlash('/mode').map((c) => c.name)).toEqual(expect.arrayContaining(['model', 'modelids']));
+    expect(suggestSlash('/mode')[0]?.name).toBe('model');
+  });
 });
