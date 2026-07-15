@@ -27,14 +27,14 @@ import { useKeyboard, usePaste, useRenderer } from '@opentui/react';
 import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
-  oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, effectiveAliasOnly, buildClaudeCodeSnippets,
-  resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
+  oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, isXaiSignedIn, effectiveAliasOnly, buildClaudeCodeSnippets,
+  resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
   type Provider, type EffortLevel, type RoutingMap, type FamilyKey, type Target,
 } from '@wisp/core';
-import { home, activeProvider, codexAuth, anthropicAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import pkg from '../package.json';
 
@@ -60,16 +60,17 @@ const DIM = '#71717a';
 
 // Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
 const keyedProviders = (): Provider[] =>
-  PROVIDERS.filter((p) => !isCodexProvider(p) && !isAnthropicProvider(p));
+  PROVIDERS.filter((p) => !isCodexProvider(p) && !isAnthropicProvider(p) && !isXaiProvider(p));
 
 const oauthProviders = (): Provider[] =>
-  PROVIDERS.filter((p) => isCodexProvider(p) || isAnthropicProvider(p));
+  PROVIDERS.filter((p) => isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p));
 
 // Sync signed-in read for display — the pure check over the stored bundle (skips codex's async
 // CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
 const oauthStatus = (p: Provider): string =>
   isCodexProvider(p) ? (isCodexSignedIn(home.readAuth().codex) ? 'signed in' : 'signed out')
   : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? 'signed in' : 'signed out')
+  : isXaiProvider(p) ? (isXaiSignedIn(home.readAuth().xai) ? 'signed in' : 'signed out')
   : '';
 
 const saveKey = (p: Provider, key: string): void => {
@@ -153,6 +154,15 @@ export async function* streamTestReply(p: Provider, model: string, signal: Abort
     const creds = await anthropicAuth.current();
     if (!creds) throw new Error(`${p.label} is not signed in — /signin anthropic.`);
     for await (const ev of anthropicStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
+      if (ev.type === 'text') yield ev.value;
+    return;
+  }
+  if (isXaiProvider(p)) {
+    const creds = await xaiAuth.current();
+    if (!creds) throw new Error(`${p.label} is not signed in — /signin xai.`);
+    // baseUrl is the row's proxy base; xaiStream routes grok-4.5 to api.x.ai itself. effort stays the
+    // shared EffortLevel — xaiReasoning gates per model.
+    for await (const ev of xaiStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
       if (ev.type === 'text') yield ev.value;
     return;
   }
@@ -292,7 +302,7 @@ export const App = () => {
   const startSignIn = (p: Provider) => {
     const seq = ++signinSeq.current;
     setMode({ kind: 'signin-wait', provider: p });
-    const auth = isCodexProvider(p) ? codexAuth : anthropicAuth;
+    const auth = isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth;
     auth.signIn().then(
       () => { if (seq === signinSeq.current) backToInput(`Signed in — ${p.label} is ready.`); },
       (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
@@ -301,7 +311,7 @@ export const App = () => {
 
   // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
   const doSignOut = (p: Provider) => {
-    (isCodexProvider(p) ? codexAuth : anthropicAuth).signOut();
+    (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth).signOut();
     backToInput(`Signed out of ${p.label}.`);
   };
 
@@ -381,11 +391,11 @@ export const App = () => {
       case 'signin':
       case 'signout': {
         const arg = target.args[0]?.toLowerCase();
-        // Match by kind, not id, so the arg names the door (codex/anthropic) rather than a catalog row.
+        // Match by kind, not id, so the arg names the door (codex/anthropic/xai) rather than a catalog row.
         const p = arg
-          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)))
+          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)) || (arg === 'xai' && isXaiProvider(x)))
           : undefined;
-        if (arg && !p) { setStatus(`/${command} takes codex or anthropic — got: ${target.args[0]}`); return; }
+        if (arg && !p) { setStatus(`/${command} takes codex, anthropic, or xai — got: ${target.args[0]}`); return; }
         if (!p) { setMode({ kind: 'oauth-pick', action: command }); return; }
         command === 'signin' ? startSignIn(p) : doSignOut(p);
         return;

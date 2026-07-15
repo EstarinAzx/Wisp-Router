@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'child_process';
-import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, type Provider } from '@wisp/core';
+import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, type Provider } from '@wisp/core';
 
 // ----------------------------- Store ----------------------------- //
 
@@ -46,4 +46,7 @@ export const codexAuth = new CodexAuth(
   openExternal, () => {});
 export const anthropicAuth = new AnthropicAuth(
   { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+  openExternal, () => {});
+export const xaiAuth = new XaiAuth(
+  { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
   openExternal, () => {});
