@@ -1100,6 +1100,70 @@ export const isXaiEndpoint = (url: string): boolean => {
   catch { return false; }
 };
 
+// ----------------------------- Grok (xAI) Responses request (pure cores) ----------------------------- //
+
+// The public direct endpoint (grok-4.5+); proxy models use the catalog row's baseUrl instead.
+const XAI_PUBLIC_RESPONSES_URL = 'https://api.x.ai/v1/responses';
+// Grok-CLI client identity the subscription proxy expects. ⚠️ Best-effort values — structurally required
+// but the exact identifier/version await a live check (#97/#98).
+const XAI_CLIENT_IDENTIFIER = 'grok-cli';
+const XAI_CLIENT_VERSION = '1.0.0';
+
+// grok-build + grok-composer are the subscription models served by the Grok-CLI proxy; grok-4.5+ go direct
+// to api.x.ai. Drives both the endpoint and whether the x-grok-* proxy headers ride.
+export const isGrokCliProxyModel = (model: string): boolean => {
+  const m = model.toLowerCase();
+  return m.startsWith('grok-build') || m.includes('composer');
+};
+
+// The Responses endpoint for a model: the row's proxy base + /responses for subscription models, else the
+// public api.x.ai. baseUrl is the xai row's proxy base (only proxy models use it).
+export const xaiResponsesUrl = (baseUrl: string, model: string): string =>
+  isGrokCliProxyModel(model) ? `${baseUrl}/responses` : XAI_PUBLIC_RESPONSES_URL;
+
+// Request headers. Bearer (the OAuth access token) always; proxy models add the x-grok-* CLI-identifying set
+// the subscription proxy validates. x-grok-conv-id keys the proxy's cache — one per stream.
+export const xaiRequestHeaders = (model: string, bearer: string, sessionId: string): Record<string, string> => {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Accept': 'text/event-stream',
+    'Authorization': `Bearer ${bearer}`,
+  };
+  if (isGrokCliProxyModel(model)) {
+    headers['x-grok-client-identifier'] = XAI_CLIENT_IDENTIFIER;
+    headers['x-grok-client-version'] = XAI_CLIENT_VERSION;
+    headers['x-xai-token-auth'] = 'xai-grok-cli';
+    headers['x-grok-model-override'] = model;
+    headers['x-grok-conv-id'] = sessionId;
+  }
+  return headers;
+};
+
+// Per-model reasoning gate: grok-4.5+ are reasoning models (take a reasoning block, same shape as Codex);
+// grok-build/composer reject it. Effort folds 'max'→'xhigh' (xAI's wire tops there, like Codex).
+export const xaiReasoning = (model: string, effort?: EffortLevel): CodexReasoning | undefined =>
+  /grok-[4-9]/.test(model.toLowerCase())
+    ? { effort: standardEffortToCodex(effort ?? DEFAULT_EFFORT), summary: 'auto' }
+    : undefined;
+
+// Sanitize a RAW external Responses payload for xAI — the path where the Bridge forwards a client's payload
+// verbatim (slice #95), NOT our own clean buildCodexResponsesBody output. xAI 400s on three OpenAI-Responses
+// quirks: prompt_cache_retention (unsupported — keep prompt_cache_key), the reasoning.encrypted_content
+// `include` entry on the proxy, and the 'minimal' effort level (fold to 'low'). Pure; returns a new object.
+export const rewriteXaiResponsesPayload = (payload: Record<string, unknown>, opts: { proxy: boolean }): Record<string, unknown> => {
+  const body = { ...payload };
+  delete body.prompt_cache_retention;
+  if (opts.proxy && Array.isArray(body.include)) {
+    const include = (body.include as unknown[]).filter((x) => x !== 'reasoning.encrypted_content');
+    if (include.length) body.include = include; else delete body.include;
+  }
+  const reasoning = body.reasoning;
+  if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning) && (reasoning as Record<string, unknown>).effort === 'minimal') {
+    body.reasoning = { ...(reasoning as Record<string, unknown>), effort: 'low' };
+  }
+  return body;
+};
+
 // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel
 // state and the per-row Routing-map lists (#53). Keyed kinds answer undefined: they have a live
 // /models route instead of a curated list.
