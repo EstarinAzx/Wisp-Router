@@ -27,11 +27,12 @@ import * as crypto from 'crypto';
 import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
-  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type EffortLevel,
+  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream } from './anthropicClient';
+import { xaiStream } from './xaiClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
   type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
@@ -65,6 +66,12 @@ export type BridgeDeps = {
   // Messages stream.
   anthropicSignedIn: () => Promise<boolean>;
   anthropicCreds: () => Promise<AnthropicCreds | undefined>;
+  // Grok (xAI) is the same "usable when signed in" shape (no API key) — these feed the xai path (#95): the
+  // flag gates the /v1/models row, current() returns the refreshed OAuth bundle for the Responses stream.
+  // OPTIONAL until the faces wire XaiAuth (#96 TUI / #97 VS Code): a face that omits them makes Grok read
+  // signed-out (a clean 401), never a crash — so this slice ships without touching extension.ts / the TUI.
+  xaiSignedIn?: () => Promise<boolean>;
+  xaiCreds?: () => Promise<XaiCreds | undefined>;
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
@@ -145,7 +152,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const computeModelInfos = async () => {
     const keyedPairs = await Promise.all(deps.providers.map(async (p) =>
       [p.id, isCodexProvider(p) ? await deps.codexSignedIn()
-        : isAnthropicProvider(p) ? await deps.anthropicSignedIn() : !!(await deps.keyFor(p))] as const));
+        : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
+        : isXaiProvider(p) ? await (deps.xaiSignedIn?.() ?? false) : !!(await deps.keyFor(p))] as const));
     return buildChatModelInfos(deps.providers, {
       keyed: Object.fromEntries(keyedPairs),
       modelMap: deps.modelMap(),
@@ -291,6 +299,57 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     }
   };
 
+  // POST /v1/chat/completions for the `xai` (Grok) Provider — the Responses stream behind the xAI sign-in,
+  // rendered through the SAME bridge.ts SSE emitters. A Codex twin: no API key (creds from the OAuth seam), so
+  // a signed-out state is a clean 401, not an empty envelope. Mirrors handleCodexChat — only the client differs.
+  const handleXaiChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const creds = await deps.xaiCreds?.();
+    if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
+
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
+    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+    // bridge.ts lifts system OUT of the turns; buildCodexResponsesBody folds a leading role:'system' back into
+    // `instructions`, so re-attach it. Images ride along (grok-4.5 is multimodal).
+    const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+    // effort stays the shared EffortLevel — xaiReasoning folds max→xhigh + gates per model (NOT standardEffortToCodex).
+    const tools = toCodexResponsesTools(parsed.tools);
+
+    const controller = new AbortController();
+    req.on('close', () => controller.abort());
+
+    const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
+    const calls: AssembledToolCall[] = [];
+    try {
+      const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools, toolChoice: 'auto', signal: controller.signal });
+      if (parsed.stream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+        for await (const ev of upstream) {
+          if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
+          else calls.push(ev.call);
+        }
+        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
+        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
+        res.write(SSE_DONE);
+        res.end();
+      } else {
+        // Non-streaming client: drain the same stream into one chat.completion object.
+        let text = '';
+        for await (const ev of upstream) {
+          if (ev.type === 'text') text += ev.value;
+          else calls.push(ev.call);
+        }
+        sendJson(res, 200, buildCompletion(meta, text, calls));
+      }
+    } catch (err) {
+      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      // A signed-out / refresh-failed Grok throws here — a clean 502 (or end if the SSE head is already out).
+      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
+    }
+  };
+
   // POST /v1/chat/completions — parse → route to a keyed Provider → send via the OpenAI SDK → render the reply
   // back through bridge.ts's SSE emitters (or one chat.completion object when stream:false).
   const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
@@ -313,6 +372,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // Anthropic → Messages (#40).
     if (isCodexProvider(provider)) return handleCodexChat(parsed, provider, pinnedModel, req, res);
     if (isAnthropicProvider(provider)) return handleAnthropicChat(parsed, provider, pinnedModel, req, res);
+    if (isXaiProvider(provider)) return handleXaiChat(parsed, provider, pinnedModel, req, res);
     const client = await deps.clientFor(provider);
     if (!client) return sendError(res, 400, `provider '${provider.id}' has no API key configured`);
 
@@ -438,6 +498,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      return { ok: true, events: mapOAuthStream(upstream) };
+    }
+    if (isXaiProvider(provider)) {
+      const creds = await deps.xaiCreds?.();
+      if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+      // Non-strict tools: the door forwards an external client's toolset (same reason as the Codex arm above).
+      const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
     }
     const client = await deps.clientFor(provider);
