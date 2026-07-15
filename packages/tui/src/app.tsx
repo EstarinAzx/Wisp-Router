@@ -13,11 +13,11 @@
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
  *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
  *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
- *     'bridge' (listener info: address + secret) | the /routing chain (#65): 'routing' (map
- *     overview) → 'alias-name' / 'alias-rename' / 'route-provider' → 'route-model-*' (pick or
- *     free text). Every
- *     non-input mode returns to 'input' on Esc, except the routing sub-screens, which step back
- *     to the map overview first.
+ *     'bridge' (listener info: address + secret) | the /routing chain (#65, sectioned #79):
+ *     'routing' (overview: two sections) → 'routing-section' (Claude Code families / Custom
+ *     aliases) → 'alias-name' / 'alias-rename' / 'route-provider' → 'route-model-*' (pick or
+ *     free text). Every non-input mode returns to 'input' on Esc, except the routing screens,
+ *     which step back one level: sub-screen → its section → overview → palette.
  *   - RouteRow: which Routing-map row is being edited — a fixed Family or a named Alias.
  */
 
@@ -200,10 +200,11 @@ type Mode =
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
   // and can write auth.json — a side effect that must not live in JSX).
   | { kind: 'bridge'; address: string; secret: string }
-  // The /routing chain (#65): overview → name a new alias / pick a row's Provider → pick its model.
-  // 'alias-rename' edits an existing alias's NAME in place (Target kept) — reached from the row's
-  // Provider picker.
+  // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new
+  // alias / pick a row's Provider → pick its model. 'alias-rename' edits an existing alias's NAME
+  // in place (Target kept) — reached from the row's Provider picker.
   | { kind: 'routing' }
+  | { kind: 'routing-section'; section: 'families' | 'aliases' }
   | { kind: 'alias-name' }
   | { kind: 'alias-rename'; name: string }
   | { kind: 'route-provider'; row: RouteRow }
@@ -234,12 +235,14 @@ export const App = () => {
     setMode({ kind: 'input' });
   };
 
-  // The /routing sub-screens step back HERE on Esc/apply, not to the palette — editing several
-  // rows in a row is the normal flow.
-  const backToRouting = (message?: string) => {
+  // The /routing sub-screens step back one level on Esc/apply — to the SECTION they came from
+  // (#79), not the palette: editing several rows in a row is the normal flow. Origin is derivable
+  // (family rows → Claude Code section, alias screens → Custom), so no extra mode state.
+  const backToSection = (section: 'families' | 'aliases', message?: string) => {
     if (message) setStatus(message);
-    setMode({ kind: 'routing' });
+    setMode({ kind: 'routing-section', section });
   };
+  const sectionOf = (row: RouteRow): 'families' | 'aliases' => row.kind === 'family' ? 'families' : 'aliases';
 
   // Persist one row's new Target through core's pure edits. A refusal (only reachable if a Provider
   // id slipped past the alias-name precheck) persists nothing.
@@ -249,7 +252,7 @@ export const App = () => {
       ? withFamilyRoute(map, PROVIDERS, row.family, target)
       : withAlias(map, PROVIDERS, row.name, target);
     if (next) home.writeConfig({ routing: next });
-    backToRouting(next ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
+    backToSection(sectionOf(row), next ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
   };
 
   // The picker's last entry: clear a Family route / remove an Alias.
@@ -258,10 +261,10 @@ export const App = () => {
     if (row.kind === 'family') {
       // Clearing can't be refused — withFamilyRoute only refuses a dangling Target.
       home.writeConfig({ routing: withFamilyRoute(map, PROVIDERS, row.family, undefined)! });
-      backToRouting(`${row.family} route cleared.`);
+      backToSection('families', `${row.family} route cleared.`);
     } else {
       home.writeConfig({ routing: withoutAlias(map, row.name) });
-      backToRouting(`Alias ${row.name} removed.`);
+      backToSection('aliases', `Alias ${row.name} removed.`);
     }
   };
 
@@ -486,11 +489,12 @@ export const App = () => {
       // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
       if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
-      // Routing sub-screens back out one level (to the map), not all the way to the palette.
-      const routingSub = mode.kind === 'alias-name' || mode.kind === 'alias-rename' || mode.kind === 'route-provider'
-        || mode.kind === 'route-model-loading' || mode.kind === 'route-model-pick' || mode.kind === 'route-model-free';
+      // Routing steps back one level per Esc (#79): sub-screen → its section → overview → palette.
       mode.kind === 'input' ? exitTui()
-        : routingSub ? backToRouting('Cancelled.')
+        : mode.kind === 'alias-name' || mode.kind === 'alias-rename' ? backToSection('aliases', 'Cancelled.')
+        : mode.kind === 'route-provider' || mode.kind === 'route-model-loading' || mode.kind === 'route-model-pick' || mode.kind === 'route-model-free'
+          ? backToSection(sectionOf(mode.row), 'Cancelled.')
+        : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
         : mode.kind === 'bridge' ? backToInput() // closes the info screen only — the listener stays up
         : backToInput('Cancelled.');
@@ -684,20 +688,39 @@ export const App = () => {
 
       {mode.kind === 'routing' && (
         <box border title="Routing map" marginTop={1} flexDirection="column">
+          <text fg={DIM}>Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.</text>
+          <select
+            focused
+            height={4}
+            showSelectionIndicator={false}
+            options={[
+              { name: 'Claude Code', description: `the Family routes (${FAMILY_KEYS.join(' / ')})`, value: 'families' },
+              { name: 'Custom', description: `your named Aliases (${routingMap().aliases.length}) + add`, value: 'aliases' },
+            ]}
+            onSelect={(_i, opt) => {
+              if (opt) setMode({ kind: 'routing-section', section: opt.value as 'families' | 'aliases' });
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'routing-section' && (
+        <box border title={mode.section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
           {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
           <select
             focused
-            height={Math.min((FAMILY_KEYS.length + routingMap().aliases.length + 1) * 2, 16)}
+            height={Math.min((mode.section === 'families' ? FAMILY_KEYS.length : routingMap().aliases.length + 1) * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
-            options={[
-              ...FAMILY_KEYS.map((f) => {
-                const t = routingMap().families[f];
-                return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
-              }),
-              ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
-              { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
-            ]}
+            options={mode.section === 'families'
+              ? FAMILY_KEYS.map((f) => {
+                  const t = routingMap().families[f];
+                  return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
+                })
+              : [
+                  ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
+                  { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
+                ]}
             onSelect={(_i, opt) => {
               if (!opt) return;
               const v = String(opt.value);
@@ -719,7 +742,7 @@ export const App = () => {
             placeholder="a bridged model name, e.g. fast"
             onSubmit={onSubmitText((value) => {
               const name = value.trim();
-              if (!name) { backToRouting('Empty — no alias added.'); return; }
+              if (!name) { backToSection('aliases', 'Empty — no alias added.'); return; }
               // Precheck the shadow rule here so the collision message lands while the name is
               // still editable (core's withAlias refuses it again at persist time).
               if (PROVIDERS.some((p) => p.id === name)) { setStatus(`"${name}" is a Provider id — pick another name.`); return; }
@@ -736,13 +759,13 @@ export const App = () => {
             placeholder={mode.name}
             onSubmit={onSubmitText((value) => {
               const next = value.trim();
-              if (!next || next === mode.name) { backToRouting('Unchanged.'); return; }
+              if (!next || next === mode.name) { backToSection('aliases', 'Unchanged.'); return; }
               // Split the two refusals so the message names the actual collision; input stays editable.
               if (PROVIDERS.some((p) => p.id === next)) { setStatus(`"${next}" is a Provider id — pick another name.`); return; }
               const renamed = withAliasRenamed(routingMap(), PROVIDERS, mode.name, next);
               if (!renamed) { setStatus(`"${next}" is already an alias — pick another name.`); return; }
               home.writeConfig({ routing: renamed });
-              backToRouting(`Alias ${mode.name} → ${next}.`);
+              backToSection('aliases', `Alias ${mode.name} → ${next}.`);
             })}
           />
         </box>
@@ -756,14 +779,21 @@ export const App = () => {
             showSelectionIndicator={false}
             showScrollIndicator
             options={[
-              ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
-              // leading-space values can't collide with Provider ids (ids never start with a space)
-              ...(mode.row.kind === 'alias'
-                ? [{ name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' }]
+              // Alias rows lead with the edit verbs (#79) — no scrolling past every Provider to
+              // rename. Only for aliases already IN the map: the add-alias flow passes through here
+              // before its row is persisted, and rename/remove on a nonexistent alias dead-ends.
+              // Leading-space values can't collide with Provider ids (ids never start with a space).
+              ...(mode.row.kind === 'alias' && routingMap().aliases.some((a) => a.name === (mode.row as { name: string }).name)
+                ? [
+                    { name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' },
+                    { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
+                  ]
                 : []),
-              mode.row.kind === 'family'
-                ? { name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }
-                : { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
+              ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
+              // A Family route is cleared, never renamed — its picker keeps clear at the bottom.
+              ...(mode.row.kind === 'family'
+                ? [{ name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }]
+                : []),
             ]}
             onSelect={(_i, opt) => {
               if (!opt) return;
@@ -812,7 +842,7 @@ export const App = () => {
             onSubmit={onSubmitText((value) => {
               const id = value.trim();
               if (id) applyRoute(mode.row, { providerId: mode.provider.id, model: id });
-              else backToRouting('Empty — route unchanged.');
+              else backToSection(sectionOf(mode.row), 'Empty — route unchanged.');
             })}
           />
         </box>
