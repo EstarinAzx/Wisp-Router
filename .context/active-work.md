@@ -8,40 +8,54 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-15 by Fable 5 (auto)._
-_At commit: c0351fb on `main`. Working tree: CONTEXT.md header fix uncommitted (this wrap-up commits it)._
+_At commit: de0b048 on `main`. Working tree: clean (this wrap-up commits only `.context/`)._
 
 ## Current focus
-**TUI UX batch v2 — planned, not yet implemented.** Planning-only session: v2.0.2 release
-verified landed, then the init funnel (grill → spec → tickets) produced GitHub issues
-**#78 (spec)** + **#79–#82 (slices, all `ready-for-agent`, zero blockers)**.
+**TUI UX batch v2 — SHIPPED, release 2.0.3 in flight.** Ticket-loop session: all four spec-#78
+slices implemented, reviewed, merged (PRs #83–#86); a real-terminal eyeball caught a broken
+`/bridge` layout, fixed on main; v2.0.3 tagged — Release workflow was still `in_progress` at
+wrap-up time (run 29383784428).
 
 ## State
-- **Done this session (no code changes):**
-  - **Release verified:** v2.0.2 workflow green, `npm view wisp-router version` → 2.0.2,
-    platform package probe 200.
-  - **Grill settled 8 UX items** → spec #78. Key decisions: `/routing` splits into two display
-    sections (Claude Code = 4 Family routes, Custom = Aliases); alias-only default flips ON at
-    read time with a zero-alias Provider-row fallback in the Bridge list; new `/modelids [on|off]`
-    twin of `/aliasonly`; `/bridge` screen reuses the existing project-scoped settings.json
-    snippet builder (PRD #43 standing decision — global `~/.claude/settings.json` stays absent).
-  - **Tickets published:** #79 `/routing` overhaul · #80 `/bridge` guidance + status redesign ·
-    #81 alias-only default + fallback + nudge · #82 `/help` + `/modelids`.
-  - **CONTEXT.md:** TUI section header fixed ("planned, not yet built" → shipped 2.x).
-- **In flight:** nothing.
+- **Done this session:**
+  - **#81** (PR #83): `effectiveAliasOnly()` in core `home.ts` — alias-only defaults ON at read
+    time, stored `false` respected, no migration writes; zero-alias fallback lives INSIDE
+    `buildAnthropicModelsList` (new `aliasOnly` param); `/aliasonly` refuse-guard dropped;
+    post-provider-select `/routing` nudge.
+  - **#79** (PR #84): `/routing` overview (intro + Claude Code / Custom sections), new
+    `routing-section` mode, Esc steps one level (sub-screen → section → overview → palette);
+    alias picker leads Rename/Remove — gated on the alias existing (review catch: add-alias flow
+    reaches the picker pre-persist; ungated verbs dead-end or lie).
+  - **#80** (PR #85): `/bridge` connect screen — status header, `claude-wisp` per-session line,
+    project-scoped settings.json trio via `buildClaudeCodeSnippets` (one snippet source).
+  - **#82** (PR #86): `/help` (scrollable select over `SLASH_COMMANDS`; Enter/Esc close only) +
+    `/modelids [on|off]` (twin of `/aliasonly` over `aliasPickerShowsModel`); ambiguous partials
+    now name candidates (`/mode` → /model or /modelids); registry order pinned by test.
+  - **`/bridge` layout fix** (1830600, straight on main): real-terminal eyeball showed rows
+    overlaying from the Connect section down — opentui overlays rows after any >~70-col wrapping
+    row, and a bare map array between siblings mispositions rows. Rule now inline in app.tsx:
+    short single-purpose rows, maps in their own column box.
+  - **Tracker triage:** #78 (spec) + #57 (PRD) relabeled `ready-for-human` (label created) —
+    `ready-for-agent` queue is EMPTY. All four slice issues closed with breadcrumbs.
+  - **Release:** `chore(release): wisp-router 2.0.3` + tag `v2.0.3` pushed.
+  - `.gitignore`: `.obsidian/` added (user edit, committed).
+- **In flight:** Release workflow run 29383784428 (v2.0.3) — unverified at wrap-up.
 - **Blocked:** nothing.
 
 ## Pick up here
-Work the frontier — all four tickets unblocked. Recommended first: **#81** (core-seam,
-tested; the default-flip story the other UX rides on). Single ticket: `/preset scope 81`.
-Whole batch: `/loop /preset ticket-loop`. Backlog #68 (chat mode) / #69 (copilot-wisp) still
-deferred behind this batch.
+1. **Verify 2.0.3 landed:** `gh run view 29383784428` green → `npm view wisp-router version` →
+   2.0.3 → platform probe (see Open questions). Then eyeball the FIXED `/bridge` screen in a real
+   terminal (`npm i -g wisp-router@2.0.3` or `packages/tui; bun run dev`) — the fix itself is
+   unverified visually.
+2. Then the backlog: #68 (chat mode) / #69 (copilot-wisp), or the small orphans below.
+
 Small orphans, anytime: LICENSE + `license` fields in `packages/tui/npm/*/package.json`;
 VS Code extension 1.7.0 release (CHANGELOG Unreleased ready); root `.vsix` pile (ask before
 purging); panel-side alias rename (TUI-only today); `.claude/settings.local.json` snippet
 switch (spec #78 out-of-scope note).
 
 ## Skills for next session
-- /preset scope — entry gate for the picked ticket, or /loop /preset ticket-loop for the batch.
+- /preset catch-up if the pick-up note is stale; otherwise /preset pick-up → verify release.
 
 ## Open questions
 - (carried) forced `tool_choice` + `temperature` not threaded on the OpenAI door; OpenAI-door
@@ -52,20 +66,19 @@ switch (spec #78 out-of-scope note).
   before blaming CI; the shim's release-download fallback keeps installs working.
 - (carried) npm token was pasted in-session previously — user should rotate it (repo secret `NPM_TOKEN`).
 - (carried) Codex signed out on this machine — `/signin codex` before Codex live checks.
+- `/modelids` inlines `?? true` as a third scattered reader of `aliasPickerShowsModel` — fine
+  while defaults agree; a #81-style shared seam only if that default ever flips.
 
 ## Recent context
-- Ticket #81 seam: the effective alias-only read must land at the shared seam ALL consumers use
-  (Bridge list + TUI echo + panel checkbox agree); stored explicit `false` respected, no
-  migration writes.
-- Ticket #80 seam: reuse `buildClaudeCodeSnippets` verbatim — no second snippet source.
-- Tests: `bun run test` at root → `packages/core/tests/` (369). Core typecheck ignores tests.
+- Tests now **376** (`bun run test` at root → `packages/core/tests/`). Core typecheck ignores tests.
 - TUI dev run: `cd packages/tui; bun run dev` (real `~/.wisp`; `WISP_HOME` to sandbox; BOM-free
   config.json if hand-seeded).
-- TUI 2.0.2 runtime still not eyeballed in a real terminal (carried from last session).
+- opentui layout trap: see the comment atop the `/bridge` JSX in `packages/tui/src/app.tsx`.
+- Repo now has `ready-for-human` label; ticket-loop breadcrumbs are on issues #79–#82.
 
 ## Related
 - [[overview]]
 - [[stack]]
-- [[decisions]] — new entry: alias-only default ON
+- [[decisions]]
 - [[gotchas]]
 - [[pick-up]]
