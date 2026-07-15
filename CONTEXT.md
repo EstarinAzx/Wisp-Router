@@ -199,7 +199,7 @@ once. A Target whose Provider is unusable (no key / signed out) fails loud with
 the Provider's real error; it never silently falls back. _Avoid_: a Target with
 an unpinned model — the pin is the point.
 
-### The TUI face — planned (decisions settled, not yet built)
+### The TUI face — shipped (npm `wisp-router` 2.x; side-panel retirement still pending)
 
 **Wisp TUI**:
 The terminal app that becomes the face of Wisp and its **only** config surface —

@@ -1,7 +1,7 @@
 ---
 type: decisions
 project: wisp
-updated: 2026-07-14
+updated: 2026-07-15
 tags: [context, decisions]
 ---
 
@@ -1471,3 +1471,19 @@ account + CI-published big binaries is exactly npm's spam heuristic; a delivery 
 takedowns beats one support ticket away from broken.
 **Reversibility:** the npm names (`wisp-router`, `@tsd47216/*`) are public — one-way. The
 fallback + dispatch shape: easy.
+
+## 2026-07-15 — Alias-only model list defaults ON (spec #78, ticket #81)
+
+**Decision:** `bridge.aliasOnlyModels` resolves to **on** when unset — a read-time `?? true` at
+the one shared seam every consumer reads through (Bridge list, TUI command echo, panel checkbox),
+never a migration write; a stored explicit `false` is respected. With alias-only effectively on
+but zero Aliases in the Routing map, the Anthropic-door model list **falls back to Provider rows**
+instead of serving empty, which also retires `/aliasonly`'s zero-alias refuse-guard. After a
+Provider is selected, the TUI nudges once toward `/routing`.
+**Why:** the clean Claude Code `/model` list is the product's intended steady state — opt-in made
+it undiscovered; the owner wants `/providers` → `/routing` to be the taught path. The fallback is
+what makes default-ON safe on fresh installs (an empty picker was the original reason for
+default-OFF + guard). Read-time (not stored) flip keeps upgrades write-free and explicit choices
+intact.
+**Reversibility:** easy (flip the default back) — but the zero-alias fallback should stay
+regardless; an empty model list is never right.
