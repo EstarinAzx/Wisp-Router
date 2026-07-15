@@ -680,6 +680,23 @@ describe('anthropicStream (streaming IO)', () => {
     ]);
   });
 
+  // #88: the streaming path requests the model's OUTPUT CEILING as max_tokens (Opus 128K), not the bounded 16K
+  // Inquire cap — a hard 16K starves a high-effort reasoning turn before its answer lands.
+  it('requests the model output ceiling as max_tokens on the streaming path', async () => {
+    let sentBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: any) => {
+      sentBody = JSON.parse(init.body);
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    await collect(anthropicStream({ ...args, model: 'claude-opus-4-8' }));
+    expect(sentBody.max_tokens).toBe(anthropicModelCaps('claude-opus-4-8').maxOutput);
+    expect(sentBody.max_tokens).toBeGreaterThan(16_000);
+  });
+
   // A clean tool_use turn (no answer text) is delivered content — must not throw or add any marker.
   it('yields a tool call on a clean tool_use turn with no text', async () => {
     stub([
