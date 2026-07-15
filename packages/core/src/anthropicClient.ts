@@ -16,7 +16,7 @@
  *     fragments as they arrive so the native chat picker renders tokens live.
  */
 
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, reduceAnthropicToolCalls, anthropicTruncationReason, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type EffortLevel } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
 type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; signal?: AbortSignal };
@@ -25,9 +25,13 @@ type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: str
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
 export type AnthropicStreamEvent = { type: 'text'; value: string } | { type: 'toolCall'; call: AssembledToolCall };
 
-// Inquire's whole-file edits can be sizeable; 16K keeps a non-streaming request under the fetch timeout
-// ceiling while leaving ample room for the edit blocks. The streaming chat path reuses it.
-const ANTHROPIC_MAX_TOKENS = 16_000;
+// Inquire is non-streaming (spinner → diff): a bounded 16K output keeps the single request under the fetch
+// timeout ceiling while leaving ample room for the edit blocks. The STREAMING path deliberately does NOT
+// share this — #88: a hard 16K cap starves a high-effort reasoning turn (adaptive thinking burns most of the
+// budget before the answer lands), a direct feeder of the content-less/truncated turns #87 surfaces. Streaming
+// requests the model's own output ceiling (anthropicModelCaps) instead, so only a genuinely oversized reply is
+// cut — and #87 now makes that cut visible rather than silent.
+const INQUIRE_MAX_TOKENS = 16_000;
 
 // ----------------------------- Request ----------------------------- //
 
@@ -62,14 +66,14 @@ export const anthropicMessagesHeaders = (bearer: string, stream?: boolean): Reco
 // POST one conversation to the Messages endpoint and return the raw Response. Bearer = the OAuth access
 // token. A non-2xx carries the status + body so a failed round-trip is diagnosable. Shared by
 // anthropicInquire (reads it whole) and anthropicStream (reads it as it flows).
-const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: boolean }): Promise<Response> => {
+const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: boolean; maxTokens: number }): Promise<Response> => {
   const bearer = args.creds.accessToken;
   if (!bearer) throw new Error('Not signed in to Claude.');
 
   const res = await fetch(`${args.baseUrl}/v1/messages`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: ANTHROPIC_MAX_TOKENS, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -83,7 +87,8 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
 // Inquire is non-streaming UX (spinner → diff), so the whole JSON reply is read and every text block
 // concatenated; tool_use / thinking blocks (none expected here) are not answer text.
 export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<string> => {
-  const res = await anthropicMessagesRequest(args);
+  // Bounded: a whole-file edit is large but finite, and the non-streaming request must clear the fetch timeout.
+  const res = await anthropicMessagesRequest({ ...args, maxTokens: INQUIRE_MAX_TOKENS });
   const data = await res.json() as { content?: { type?: string; text?: string }[] };
   return (data.content ?? []).filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
 };
@@ -109,7 +114,9 @@ export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<stri
 //   - Delivered content but no terminal frame (idle socket/proxy drop): keep the content, only flag the abrupt
 //     end — never discard a good turn's already-streamed text or false-alarm one whose tail frame was just lost.
 export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerator<AnthropicStreamEvent> {
-  const res = await anthropicMessagesRequest({ ...args, stream: true });
+  // #88: request the model's own output ceiling, not a hard 16K — a high-effort turn must be able to think
+  // AND still reach its answer. Only a reply genuinely past the model max is cut, and #87 makes that visible.
+  const res = await anthropicMessagesRequest({ ...args, stream: true, maxTokens: anthropicModelCaps(args.model).maxOutput });
   if (!res.body) return;
   let sawDelta = false;                     // any answer text arrived (tool-only turns count via toolCalls below)
   let sawTerminal = false;                  // a message_delta / message_stop actually closed the stream

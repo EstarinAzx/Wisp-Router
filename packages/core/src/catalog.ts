@@ -1188,7 +1188,9 @@ export const reduceAnthropicToolCalls = (events: SseEvent[]): AssembledToolCall[
 // true (Claude is multimodal). ⚠️ These are the *model* maxes — the Claude.ai subscription Messages path
 // the OAuth token rides may cap lower than 1M; advertised as a picker budgeting hint, so an oversized
 // pack surfaces as a backend error (already handled) rather than being silently wrong.
-export const anthropicModelCaps = (model: string): ModelCaps => {
+// Return type pins maxOutput as ALWAYS present (every branch sets it) — #88's streaming path reads it as the
+// request's max_tokens, a non-optional number, so the guarantee lives in the type rather than a caller fallback.
+export const anthropicModelCaps = (model: string): ModelCaps & { maxOutput: number } => {
   const m = model.toLowerCase();
   if (m.includes('haiku')) return { contextInput: 200_000, maxOutput: 64_000, vision: true };
   if (m.includes('opus')) return { contextInput: 1_000_000, maxOutput: 128_000, vision: true };
