@@ -27,7 +27,7 @@ import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, effectiveAliasOnly,
+  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, effectiveAliasOnly, buildClaudeCodeSnippets,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
@@ -679,9 +679,25 @@ export const App = () => {
 
       {mode.kind === 'bridge' && (
         <box border title="Bridge" marginTop={1} flexDirection="column">
-          <text>OpenAI door:    <span fg={ACCENT}>{mode.address}/v1</span></text>
+          {/* status header first — state + port at a glance, then the connection facts (#80).
+              Always "up" by construction: this mode is only entered post-bind, and no stop path
+              exists without leaving the screen. Port derives from the frozen address so the header
+              can't contradict the copy-paste lines below after an external config edit. */}
+          <text><span fg="#4ade80">● up</span><span fg={DIM}> · port {mode.address.slice(mode.address.lastIndexOf(':') + 1)}</span></text>
+          <text marginTop={1}>OpenAI door:    <span fg={ACCENT}>{mode.address}/v1</span></text>
           <text>Anthropic door: <span fg={ACCENT}>{mode.address}</span></text>
           <text>Access secret:  <span fg={ACCENT}>{mode.secret}</span></text>
+
+          <text marginTop={1}>Connect Claude Code</text>
+          <text fg={DIM}>Per session — launches Claude Code pre-wired to this Bridge:</text>
+          <text>  <span fg={ACCENT}>claude-wisp</span> [args…]</text>
+          <text fg={DIM}>Persistent — add to the project's .claude/settings.json:</text>
+          {/* the tested core builder is the ONE snippet source (#80) — the side panel renders the
+              same block; the global ~/.claude form is deliberately absent (PRD #43) */}
+          {buildClaudeCodeSnippets(mode.address, mode.secret).settingsJson.split('\n').map((l, i) => (
+            <text key={i} fg={ACCENT}>  {l}</text>
+          ))}
+          <text fg={DIM} marginTop={1}>Both routes need the Bridge up — with the env block set, plain <span fg={ACCENT}>claude</span> dials it on every start and errors while it's down (remove the block to detach).</text>
           <text fg={DIM}>Esc closes this screen — the listener stays up. /bridge again to stop; /quit kills it (headless: wisp serve).</text>
         </box>
       )}
