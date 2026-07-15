@@ -1,16 +1,16 @@
 // ---------------- anthropic.test.ts — pure Anthropic OAuth Provider helpers ---------------- //
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isAnthropicProvider, isAnthropicSignedIn,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds,
   base64url, codeVerifier, codeChallenge, oauthState,
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
-  toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor,
+  toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
   type Provider, type SseEvent,
 } from '../src/catalog';
-import { anthropicMessagesHeaders } from '../src/anthropicClient';
+import { anthropicMessagesHeaders, anthropicStream } from '../src/anthropicClient';
 
 const provider = (over: Partial<Provider> = {}): Provider => ({
   id: 'anthropic', label: 'Claude', baseUrl: 'https://api.anthropic.com',
@@ -627,5 +627,135 @@ describe('buildAnthropicMessagesBody — images', () => {
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
       { type: 'text', text: 'and this?' },
     ]);
+  });
+});
+
+describe('anthropicTruncationReason', () => {
+  // The message_delta stop_reason that means the reply was CUT SHORT (budget / filter / refusal) — the only
+  // signal the streamed text deltas can't carry, so #87 surfaces it as a visible marker. The Anthropic analogue
+  // of responsesIncompleteReason.
+  it('returns the reason for a truncating stop_reason', () => {
+    expect(anthropicTruncationReason('max_tokens')).toBe('max_tokens');
+    expect(anthropicTruncationReason('content_filter')).toBe('content_filter');
+    expect(anthropicTruncationReason('refusal')).toBe('refusal');
+  });
+
+  // A clean close (end_turn/tool_use/stop_sequence/pause_turn), an unknown string, or undefined all mean
+  // "not truncated" → undefined (no marker, no false alarm on a good turn).
+  it('returns undefined for a clean or unknown stop_reason', () => {
+    expect(anthropicTruncationReason('end_turn')).toBeUndefined();
+    expect(anthropicTruncationReason('tool_use')).toBeUndefined();
+    expect(anthropicTruncationReason('stop_sequence')).toBeUndefined();
+    expect(anthropicTruncationReason('pause_turn')).toBeUndefined();
+    expect(anthropicTruncationReason(undefined)).toBeUndefined();
+  });
+});
+
+// #87: stub global.fetch to hand back a Response streaming Messages SSE bytes, so anthropicStream's END-state
+// handling (clean, content-less, truncated, or dropped) is exercised without a live Anthropic backend. The
+// sibling of codex.test.ts's `codexStream (streaming IO)` block — same harness, Messages wire.
+describe('anthropicStream (streaming IO)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const sseResponse = (blocks: string[]): Response => {
+    const text = blocks.map((b) => `${b}\n\n`).join('');
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } });
+    return new Response(body, { status: 200 });
+  };
+  const stub = (blocks: string[]) => vi.stubGlobal('fetch', async () => sseResponse(blocks));
+  const args = { creds: { accessToken: 'at' }, baseUrl: 'https://x', model: 'claude-opus-4-8', messages: [{ role: 'user' as const, content: 'hi' }] };
+  const collect = async (gen: AsyncGenerator<any>): Promise<any[]> => { const out: any[] = []; for await (const ev of gen) out.push(ev); return out; };
+
+  // Happy path: text_delta fragments render live; a clean end_turn terminal adds no marker.
+  it('yields text deltas live and adds no marker on a clean end_turn', async () => {
+    stub([
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"Hel"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"lo"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'text', value: 'Hel' },
+      { type: 'text', value: 'lo' },
+    ]);
+  });
+
+  // A clean tool_use turn (no answer text) is delivered content — must not throw or add any marker.
+  it('yields a tool call on a clean tool_use turn with no text', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"readFile"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"a.ts\\"}"}}',
+      'event: content_block_stop\ndata: {"index":0}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"tool_use"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'toolCall', call: { id: 'toolu_1', name: 'readFile', argsJson: '{"path":"a.ts"}' } },
+    ]);
+  });
+
+  // THE bug: a content-less turn — message_start → message_delta(end_turn) → message_stop, zero content blocks —
+  // was forwarded as a valid-but-empty envelope Claude Code rejects as "empty or malformed". Now it throws, so
+  // the door writes a real error frame / 502 instead of the silent empty SSE.
+  it('throws on a content-less end_turn envelope instead of yielding nothing', async () => {
+    stub([
+      'event: message_start\ndata: {"message":{"content":[]}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    await expect(collect(anthropicStream(args))).rejects.toThrow(/empty response/);
+  });
+
+  // A thinking-only turn: the model streamed thinking blocks (never forwarded) and no visible text/tool — the
+  // encoder would emit an empty envelope. Surfaced as the same diagnosable throw.
+  it('throws on a thinking-only turn that delivered no visible content', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":""}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}',
+      'event: content_block_stop\ndata: {"index":0}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    await expect(collect(anthropicStream(args))).rejects.toThrow(/empty response/);
+  });
+
+  // max_tokens truncation WITH partial text: keep the text, append a visible truncation marker carrying the
+  // reason (no longer relabeled a clean end_turn).
+  it('appends a truncation marker with the stop_reason after partial text', async () => {
+    stub([
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"cut here"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"max_tokens"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    const out = await collect(anthropicStream(args));
+    expect(out[0]).toEqual({ type: 'text', value: 'cut here' });
+    expect(out.at(-1)).toEqual({ type: 'text', value: '\n\n_[Response truncated: max_tokens]_' });
+  });
+
+  // max_tokens truncation with NO visible text (a thinking turn that spent the budget — the #88 amplifier):
+  // surface the reason as a marker rather than throwing, so the user sees WHY it was empty.
+  it('surfaces the truncation reason even when nothing visible was delivered', async () => {
+    stub([
+      'event: message_delta\ndata: {"delta":{"stop_reason":"max_tokens"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'text', value: '\n\n_[Response truncated: max_tokens]_' },
+    ]);
+  });
+
+  // Partial text but the terminal frame was lost (idle socket/proxy drop): keep the text, only flag the abrupt
+  // end — never discard delivered content, never false-alarm a good turn whose tail frame was merely dropped.
+  it('keeps streamed text and appends a soft marker when the terminal frame is missing', async () => {
+    stub(['event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"partial answer"}}']);
+    const out = await collect(anthropicStream(args));
+    expect(out[0]).toEqual({ type: 'text', value: 'partial answer' });
+    expect(out.at(-1).value).toMatch(/ended before completion/);
+  });
+
+  // A bare `error` frame emitted after the 200 with nothing delivered surfaces its message (not the generic empty).
+  it('throws the backend error message on a content-less error frame', async () => {
+    stub(['event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"boom"}}']);
+    await expect(collect(anthropicStream(args))).rejects.toThrow('boom');
   });
 });

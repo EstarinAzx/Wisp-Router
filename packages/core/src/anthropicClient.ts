@@ -16,7 +16,7 @@
  *     fragments as they arrive so the native chat picker renders tokens live.
  */
 
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, reduceAnthropicToolCalls, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type EffortLevel } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, reduceAnthropicToolCalls, anthropicTruncationReason, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
 type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; signal?: AbortSignal };
@@ -96,18 +96,50 @@ export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<stri
 // input_json_delta events that can't be surfaced until whole, so they are collected and folded by the
 // reducer once the stream ends (the assemble-at-end pattern codexStream uses). An `error` event is a backend
 // failure (throw its message); other lifecycle events carry no answer text.
+//
+// #87 — the stream can also end with NO visible content, and this path was previously silent: it read only
+// text/tool/error events and ignored message_delta entirely, so a content-less turn yielded nothing and the
+// door forwarded a structurally-valid-but-empty SSE envelope that Claude Code rejects as "empty or malformed".
+// The Codex sibling (codexStream) was already hardened; this mirrors it. Track whether any text/tool delta
+// arrived and read message_delta's stop_reason, then at stream end:
+//   - Truncation (max_tokens / content_filter / refusal): surface a visible marker carrying the reason so a
+//     cut-short reply is diagnosable, not relabeled a silent end_turn — even when nothing else was delivered.
+//   - Truly content-less (no text, no tools, no truncation reason — a thinking-only or dropped turn): throw,
+//     so the door writes a real error frame / clean 502 instead of the empty envelope, and the turn is retryable.
+//   - Delivered content but no terminal frame (idle socket/proxy drop): keep the content, only flag the abrupt
+//     end — never discard a good turn's already-streamed text or false-alarm one whose tail frame was just lost.
 export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerator<AnthropicStreamEvent> {
   const res = await anthropicMessagesRequest({ ...args, stream: true });
   if (!res.body) return;
+  let sawDelta = false;                     // any answer text arrived (tool-only turns count via toolCalls below)
+  let sawTerminal = false;                  // a message_delta / message_stop actually closed the stream
+  let stopReason: string | undefined;       // message_delta's stop_reason — the only place truncation shows
   const toolEvents = [];
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
     if (!ev) continue;
     if (ev.event === 'error') throw new Error(ev.data?.error?.message ?? 'Anthropic response failed');
     const text = anthropicTextDelta(ev);
-    if (text) { yield { type: 'text', value: text }; continue; }
+    if (text) { sawDelta = true; yield { type: 'text', value: text }; continue; }
     // tool_use blocks arrive in fragments — collect the relevant events, fold them after the stream ends.
-    if (ev.event === 'content_block_start' || ev.event === 'content_block_delta') toolEvents.push(ev);
+    if (ev.event === 'content_block_start' || ev.event === 'content_block_delta') { toolEvents.push(ev); continue; }
+    // The terminal frames carry no answer text but DO carry the stop_reason (truncation) and prove a clean close.
+    if (ev.event === 'message_delta') {
+      sawTerminal = true;
+      if (typeof ev.data?.delta?.stop_reason === 'string') stopReason = ev.data.delta.stop_reason;
+    } else if (ev.event === 'message_stop') {
+      sawTerminal = true;
+    }
   }
-  for (const call of reduceAnthropicToolCalls(toolEvents)) yield { type: 'toolCall', call };
+  const toolCalls = reduceAnthropicToolCalls(toolEvents);
+  for (const call of toolCalls) yield { type: 'toolCall', call };
+  const delivered = sawDelta || toolCalls.length > 0;
+  // A truncation reason is always worth surfacing — it explains an empty or cut-short turn; the marker also
+  // makes the envelope non-empty, so it stands in for a content-less turn without needing to throw.
+  const truncation = anthropicTruncationReason(stopReason);
+  if (truncation) { yield { type: 'text', value: `\n\n_[Response truncated: ${truncation}]_` }; return; }
+  // Nothing delivered and no reason to explain it → the empty-envelope bug. Throw so the door surfaces it.
+  if (!delivered) throw new Error('Anthropic returned an empty response — the model produced no visible content (a thinking-only or dropped turn). Try again.');
+  // Content did stream but the stream never closed cleanly — keep it, flag only the abrupt end.
+  if (!sawTerminal) yield { type: 'text', value: '\n\n_[Stream ended before completion — the reply may be incomplete.]_' };
 }
