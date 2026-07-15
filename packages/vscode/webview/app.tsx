@@ -202,12 +202,14 @@ export const App = () => {
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
   // live /models route. oauth gates both behaviours; the per-kind label/messages below distinguish them.
-  const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth';
-  const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : 'Codex Account';
-  const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : 'codexSignIn';
-  const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : 'codexSignOut';
+  const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth';
+  const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : state.kind === 'xai-oauth' ? 'Grok Account' : 'Codex Account';
+  const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : state.kind === 'xai-oauth' ? 'xaiSignIn' : 'codexSignIn';
+  const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : state.kind === 'xai-oauth' ? 'xaiSignOut' : 'codexSignOut';
   const accountHint = state.kind === 'anthropic-oauth'
     ? 'Subscription-backed Claude — sign in with your Claude.ai account; no API key.'
+    : state.kind === 'xai-oauth'
+    ? 'Subscription-backed Grok — sign in with your xAI account; no API key.'
     : 'Subscription-backed ChatGPT Codex — sign in with your ChatGPT account; no API key.';
 
   // OAuth kinds have no live /models list — use the curated modelOptions; every other Provider uses the

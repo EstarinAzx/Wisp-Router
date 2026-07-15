@@ -76,6 +76,14 @@
         "title": "Wisp: Sign out of Claude"
       },
       {
+        "command": "wisp.xaiSignIn",
+        "title": "Wisp: Sign in to Grok"
+      },
+      {
+        "command": "wisp.xaiSignOut",
+        "title": "Wisp: Sign out of Grok"
+      },
+      {
         "command": "wisp.bridgeToggle",
         "title": "Wisp: Toggle Bridge"
       }
