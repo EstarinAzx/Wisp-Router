@@ -27,7 +27,7 @@ import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider,
-  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn,
+  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, effectiveAliasOnly,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
@@ -432,16 +432,19 @@ export const App = () => {
         return;
       }
       case 'aliasonly': {
-        // Claude Code's /model list: aliases only on/off (#67). No arg toggles; the running
-        // Bridge reads the flag live per list request, so no restart is needed.
+        // Claude Code's /model list: aliases only on/off (#67, on by default #81 — toggle base is
+        // the EFFECTIVE state so the first bare /aliasonly on a fresh install turns it off). No
+        // zero-alias guard: the Bridge list falls back to Provider rows, never empty. No arg
+        // toggles; the running Bridge reads the flag live per list request, so no restart needed.
         const arg = target.args[0]?.toLowerCase();
         if (arg && arg !== 'on' && arg !== 'off') { setStatus('/aliasonly takes on or off'); return; }
         const cfg = home.readConfig();
-        const on = arg ? arg === 'on' : !(cfg.bridge?.aliasOnlyModels ?? false);
-        // Refuse ON with zero aliases — it would blank Claude Code's picker with no hint why.
-        if (on && routingMap().aliases.length === 0) { setStatus('No aliases set — add one in /routing first.'); return; }
+        const on = arg ? arg === 'on' : !effectiveAliasOnly(cfg);
         home.writeConfig({ bridge: { ...cfg.bridge, aliasOnlyModels: on } });
-        setStatus(on ? 'Claude Code /model list → aliases only.' : 'Claude Code /model list → Providers + aliases.');
+        // Echo stays honest with zero aliases — the served list falls back to Provider rows.
+        setStatus(!on ? 'Claude Code /model list → Providers + aliases.'
+          : routingMap().aliases.length === 0 ? 'Claude Code /model list → aliases only (Providers shown until the first alias — add one in /routing).'
+          : 'Claude Code /model list → aliases only.');
         return;
       }
       case 'quit': exitTui(); return;
@@ -568,7 +571,8 @@ export const App = () => {
             onSelect={(_i, opt) => {
               if (!opt) return;
               home.writeConfig({ provider: opt.value as string });
-              backToInput(`Active Provider → ${String(opt.name).replace(' (active)', '')}`);
+              // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
+              backToInput(`Active Provider → ${String(opt.name).replace(' (active)', '')} — tip: name it in /routing for a clean /model list.`);
             }}
           />
         </box>

@@ -69,7 +69,7 @@ export type BridgeDeps = {
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
   aliasPickerShowsModel: () => boolean;                          // wisp.bridge.aliasPickerShowsModel — alias picker rows carry the pinned model id (#52)
-  aliasOnlyModels: () => boolean;                                // bridge.aliasOnlyModels — the Anthropic-door list shows ONLY Aliases (hides Provider rows) (#67)
+  aliasOnlyModels: () => boolean;                                // EFFECTIVE bridge.aliasOnlyModels (#67, defaults ON #81) — hosts read via home's effectiveAliasOnly
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
@@ -173,13 +173,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // shape, ids aliased claude-wisp-<id> so Claude Code's /model picker lists them (slice #44's decision).
   // Aliases carry their pinned model so the picker row reads 'sol — gpt-5', like the Provider rows —
   // unless the user prefers bare alias names (wisp.bridge.aliasPickerShowsModel off).
-  // aliasOnlyModels (#67) drops the Provider rows entirely — Claude Code's picker then lists just the
-  // user-named Aliases. Anthropic door only, on purpose: that IS Claude Code's list; the OpenAI door
-  // serves generic clients where hiding backends has no story.
+  // aliasOnlyModels (#67) drops the Provider rows — Claude Code's picker then lists just the user-named
+  // Aliases; with zero Aliases the builder falls back to the Provider rows so the picker is never empty
+  // (#81). Anthropic door only, on purpose: that IS Claude Code's list; the OpenAI door serves generic
+  // clients where hiding backends has no story. Infos are always computed — local key/creds reads only.
   const handleAnthropicModels = async (res: http.ServerResponse): Promise<void> =>
     sendJson(res, 200, buildAnthropicModelsList(
-      deps.aliasOnlyModels() ? [] : await computeModelInfos(),
+      await computeModelInfos(),
       deps.routingMap().aliases.map((a) => ({ name: a.name, model: deps.aliasPickerShowsModel() ? a.target.model : undefined })),
+      deps.aliasOnlyModels(),
     ));
 
   // POST /v1/chat/completions for the `codex` Provider — the Responses stream behind the ChatGPT sign-in,

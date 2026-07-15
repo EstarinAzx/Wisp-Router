@@ -328,6 +328,20 @@ describe('buildAnthropicModelsList', () => {
     const list = buildAnthropicModelsList([], [{ name: 'sol' }]);
     expect(list.data[0].display_name).toBe('sol');
   });
+
+  // Alias-only (#81): the clean-list decision lives HERE, not at the call site, so the fallback
+  // below can't be skipped by a caller. With aliases present the Provider rows drop out.
+  it('alias-only with aliases present lists only the aliases', () => {
+    const list = buildAnthropicModelsList([modelInfo('codex', 'Codex — gpt-5')], [{ name: 'sol' }], true);
+    expect(list.data.map((m) => m.id)).toEqual(['claude-wisp-sol']);
+  });
+
+  // Zero-alias fallback (#81): alias-only effectively on with an empty Routing map must never
+  // serve an empty picker — the Provider rows come back until the first Alias exists.
+  it('alias-only with zero aliases falls back to the Provider rows', () => {
+    const list = buildAnthropicModelsList([modelInfo('codex', 'Codex — gpt-5')], [], true);
+    expect(list.data.map((m) => m.id)).toEqual(['claude-wisp-codex']);
+  });
 });
 
 describe('buildClaudeCodeSnippets', () => {

@@ -39,6 +39,13 @@ export type WispAuth = {
   bridgeSecret?: string;
 };
 
+// ----------------------------- effectiveAliasOnly ----------------------------- //
+
+// The one shared read of bridge.aliasOnlyModels (#81): unset resolves to ON at read time — never a
+// migration write — so a stored explicit false survives the default flip. Every consumer (Bridge
+// list, TUI echo, side-panel checkbox) must read through this fn, not the raw field.
+export const effectiveAliasOnly = (cfg: WispConfig): boolean => cfg.bridge?.aliasOnlyModels ?? true;
+
 // ----------------------------- Parse helpers ----------------------------- //
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>

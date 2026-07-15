@@ -265,9 +265,12 @@ const FIXED_CREATED_AT = '2025-01-01T00:00:00Z';
 // carries the pinned model when one is passed ('sol — gpt-5', matching the Provider rows), bare otherwise
 // — the caller decides via the wisp.bridge.aliasPickerShowsModel preference. Family routes stay unlisted.
 // first_id/last_id bound the page, null when empty.
-export const buildAnthropicModelsList = (infos: ChatModelInfo[], aliases: { name: string; model?: string }[] = []): AntModelsList => {
+export const buildAnthropicModelsList = (infos: ChatModelInfo[], aliases: { name: string; model?: string }[] = [], aliasOnly = false): AntModelsList => {
+  // Alias-only (#81) hides the Provider rows — but with zero Aliases that would serve Claude Code
+  // an empty picker, so the Provider rows come back. The decision lives here, not at call sites.
+  const providerRows = aliasOnly && aliases.length > 0 ? [] : infos;
   const data: AntModel[] = [
-    ...infos.map((info) => ({ id: info.id, name: info.name })),
+    ...providerRows.map((info) => ({ id: info.id, name: info.name })),
     ...aliases.map((a) => ({ id: a.name, name: a.model ? `${a.name} — ${a.model}` : a.name })),
   ].map((m) => ({
     type: 'model' as const, id: `claude-wisp-${m.id}`, display_name: m.name, created_at: FIXED_CREATED_AT,

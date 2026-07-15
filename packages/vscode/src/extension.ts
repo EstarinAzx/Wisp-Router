@@ -38,7 +38,7 @@ import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
 import { CodexAuth, AnthropicAuth } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
 import { anthropicInquire } from '@wisp/core';
-import { WispHome, planSecretsMigration, seedConfigFromVsCode } from '@wisp/core';
+import { WispHome, planSecretsMigration, seedConfigFromVsCode, effectiveAliasOnly } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 
@@ -146,9 +146,9 @@ const bridgePort = (): number => home.readConfig().bridge?.port ?? DEFAULT_BRIDG
 // The alias picker rows' pinned-model suffix toggle (#52) — config.json, on by default.
 const aliasPickerShowsModel = (): boolean => home.readConfig().bridge?.aliasPickerShowsModel ?? true;
 
-// The alias-only models-list toggle (#67) — config.json, off by default. On = Claude Code's
-// /model picker lists only the Aliases (Provider rows hidden). Anthropic door only.
-const aliasOnlyModels = (): boolean => home.readConfig().bridge?.aliasOnlyModels ?? false;
+// The alias-only models-list toggle (#67) — effective read via core's shared seam (#81: unset = on,
+// stored false respected). On = Claude Code's /model picker lists only the Aliases. Anthropic door only.
+const aliasOnlyModels = (): boolean => effectiveAliasOnly(home.readConfig());
 
 // Key resolution for a given Provider: its (possibly borrowed, via keyId) auth.json entry first,
 // then the row's own env var (OPENCODE_API_KEY for OpenCode, GROQ_API_KEY for Groq, …). Never read from
