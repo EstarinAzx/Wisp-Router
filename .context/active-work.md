@@ -8,53 +8,49 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-15 by Opus 4.8 (auto)._
-_At commit: `a903981` on `main` (Grok #92–#97 merged). #98 release-prep on branch `ticket/98-release-2.0.5` / PR #105 (unmerged)._
+_At commit: `89a0898` on `main`. `wisp-router@2.0.5` released to npm; epic #91 + issue #98 closed._
 
 ## Current focus
-**Grok (xAI OAuth) provider is BUILT + LIVE-VERIFIED — epic #91, 6 of 7 slices shipped.** Only the
-**release (2.0.5)** remains, and it's deliberately **human-gated** (irreversible npm publish). The
-`/loop /preset ticket-loop` self-promoting chain walked #92→#97 in one session; #98 is prepped in a PR,
-awaiting the tag. See [[2026-07-15-grok-xai-oauth-provider-shipped-live-verified]].
+**Nothing in flight.** The Grok (xAI OAuth) provider epic #91 is **fully done and released** —
+`wisp-router@2.0.5` is live on npm and the release run is green. Ready queue is empty. Next work is
+whatever's picked from the carried backlog below (top candidate: **VS Code extension 1.7.0**, which would
+ship the Grok face to extension users — the npm/TUI release is out, the extension is still v1.6.0).
 
 ## State
-- **Shipped to `main` this session (Grok epic #91):**
-  - **#92** catalog foundation — PR #99 → `509f753` (kind `xai-oauth`, 13th built-in Grok row, `XaiCreds` + pure helpers, `WispAuth.xai`).
-  - **#93** XaiAuth OAuth manager — PR #100 → `8146081` (`xaiAuth.ts`, PKCE loopback `127.0.0.1:56121`, OIDC discovery D7, `~/.grok` import D6; pure `parseGrokAuthJson`/`isXaiEndpoint`).
-  - **#94** Grok client — PR #101 → `a21382b` (`xaiClient.ts` `xaiStream`/`xaiRequest`, Codex-twin Responses; `isGrokCliProxyModel`/`xaiResponsesUrl`/`xaiRequestHeaders`/`xaiReasoning`/`rewriteXaiResponsesPayload`).
-  - **#95** Bridge dispatch — PR #102 → `93c83c2` (both doors; `handleXaiChat` + `startProviderStream` xai arm; **first `bridgeServer.test.ts`**; deps optional).
-  - **#96** TUI face — PR #103 → `528cfde` (`xaiAuth` in store, Bridge deps, `/signin xai`/`/test`, slash hint).
-  - **#97** VS Code face — PR #104 → `a903981` (extension `XaiAuth` + commands + Bridge/chat deps + Inquire arm; `chatProvider` arms; side panel + webview; package.json commands).
-- **LIVE-VERIFIED (the deferred check, now done):** via `claude-wisp` (Bridge Anthropic door), **grok-4.5** (public api.x.ai) AND **grok-build** (subscription proxy + `x-grok-*` headers) both stream real replies. The best-effort `x-grok-client-identifier`/`-version` (`grok-cli`/`1.0.0`) are **confirmed working**.
-- **Tests: 387 → 431** (`bun run test`); vscode + webview + TUI `tsc` clean throughout.
+- **Grok epic #91 shipped + released:** #92–#97 merged (`509f753`→`a903981`), #98 release-prep merged (PR #105 → `bee49c6`).
+- **Release `wisp-router@2.0.5` (2026-07-15):** tag `v2.0.5` → `bee49c6`; `release.yml` run `29406040823` **GREEN**.
+  - `wisp-router@2.0.5` live; all 4 `@tsd47216/wisp-router-{win32-x64,darwin-arm64,darwin-x64,linux-x64}@2.0.5` published (no best-effort fallback needed); shell optionalDependencies pinned to 2.0.5; GitHub release created.
+  - NPM_TOKEN was valid (publish clean). Only CI noise: Node 20 deprecation warnings (cosmetic).
+- **LIVE-VERIFIED earlier this epic:** grok-4.5 (public api.x.ai) + grok-build (subscription proxy, `x-grok-*` headers) both stream via `claude-wisp`; `grok-cli`/`1.0.0` client tags confirmed.
+- **Tests: 431** (`bun run test`); vscode + webview + TUI `tsc` clean.
 
 ## In flight
-**#98 release-prep — PR #105 (branch `ticket/98-release-2.0.5`), NOT merged.** Contains: `packages/tui/package.json` → **2.0.5**, CHANGELOG Grok entry, README 12→13 built-ins + Grok section. Left unmerged on purpose — the tag/publish is the human's call.
+None.
 
 ## Blocked
-None. (The release is a human decision, not a blocker.)
+None.
 
 ## Pick up here
-**Finish the release** (human gate, live checks already passed):
-1. Merge **PR #105** → `git tag v2.0.5 && git push --tags`.
-2. Watch `gh run list --workflow release.yml` for the `v2.0.5` run → **green**; confirm `npm view wisp-router version` → **2.0.5**.
-3. On green, **close epic #91** and its issue.
-4. If the run/publish fails, **registry-probe before blaming CI**: `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64` — a burned version can never be republished.
+Ready queue empty; no committed next task. Pick from the carried backlog (top candidate first):
+1. **VS Code extension 1.7.0** — ship the Grok face to extension users. CHANGELOG `[Unreleased]` already holds the Grok entry; extension is still v1.6.0. Separate release path from the npm `wisp-router` TUI.
+2. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
+3. **Panel-side alias rename** — TUI-only follow-up.
 
 ## Landmines
-- **npm publish is irreversible** — a burned `2.0.5` can't be reused. Verify before tagging.
-- **Rotate `NPM_TOKEN`** (repo secret) if it hasn't been — pasted in-session previously.
-- **Grok ≠ Groq** — Grok is `id:'xai'` (OAuth); do not disturb the `id:'groq'` row (Llama, API-key).
+- **Release rebase trap (bit us this release):** `/preset wrap-up` commits the `.context/` handoff locally but does **not** push it. Next session that context commit diverges from the PR's squash-merge on origin — **rebase local `main` onto `origin/main` and tag the release-prep commit** (the one with the bumped `packages/tui/package.json`), not the context commit. `release.yml` guards tag==version, so a wrong tag fails loud, but reconcile first.
+- **npm publish is irreversible** — a burned version can't be reused. (2.0.5 is spent; next release is 2.0.6+.)
+- **Grok ≠ Groq** — Grok is `id:'xai'` (OAuth); leave the `id:'groq'` row (Llama, API-key) alone.
 - Codex signed out on this machine (`/signin codex` before any Codex live checks).
-- Carried backlog (post-release): VS Code extension 1.7.0 (CHANGELOG `[Unreleased]` now also holds the Grok entry); root `.vsix` pile (ask before purging); panel-side alias rename (TUI-only).
 
 ## Open questions
 - (carried) grok-4.5 rides the public `api.x.ai` lane — it *works*, but whether xAI **bills** it under SuperGrok or as metered API usage is unverified (untestable from here).
 - (carried) Bridge client-tag heuristic mislabels some Claude Code requests as `(panel)`.
 
 ## Recent context
-- New core files this epic: `xaiAuth.ts`, `xaiClient.ts`; new pure cores in `catalog.ts` (search `xai`/`grok`); `WispAuth.xai` slot in `home.ts`; barrel updated. New tests: `xai.test.ts`, `bridgeServer.test.ts`; touched `catalog.test.ts`/`home.test.ts`/`slash.test.ts`.
+- Core files from the epic: `xaiAuth.ts`, `xaiClient.ts`; `xai`/`grok` pure cores in `catalog.ts`; `WispAuth.xai` in `home.ts`; barrel updated. Tests: `xai.test.ts`, `bridgeServer.test.ts`.
 - Face wiring: `packages/vscode/src/{extension,chatProvider,sidePanelProvider}.ts` + `webview/app.tsx` + `package.json`; `packages/tui/src/{store,bridge,app}.tsx`.
-- Repo labels: `ready-for-agent` (frontier) / `ready-for-human`. Ready queue is **empty**; #98 is `ready-for-human`.
+- Release plumbing: `.github/workflows/release.yml` (tag `v*` → 4-runner matrix build + npm publish); scoped platform pkgs under `packages/tui/npm/`.
+- Repo labels: `ready-for-agent` (frontier) / `ready-for-human`. Ready queue **empty**.
 
 ## Related
 - [[overview]]

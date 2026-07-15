@@ -9,35 +9,34 @@ tags: [context, pick-up]
 
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
-## What this session finished
-**Built + live-verified the whole Grok (xAI OAuth) provider — epic #91, slices #92–#97 merged to `main`.**
-- `/loop /preset ticket-loop` (self-paced) walked the self-promoting chain #92→#97 in one session — PRs
-  #99–#104, all squash-merged. Tests **387 → 431**; vscode + webview + TUI `tsc` clean throughout.
-- **Live-verified** through `claude-wisp`: **grok-4.5** (public api.x.ai) AND **grok-build** (subscription
-  proxy + `x-grok-*` headers) both stream real replies → the best-effort header values
-  (`grok-cli`/`1.0.0`) are **confirmed working**. Recorded in
-  [[decisions]] (2026-07-15 "Grok … SHIPPED + live-verified").
+## What last session finished
+**Released `wisp-router@2.0.5` — Grok (xAI OAuth) provider epic #91 fully done.**
+- Merged PR #105, rebased the local wrap-up context commit onto origin, tagged `v2.0.5` → `bee49c6`,
+  pushed. `release.yml` run `29406040823` **GREEN**.
+- npm: `wisp-router@2.0.5` + all 4 scoped platform pkgs live; shell optionalDeps pinned to 2.0.5;
+  GitHub release created. Epic **#91** + issue **#98** closed.
+- Recorded in [[active-work]] (State + Landmines).
 
 ## Next task
-**Finish the release — `wisp-router 2.0.5`. Human-gated (irreversible npm publish); the prep is done.**
+**No committed next task — ready queue is empty, epic #91 done.** Pick from the carried backlog
+(top candidate first):
+1. **VS Code extension 1.7.0** — ship the Grok face to *extension* users (the npm/TUI 2.0.5 release is
+   out; the extension is still v1.6.0, CHANGELOG `[Unreleased]` already holds the Grok entry). Separate
+   release path from `release.yml`.
+2. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
+3. **Panel-side alias rename** — TUI-only follow-up.
 
-Prep is in **PR #105** (branch `ticket/98-release-2.0.5`): version → 2.0.5, CHANGELOG, README 13 built-ins.
-
-```
-1. Merge PR #105  →  git tag v2.0.5 && git push --tags
-2. gh run list --workflow release.yml   → wait for the v2.0.5 run to go GREEN
-3. npm view wisp-router version         → expect 2.0.5
-4. Close epic #91 (+ issue #98) on green.
-```
+Or verify the one open loose thread: **grok-4.5 billing** (SuperGrok vs metered) — untestable from here,
+needs the human's xAI account.
 
 ## Landmines
-- **npm publish is irreversible** — a burned `2.0.5` can never be republished. That's why the tag was left
-  for a human; the live checks are already done, so it's safe to proceed.
-- If the run/publish fails, **registry-probe before blaming CI**:
-  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`.
-- **Rotate `NPM_TOKEN`** (repo secret) if it hasn't been.
+- **Release rebase trap (bit us this release):** wrap-up commits `.context/` locally but doesn't push it;
+  next session that commit diverges from the PR squash-merge on origin. **Rebase local `main` onto
+  `origin/main` and tag the version-bump commit**, not the context commit. `release.yml` guards
+  tag==`packages/tui` version, so a wrong tag fails loud.
+- **npm publish is irreversible** — 2.0.5 is spent; next npm release is 2.0.6+.
 - **Grok ≠ Groq** — Grok is `id:'xai'`; leave the `id:'groq'` row alone.
-- (carried) grok-4.5 works on the public lane, but its **billing** (SuperGrok vs metered) is unverified.
+- Codex signed out on this machine (`/signin codex` before any Codex live checks).
 
 ## Related
 - [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[stack]]
