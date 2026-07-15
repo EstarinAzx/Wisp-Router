@@ -10,40 +10,39 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What this session finished
-**Shipped the empty/malformed-200 fix and cut wisp-router 2.0.4.**
-- **#87** (PR #89 → `2008cd8`): `anthropicStream` now guards content-less turns — throws on a truly-empty
-  turn (thinking-only / dropped) so the Anthropic door writes a real `anthropicErrorFrame`/502 instead of
-  the silent empty SSE envelope Claude Code rejected; surfaces the truncation reason
-  (`max_tokens`/`content_filter`/`refusal`) as a visible marker; keeps partial content on a lost terminal
-  frame. Ported from `codexStream`. New pure `anthropicTruncationReason` in `catalog.ts`.
-- **#88** (PR #90 → `5c24299`): streaming path requests the model output ceiling
-  (`anthropicModelCaps(model).maxOutput` — Opus 128K, Sonnet/Haiku 64K) instead of the hard 16K; Inquire
-  keeps the bounded `INQUIRE_MAX_TOKENS`.
-- `bun run test` **387** (+11), vscode `tsc` clean. Both closed. Full write-up in [[decisions]] (2026-07-15
-  "#87/#88 fix landed"). Release **2.0.4** cut this session (tag `v2.0.4`).
+**Planned the Grok (xAI OAuth) provider and filed it as a self-promoting ticket chain — no code shipped.**
+- Ran the `init` funnel: studied `github.com/BlockedPath/pi-xai-oauth` (reference — extract the xAI OAuth
+  flow + payload rules only), locked decisions **D1–D7**, mapped ~60+ touch points.
+- Filed **epic #91** + slices **#92–#98** on `EstarinAzx/Wisp-Router`, dependency-ordered. Every slice
+  carries a "Loop protocol" footer (read blockers' breadcrumbs + committed code first; breadcrumb on
+  finish; promote unblocked dependents to `ready-for-agent`). Recorded in [[decisions]] (2026-07-15 "Grok
+  provider planned"). Target release **2.0.5**.
 
 ## Next task
-**Verify the 2.0.4 release, then two live checks tests can't reach.**
-1. `gh run list --repo EstarinAzx/Wisp-Router --workflow release.yml` → newest `v2.0.4` run **green** →
-   `npm view wisp-router version` → **2.0.4**. Platform probe if suspicious (see Landmines).
-2. **Live-confirm #87's residual:** run `claude-wisp`, hit/observe a content-less turn, grep the Bridge
-   `[bridge]` logs. NO `[bridge] error` line + request ended = the empty-envelope path the guard now
-   throws on (fixed). `[bridge] error anthropic …` present but Claude Code **still** "empty/malformed" =
-   the mid-stream error frame isn't honored by the client → **split a smaller sub-issue off #87**.
-3. Eyeball the FIXED `/bridge` screen (1830600) in a real terminal — never visually verified.
+**Run the Grok provider loop — self-paced, no fixed interval:**
+
+```
+/loop /preset ticket-loop
+```
+
+- Epic **#91**; **#92** (catalog foundation) is the only `ready-for-agent` ticket — the trunk. No code
+  dependencies: pure `catalog.ts` + `home.ts` + a new `xai.test.ts`.
+- The chain **self-promotes**: closing #92 labels #93 + #94 ready-for-agent, on down to #98 (release). One
+  loop walks the whole tree.
+- 7 tickets is long → wrap in `/relay N=6 /preset ticket-loop` for fresh sessions (relay = session
+  hygiene, not pacing). Do **not** set a fixed wall-clock interval — see [[prefers-dynamic-loop-pacing]];
+  ticket work advances on leg-finish, not a timer.
 
 ## Landmines
-- The ticket-loop queue is now **empty** (#87 + #88 both closed) — a `/loop /preset ticket-loop` will just
-  report "queue empty" until new `ready-for-agent` tickets are filed.
-- npm platform packages were spam-removed once — probe
-  `curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@tsd47216%2fwisp-router-win32-x64`
-  before blaming CI. A burned version can never be republished.
-- User should still rotate the npm token (repo secret `NPM_TOKEN`).
-- Codex signed out on this machine — `/signin codex` before Codex live checks.
-- Both faces share Bridge port + secret — second host fails loud; stop one first. TUI dev writes real
-  `~/.wisp` — use `WISP_HOME` sandbox; hand-seeded config.json must be BOM-free.
-- PowerShell 5.1 mangles multi-line `git commit -m` — use `git commit -F <file>` (or Bash heredoc).
-- Tests are 387; `bun run test` at root.
+- **Grok ≠ Groq.** New provider is `id:'xai'` (Grok, xAI, OAuth). Do NOT touch the existing `id:'groq'`
+  row (Llama, API-key).
+- The client is a **Codex-twin** (Responses API + `x-grok-*` headers + subscription proxy), NOT the plain
+  OpenAI-chat path — reference #94 against `codexClient.ts`.
+- xAI public constants (client id, scope, endpoints, model caps) live in the **epic #91 body** — copy from
+  there, don't re-derive.
+- **Deferred (carried, not blocking the loop):** 2.0.4 live-terminal checks — #87 residual live-confirm +
+  eyeball the fixed `/bridge` screen (see [[active-work]]); npm token rotation (`NPM_TOKEN`); Codex signed
+  out (`/signin codex` before Codex checks).
 
 ## Related
 - [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[stack]]

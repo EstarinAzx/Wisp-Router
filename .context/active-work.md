@@ -8,12 +8,13 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-15 by Opus 4.8 (auto)._
-_At commit: `31026a7` on `main` (the 2.0.4 release commit; working tree clean)._
+_At commit: `41da0fb` on `main`; this update = Grok-provider planning (epic #91), no code changed._
 
 ## Current focus
-**wisp-router 2.0.4 is released and verified.** The empty/malformed-200 fix (#87 + #88) shipped, the
-release cut cleanly, and it's live on npm. What remains is **not** release verification anymore — it's the
-handful of live/real-terminal checks that the test suite can't reach, then the feature backlog.
+**Grok (xAI OAuth) provider is planned and sliced — epic #91, target 2.0.5.** This session ran the `init`
+funnel (studied `pi-xai-oauth`, locked decisions D1–D7) and filed a self-promoting ticket chain #92–#98.
+No code yet — next session runs the loop. Deferred/background: the 2.0.4 live-terminal checks tests can't
+reach (below), and the feature backlog.
 
 ## State
 - **Done (verified this session):** 2.0.4 release is green end-to-end — tag `v2.0.4` → `31026a7`,
@@ -29,25 +30,33 @@ handful of live/real-terminal checks that the test suite can't reach, then the f
     `anthropicModelCaps(model).maxOutput` (Opus 128K, Sonnet/Haiku 64K); Inquire keeps bounded
     `INQUIRE_MAX_TOKENS = 16_000`.
   - `bun run test` **387**, vscode `tsc` clean. Full write-up in [[decisions]].
+- **Planned this session (no code):** Grok (xAI OAuth) provider — 4th kind `xai-oauth`, epic **#91** →
+  slices **#92** catalog · **#93** XaiAuth · **#94** client · **#95** Bridge · **#96** TUI · **#97** VS
+  Code · **#98** release. Decisions D1–D7 in [[decisions]] (2026-07-15 "Grok provider planned"). #92 is
+  `ready-for-agent`; the chain self-promotes as blockers close. Grok ≠ Groq; client is a Codex-twin.
 - **In flight:** none.
 - **Blocked:** none.
 
 ## Pick up here
-No release work left — start with the live checks tests can't reach, then the backlog:
+**Run the Grok provider loop — `/loop /preset ticket-loop` (self-paced, no interval).** Epic #91; **#92**
+is the ready trunk. The chain self-promotes down to #98; each leg reads its blockers' breadcrumbs +
+committed code first. Long chain → wrap in `/relay N=6 /preset ticket-loop` for fresh sessions.
+
+Deferred (carried, not blocking the loop) — the 2.0.4 live checks tests can't reach:
 1. **Live-confirm #87's residual:** run `claude-wisp`, force/observe a content-less turn, watch the Bridge
    `[bridge]` logs. If a failure logs `[bridge] error anthropic …` but Claude Code **still** shows "empty
    or malformed", the mid-stream error frame isn't honored by the client → **split a smaller sub-issue off
    #87** (confirm signature in [[decisions]]).
 2. **Eyeball the FIXED `/bridge` screen** in a real terminal (the `1830600` row-overlap fix — never
    visually verified).
-3. Then the backlog: #68 (chat mode) / #69 (copilot-wisp), or the small orphans below.
+3. Backlog: #68 (chat mode) / #69 (copilot-wisp), or the small orphans below.
 
 Small orphans, anytime: LICENSE + `license` fields in `packages/tui/npm/*/package.json`; VS Code
 extension 1.7.0 release (CHANGELOG Unreleased ready); root `.vsix` pile (ask before purging); panel-side
 alias rename (TUI-only today); `.claude/settings.local.json` snippet switch (spec #78 out-of-scope note).
 
 ## Skills for next session
-- /preset pick-up → run the live checks above, then work the frontier. /preset catch-up only if stale.
+- /preset pick-up → resumes the Grok loop (baton in [[pick-up]]). Or go straight to `/loop /preset ticket-loop`.
 
 ## Open questions
 - (carried) #87 live confirm: does a real content-less failure log `[bridge] error anthropic …` or not? No
@@ -72,8 +81,8 @@ alias rename (TUI-only today); `.claude/settings.local.json` snippet switch (spe
   `packages/core/tests/anthropic.test.ts`.
 - TUI dev run: `cd packages/tui; bun run dev` (real `~/.wisp`; `WISP_HOME` to sandbox; BOM-free
   config.json if hand-seeded).
-- Repo labels: `ready-for-agent` (frontier), `ready-for-human`. Ticket-loop is label-gated — the queue is
-  empty (#87 + #88 both closed).
+- Repo labels: `ready-for-agent` (frontier), `ready-for-human`. Ticket-loop is label-gated — **#92 is now
+  `ready-for-agent`** (Grok epic #91); the chain self-promotes its dependents on close.
 
 ## Related
 - [[overview]]

@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-15-grok-xai-oauth-provider-planned-epic-91]] — Grok (xAI OAuth) provider planned: 4th kind `xai-oauth`, epic #91 / slices #92–#98, target 2.0.5
 - [[2026-07-15-87-88-fix-landed-anthropicstream-guards-content-less-turns-streaming]] — #87/#88 fix landed: anthropicStream guards content-less turns; streaming max_tokens = model ceiling
 - [[2026-07-15-diagnosis-claude-wisp-empty-or-malformed-response-http-200-is-our-end]] — Diagnosis: claude-wisp "empty or malformed response (HTTP 200)" is our end (tickets #87/#88)
 - [[2026-07-15-alias-only-model-list-defaults-on-spec-78-ticket-81]] — Alias-only model list defaults ON (spec #78, ticket #81)
