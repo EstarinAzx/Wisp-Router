@@ -5,6 +5,7 @@ import {
   isXaiProvider, isXaiSignedIn,
   tokensToXaiCreds, shouldRefreshXaiToken, parseXaiCreds,
   xaiModelCaps, xaiModelsFrom, XAI_MODELS,
+  parseGrokAuthJson, isXaiEndpoint,
   effortOptionsFor, oauthModelOptions,
   type Provider,
 } from '../src/catalog';
@@ -145,6 +146,54 @@ describe('effortOptionsFor — Grok', () => {
   // in the client slice #94; the ladder itself is provider-level.)
   it('offers the low→xhigh ladder for Grok, no max', () => {
     expect(effortOptionsFor(provider())).toEqual(['low', 'medium', 'high', 'xhigh']);
+  });
+});
+
+describe('parseGrokAuthJson (#93 — ~/.grok/auth.json import)', () => {
+  const CLIENT = 'b1a00492-073a-47ea-816f-4c329264a828';
+
+  // Present shape: the Grok CLI nests creds under an "https://auth.x.ai::<client_id>" key — `key` is the
+  // bearer, plus refresh_token + an absolute expires_at (already ms here).
+  it('imports the namespaced xAI entry (key→bearer, refresh, expiry)', () => {
+    const json = { [`https://auth.x.ai::${CLIENT}`]: { key: 'at', refresh_token: 'rt', expires_at: 1_750_000_000_000 } };
+    expect(parseGrokAuthJson(json)).toEqual({ accessToken: 'at', refreshToken: 'rt', expiresAt: 1_750_000_000_000 });
+  });
+
+  // Some builds store expires_at in epoch SECONDS — normalize to ms by magnitude so the refresh check reads
+  // a sane deadline (a wrong guess only forces one self-healing refresh, so this is best-effort).
+  it('normalizes a seconds expires_at to milliseconds', () => {
+    const json = { [`https://auth.x.ai::${CLIENT}`]: { key: 'at', refresh_token: 'rt', expires_at: 1_750_000_000 } };
+    expect(parseGrokAuthJson(json)?.expiresAt).toBe(1_750_000_000_000);
+  });
+
+  // Legacy/flat shape: the creds sit at the root (no issuer-namespaced key).
+  it('reads a flat legacy shape at the root', () => {
+    expect(parseGrokAuthJson({ key: 'at', refresh_token: 'rt' })).toEqual({ accessToken: 'at', refreshToken: 'rt' });
+  });
+
+  // Missing shapes: nothing usable (no bearer) → undefined, never a throw; the caller falls back to fresh sign-in.
+  it('returns undefined for absent, empty, non-object, and bearer-less input', () => {
+    expect(parseGrokAuthJson(undefined)).toBeUndefined();
+    expect(parseGrokAuthJson({})).toBeUndefined();
+    expect(parseGrokAuthJson('nope')).toBeUndefined();
+    expect(parseGrokAuthJson({ [`https://auth.x.ai::${CLIENT}`]: { refresh_token: 'rt' } })).toBeUndefined();
+  });
+});
+
+describe('isXaiEndpoint (#93 — OIDC discovery host allowlist)', () => {
+  // A discovered OAuth endpoint MUST live on x.ai (or a subdomain) — otherwise the token/redirect would
+  // leak the bearer off-domain. The leading-dot subdomain check blocks the look-alike bypasses.
+  it('accepts x.ai and its subdomains', () => {
+    expect(isXaiEndpoint('https://auth.x.ai/oauth2/token')).toBe(true);
+    expect(isXaiEndpoint('https://x.ai/authorize')).toBe(true);
+  });
+
+  it('rejects off-domain, look-alike, and unparseable hosts', () => {
+    expect(isXaiEndpoint('https://cli-chat-proxy.grok.com/v1')).toBe(false);
+    expect(isXaiEndpoint('https://x.ai.evil.com/token')).toBe(false);
+    expect(isXaiEndpoint('https://evilx.ai/token')).toBe(false);
+    expect(isXaiEndpoint('not a url')).toBe(false);
+    expect(isXaiEndpoint('')).toBe(false);
   });
 });
 
