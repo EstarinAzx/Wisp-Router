@@ -6,8 +6,10 @@ import {
   tokensToXaiCreds, shouldRefreshXaiToken, parseXaiCreds,
   xaiModelCaps, xaiModelsFrom, XAI_MODELS,
   parseGrokAuthJson, isXaiEndpoint,
+  isGrokCliProxyModel, xaiResponsesUrl, xaiRequestHeaders, xaiReasoning, rewriteXaiResponsesPayload,
+  buildCodexResponsesBody, parseSseBlock, reduceResponsesTextEvents, responsesIncompleteReason,
   effortOptionsFor, oauthModelOptions,
-  type Provider,
+  type Provider, type CodexResponsesEvent,
 } from '../src/catalog';
 
 // A Grok catalog row, overridable per-test — mirrors the anthropic.test.ts provider() helper.
@@ -194,6 +196,128 @@ describe('isXaiEndpoint (#93 — OIDC discovery host allowlist)', () => {
     expect(isXaiEndpoint('https://evilx.ai/token')).toBe(false);
     expect(isXaiEndpoint('not a url')).toBe(false);
     expect(isXaiEndpoint('')).toBe(false);
+  });
+});
+
+describe('isGrokCliProxyModel (#94 — model → endpoint routing)', () => {
+  // grok-build + composer are the subscription models served by the Grok-CLI proxy; grok-4.5+ go direct
+  // to the public api.x.ai. This split drives both the URL and the x-grok-* proxy headers.
+  it('is true for the subscription (proxy) models, false for the public ones', () => {
+    expect(isGrokCliProxyModel('grok-build')).toBe(true);
+    expect(isGrokCliProxyModel('grok-composer-2.5-fast')).toBe(true);
+    expect(isGrokCliProxyModel('grok-4.5')).toBe(false);
+    expect(isGrokCliProxyModel('grok-3')).toBe(false);
+  });
+});
+
+describe('xaiResponsesUrl (#94)', () => {
+  const PROXY = 'https://cli-chat-proxy.grok.com/v1';
+  // Proxy models hit the row's proxy base + /responses; grok-4.5 overrides to the public api.x.ai.
+  it('routes proxy models to the proxy and public models to api.x.ai', () => {
+    expect(xaiResponsesUrl(PROXY, 'grok-build')).toBe(`${PROXY}/responses`);
+    expect(xaiResponsesUrl(PROXY, 'grok-4.5')).toBe('https://api.x.ai/v1/responses');
+  });
+});
+
+describe('xaiRequestHeaders (#94 — proxy vs public)', () => {
+  // Proxy models carry the full x-grok-* CLI-identifying set (the subscription proxy validates them) plus
+  // the bearer + a per-stream cache-routing conv id.
+  it('adds the x-grok-* set + bearer for a proxy model', () => {
+    const h = xaiRequestHeaders('grok-build', 'tok', 'sess-1');
+    expect(h['Authorization']).toBe('Bearer tok');
+    expect(h['x-xai-token-auth']).toBe('xai-grok-cli');
+    expect(h['x-grok-model-override']).toBe('grok-build');
+    expect(h['x-grok-conv-id']).toBe('sess-1');
+    expect(h['x-grok-client-identifier']).toBeTruthy();
+    expect(h['x-grok-client-version']).toBeTruthy();
+  });
+
+  // A public model sends only the bearer — no x-grok-* headers (api.x.ai rejects/ignores them; they're a
+  // proxy-only signal).
+  it('sends only the bearer for a public model', () => {
+    const h = xaiRequestHeaders('grok-4.5', 'tok', 'sess-2');
+    expect(h['Authorization']).toBe('Bearer tok');
+    expect('x-grok-model-override' in h).toBe(false);
+    expect('x-xai-token-auth' in h).toBe(false);
+  });
+});
+
+describe('xaiReasoning (#94 — per-model reasoning gate)', () => {
+  // grok-4.5+ are reasoning models (take reasoning.effort, same block shape as Codex); build/composer reject
+  // it. Effort folds 'max'→'xhigh' (xAI's wire tops there, like Codex).
+  it('emits reasoning only for the reasoning family, folding max→xhigh', () => {
+    expect(xaiReasoning('grok-4.5', 'high')).toEqual({ effort: 'high', summary: 'auto' });
+    expect(xaiReasoning('grok-4.5', 'max')).toEqual({ effort: 'xhigh', summary: 'auto' });
+    expect(xaiReasoning('grok-build', 'high')).toBeUndefined();
+    expect(xaiReasoning('grok-composer-2.5-fast', 'high')).toBeUndefined();
+  });
+
+  // No effort threaded → the reasoning family still reasons at the default depth.
+  it('defaults the effort for a reasoning model when none is given', () => {
+    expect(xaiReasoning('grok-4.5')).toEqual({ effort: 'medium', summary: 'auto' });
+  });
+});
+
+describe('rewriteXaiResponsesPayload (#94 — external-passthrough sanitizer)', () => {
+  // For the path where the Bridge forwards a RAW external Responses payload to xAI (slice #95). xAI 400s on
+  // three OpenAI-Responses quirks: prompt_cache_retention, the reasoning.encrypted_content include entry on
+  // the proxy, and the 'minimal' effort level.
+  it('drops prompt_cache_retention but keeps prompt_cache_key', () => {
+    const out = rewriteXaiResponsesPayload({ prompt_cache_key: 'k', prompt_cache_retention: '24h', model: 'grok-build' }, { proxy: true });
+    expect('prompt_cache_retention' in out).toBe(false);
+    expect(out.prompt_cache_key).toBe('k');
+  });
+
+  it('strips the encrypted_content include entry on proxy models only', () => {
+    const proxied = rewriteXaiResponsesPayload({ include: ['reasoning.encrypted_content', 'other'] }, { proxy: true });
+    expect(proxied.include).toEqual(['other']);
+    // On a public model the include array is left intact.
+    const publicOut = rewriteXaiResponsesPayload({ include: ['reasoning.encrypted_content'] }, { proxy: false });
+    expect(publicOut.include).toEqual(['reasoning.encrypted_content']);
+  });
+
+  it('folds a minimal effort to low and leaves a clean payload untouched', () => {
+    expect(rewriteXaiResponsesPayload({ reasoning: { effort: 'minimal', summary: 'auto' } }, { proxy: false }).reasoning)
+      .toEqual({ effort: 'low', summary: 'auto' });
+    expect(rewriteXaiResponsesPayload({ model: 'grok-4.5', input: [] }, { proxy: false }))
+      .toEqual({ model: 'grok-4.5', input: [] });
+  });
+});
+
+describe('Grok Responses body (#94 — reuses buildCodexResponsesBody + xaiReasoning)', () => {
+  // Grok speaks the same Responses API: the system turn hoists into top-level instructions, and reasoning
+  // rides only for the reasoning family via xaiReasoning.
+  it('hoists system to instructions and gates reasoning by model', () => {
+    const reasoningBody = buildCodexResponsesBody({
+      model: 'grok-4.5',
+      messages: [{ role: 'system', content: 'be terse' }, { role: 'user', content: 'hi' }],
+      reasoning: xaiReasoning('grok-4.5', 'high'),
+    });
+    expect(reasoningBody.instructions).toBe('be terse');
+    expect(reasoningBody.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+
+    const proxyBody = buildCodexResponsesBody({
+      model: 'grok-build',
+      messages: [{ role: 'user', content: 'hi' }],
+      reasoning: xaiReasoning('grok-build', 'high'),
+    });
+    expect('reasoning' in proxyBody).toBe(false);
+  });
+});
+
+describe('Grok Responses stream (#94 — reuses the Codex Responses reducers)', () => {
+  // Grok's stream is the same Responses SSE as Codex, so the shared reducers assemble it. A canned sequence:
+  // text deltas + a terminal response.completed carrying an incomplete_details.reason.
+  it('assembles the answer text and surfaces the truncation reason', () => {
+    const blocks = [
+      'event: response.output_text.delta\ndata: {"delta":"Hel"}',
+      'event: response.output_text.delta\ndata: {"delta":"lo"}',
+      'event: response.completed\ndata: {"response":{"output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}],"incomplete_details":{"reason":"max_output_tokens"}}}',
+    ];
+    const events = blocks.map(parseSseBlock).filter((e): e is CodexResponsesEvent => e !== undefined);
+    expect(reduceResponsesTextEvents(events)).toBe('Hello');
+    const terminal = events.find((e) => e.event === 'response.completed');
+    expect(responsesIncompleteReason(terminal?.data?.response)).toBe('max_output_tokens');
   });
 });
 
