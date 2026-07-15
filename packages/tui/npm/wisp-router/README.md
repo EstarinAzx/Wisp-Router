@@ -24,4 +24,8 @@ claude-wisp     # Claude Code through the Bridge (start the Bridge first)
 
 State lives in `~/.wisp/` (`config.json` + owner-only `auth.json`), shared with the Wisp VS Code extension.
 
+## Versioning
+
+`wisp-router` starts at **2.0.x** — there is no 1.x npm line. It shares the monorepo with the 1.x Wisp VS Code extension; the two faces version independently.
+
 Source and docs: [github.com/EstarinAzx/Wisp-Router](https://github.com/EstarinAzx/Wisp-Router).
