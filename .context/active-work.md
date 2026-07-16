@@ -8,13 +8,13 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-16 by Fable 5 (auto)._
-_At commit: `8129879` on `main` (in sync with `origin/main`; latest tag `v2.0.7`)._
+_At commit: `81b3d52` on `main` (in sync with `origin/main`; tag `v2.0.8` pushed)._
 
 ## Current focus
-**Post-2.0.7 idle.** This session shipped one small feature: `claude-wisp` now sets
+**wisp-router 2.0.8 released and VERIFIED** (npm thin shell + all 4 platform packages +
+GitHub release assets live; run 29475885120 green, ~2m). Contents: `claude-wisp` sets
 `CLAUDE_BINARY=claude-wisp` on the spawned child (`8129879`), so `/relay` loops inside a
-wisp-launched session respawn the wrapper instead of bare `claude`. **Riding on main until
-2.0.8** — no release cut for it.
+wisp-launched session respawn the wrapper instead of bare `claude`.
 
 ## State
 - **CLAUDE_BINARY on child DONE** (`8129879`, pushed): added to core's pure `buildClaudeLaunch`
@@ -22,9 +22,12 @@ wisp-launched session respawn the wrapper instead of bare `claude`. **Riding on 
   inherited value (session running under the wrapper ⇒ legs must too).
 - TDD'd: test updated red-first in `packages/core/tests/bridgeAnthropic.test.ts`; 434/434 pass.
 - **Smoke-tested end-to-end by the user**: Bridge up, `bun src/claude-wisp.ts`, child echoed
-  `claude-wisp`. Installed compiled binaries get it only at the next release.
+  `claude-wisp`.
+- **Released as 2.0.8** (`81b3d52` + tag `v2.0.8`): verified `wisp-router@2.0.8` on npm, all
+  4 platform packages, GitHub release with 4 binaries.
 - Relay skill doc (`~/.claude/skills/relay/SKILL.md`, off-repo) noted: profile export
-  `$env:CLAUDE_BINARY` only needed on wisp-router < 2.0.8.
+  `$env:CLAUDE_BINARY` only needed on wisp-router < 2.0.8 — droppable once the installed
+  wrapper is updated to 2.0.8.
 
 ## In flight
 None.
@@ -40,8 +43,6 @@ Ready queue empty. Carried backlog (top first):
 2. **catalog.ts someday-9 remainder** — deferred, low payoff.
 3. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
 4. **Panel-side alias rename** — TUI-only follow-up.
-- **2.0.8 trigger:** main carries the unreleased CLAUDE_BINARY change — fold it into whatever
-  next warrants a release.
 
 ## Skills for next session
 (none clearly apply — top items are verify/human steps)
