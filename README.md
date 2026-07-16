@@ -33,6 +33,26 @@ Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, y
 
 The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
 
+## Bridge in the TUI
+
+`/bridge` starts the local endpoint. OpenAI + Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it:
+
+<p align="center">
+  <img src="docs/bridge-tui.png" alt="Wisp TUI Bridge panel — bridge up on port 41184" width="720">
+</p>
+
+## Routing aliases
+
+Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Same list lands in Claude Code's model picker as **From gateway**:
+
+<p align="center">
+  <img src="docs/routing-tui.png" alt="Wisp TUI Routing — custom aliases" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/claude-model-picker.png" alt="Claude Code model picker showing Wisp gateway aliases" width="720">
+</p>
+
 ## Install
 
 ### TUI + Bridge + Claude Code launcher (npm)
@@ -77,26 +97,6 @@ bun run compile    # typecheck + bundle + webview build (packages/vscode)
 
 - **Extension:** press **F5** → Extension Development Host (the Wisp icon is in *that* window's activity bar). Package a `.vsix` with `bun run package` in `packages/vscode`.
 - **TUI:** `cd packages/tui && bun run dev`. It writes the real `~/.wisp` — set `WISP_HOME` to sandbox.
-
-## Bridge in the TUI
-
-`/bridge` starts the local endpoint. OpenAI + Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it:
-
-<p align="center">
-  <img src="docs/bridge-tui.png" alt="Wisp TUI Bridge panel — bridge up on port 41184" width="720">
-</p>
-
-## Routing aliases
-
-Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Same list lands in Claude Code's model picker as **From gateway**:
-
-<p align="center">
-  <img src="docs/routing-tui.png" alt="Wisp TUI Routing — custom aliases" width="720">
-</p>
-
-<p align="center">
-  <img src="docs/claude-model-picker.png" alt="Claude Code model picker showing Wisp gateway aliases" width="720">
-</p>
 
 ## Releases
 
