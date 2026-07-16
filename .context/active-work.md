@@ -8,59 +8,41 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-16 by Fable 5 (auto)._
-_At commit: `6812751` on `main` (in sync with `origin/main`; tag `v2.0.10` pushed)._
+_At commit: `8483598` on `main` (not pushed this session)._
 
 ## Current focus
-**wisp-router 2.0.10 released and VERIFIED** — the #111 prompt-caching fix. Bridged
-Anthropic-routed sessions were burning plan usage ~5-10x native because the Bridge dropped
-`cache_control`; `buildAnthropicMessagesBody` now places two ephemeral breakpoints (last
-system block — covers tools too — and the final message's last block). Live-verified against
-the Claude.ai OAuth endpoint: turn 1 wrote 9122 tokens to cache, turn 2 read all 9122 back.
-npm thin shell + all 4 platform packages + release assets confirmed at 2.0.10.
+Routing CLI snapshot half is complete: `wisp routing` now exposes the live map to humans and `--json` emits a faithful machine snapshot. Next frontier is #109, which adds validated set/unset writes and credential warnings so external tools can complete the flip/restore dance.
 
 ## State
-- **#111 cache fix DONE** (`e5ec476`, closed): two breakpoints in core `anthropic.ts`; a
-  bare-string final turn converts to one text block to carry the marker; all earlier plain
-  turns keep the #29 bare-string shape. 3 new + 11 updated test assertions; suite 437/437;
-  extension + TUI tsc clean. See [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]].
-- **Routing CLI + Slot skill planned** — spec #107, tickets #108 → #109 → #110 (blocking
-  chain), all `ready-for-agent`. Design settled by grill; see
-  [[2026-07-16-routing-cli-plus-slot-skill-not-mcp]]. **Slot** is now a CONTEXT.md term;
-  MVD spine in [[happy-path]] § "Routing CLI + Slot skill".
-- Release bump `6812751`, workflow run 29489189308 green.
-
-## In flight
-None.
-
-## Blocked
-None.
+- **In flight:** None.
+- **Done this session:** #108 committed as `8483598` and closed. Added pure `packages/core/src/routingCli.ts`, tests, core export, thin `packages/tui/src/routingCli.ts`, and lazy routing dispatch in `packages/tui/src/index.tsx`.
+- **Blocked:** None. #109 was blocked by #108 and is now ready.
 
 ## Pick up here
-Frontier: **#108 — `wisp routing` show + `--json` snapshot** (unblocked). Then #109
-(set/unset + credential warning), then #110 (Slot skill, lands in `~/.claude/skills/`).
-Carried backlog behind those:
-1. **Publish VS Code extension 1.7.0 to the Marketplace** — human step: `vsce publish` in
-   `packages/vscode` (EsarinAzx PAT) or upload `packages/vscode/wisp-1.7.0.vsix`.
-   **Never tag `v1.7.0`** (fires the TUI `release.yml`).
-2. Panel-side alias rename — TUI-only follow-up.
-3. Root `.vsix` pile — stale builds; **ask before purging**.
-4. catalog.ts someday-9 remainder — deferred, low payoff.
+Run `/preset scope 109`, then implement `wisp routing set <row> <target>` and `unset <row>` against the existing pure core seam. Read GitHub #109 and spec #107 first. Extend `packages/core/src/routingCli.ts` + `packages/core/tests/routingCli.test.ts`; keep filesystem/auth lookup/printing in `packages/tui/src/routingCli.ts`; document commands in the TUI README. Verify one live next-request Bridge reroute with a safe target before closing #109.
+
+After #109, continue to #110: personal Slot skill in `~/.claude/skills/`.
+
+## Skills for next session
+- `superpowers:brainstorming` — design is already settled; use it only to confirm #109 boundaries before planning.
+- `superpowers:writing-plans` — turn #109 acceptance criteria into the TDD execution plan.
+- `superpowers:test-driven-development` — core argv/edit behavior needs red-green coverage.
+- `verify` — exercise the real CLI and one live Bridge next-request reroute with isolated state where possible.
 
 ## Open questions
-- (carried) grok-4.5 on public `api.x.ai`: SuperGrok vs metered billing unverified.
-- (carried) Bridge client-tag heuristic mislabels some Claude Code requests as `(panel)`.
+None for #109. Carried unknowns outside this task: Grok 4.5 public API billing; Bridge client-tag heuristic sometimes labels Claude Code as `(panel)`.
 
 ## Recent context
-- User's installed wrapper: `npm i -g wisp-router@2.0.10` then restart the Bridge host —
-  earlier binaries still burn uncached on Anthropic-routed sessions.
-- Until the user's Max window resets: rebind the haiku Family route off `anthropic` (else
-  Claude Code background chores keep billing Max even when the session model is a Codex
-  alias); see [[bridged-family-routes-bound-to-anthropic-burn-max-quota]].
+- `--json` serializes the live `RoutingMap` directly; it does not materialize missing family keys or reorder aliases.
+- Family rows come from shared `FAMILY_KEYS`; the CLI does not maintain a second hardcoded family list.
+- Runtime verification used isolated `WISP_HOME`; unknown and duplicate flags exit 1, empty home shows four Active Provider fallbacks.
+- Final verification: 441/441 core tests, core + TUI TypeScript clean, independent review ready to merge.
+- User's installed global wrapper still needs a future release containing `8483598`; current source command works through Bun.
 
 ## Related
 - [[overview]]
-- [[stack]]
+- [[pick-up]]
+- [[flows]]
 - [[decisions]]
 - [[gotchas]]
-- [[pick-up]]
 - [[happy-path]]

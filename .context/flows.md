@@ -1,7 +1,7 @@
 ---
 type: flows
 project: wisp
-updated: 2026-07-14
+updated: 2026-07-16
 tags: [flows]
 ---
 # Flows
@@ -48,3 +48,21 @@ tags: [flows]
 8. packages/core/src/anthropicAuth.ts:70-90 posts the authorization code, verifier, redirect URI, client id, and state to `https://platform.claude.com/v1/oauth/token`; src/catalog.ts:828-836 converts the token JSON into `{accessToken, refreshToken, expiresAt}`.
 9. packages/core/src/anthropicAuth.ts:203-206 reads stored creds when callers need them and refreshes if needed; packages/core/src/anthropicAuth.ts:169-188 refreshes near expiry, keeps the old refresh token if the response omits one, and logs but keeps old creds on refresh failure.
 10. src/extension.ts:319-326 and src/chatProvider.ts:109-116 use `isSignedIn()` for UI/model availability; src/extension.ts:680-682, src/chatProvider.ts:185-191, and src/anthropicClient.ts:52-75 use `current()` creds for Inquire/native chat Messages requests.
+
+## Routing CLI snapshot — live map to terminal
+- **Question:** How does `wisp routing` expose the current Routing map?  **Lens:** understand
+- **Summary:** The `wisp` entry lazily dispatches `routing` before renderer imports, TUI glue reads the live Wisp home config, and pure core logic formats all fixed family rows or serializes the stored map directly as JSON.
+- **Entry:** packages/tui/src/index.tsx:18
+- **Key files:** packages/tui/src/index.tsx, packages/tui/src/routingCli.ts, packages/core/src/routingCli.ts, packages/core/src/routing.ts
+- **Updated:** 2026-07-16
+
+### Hops
+1. `packages/tui/src/index.tsx:18` matches the `routing` argv word and lazily imports `runRoutingCli` before any OpenTUI import.
+2. `packages/tui/src/routingCli.ts:16` reads `home.readConfig().routing`, defaults to `EMPTY_ROUTING_MAP`, and passes argv + map to core.
+3. `packages/core/src/routingCli.ts:21` accepts only show or `--json`; text iterates shared `FAMILY_KEYS`, while JSON calls `JSON.stringify` on the current map itself.
+4. `packages/tui/src/routingCli.ts:19` prints returned lines and hands the exit code back to the process.
+
+## Related
+
+- [[overview]]
+- [[active-work]]
