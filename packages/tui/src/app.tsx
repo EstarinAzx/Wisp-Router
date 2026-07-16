@@ -944,6 +944,16 @@ export const App = () => {
             <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
           </box>
 
+          {/* Advisor is endpoint-gated upstream — its calls never hit the configurable base URL,
+              so the Bridge can't intercept them and no fix exists on our side. Warn here, where
+              Claude Code gets wired. Hand-wrapped (panel rows never use opentui wrap); -2 = the
+              panel's inner padding. Plain-text amber, no glyph — ⚠ is ambiguous-width and smears
+              on common Windows fonts, same reason the select indicator is off. */}
+          <box marginTop={1} flexDirection="column">
+            {wrapWords("Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.", panelCols - 2)
+              .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg="#fbbf24">{l}</text>)}
+          </box>
+
           <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge stops · /quit kills</text>
         </box>
       )}
