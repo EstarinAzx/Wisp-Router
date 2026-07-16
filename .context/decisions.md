@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-07-15
+updated: 2026-07-16
 tags: [context, decisions]
 ---
 
@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-16-typescript-7-native-compiler-upgrade]] — upgrade to TypeScript 7.0.2 (native Go compiler); any tsconfig consuming core's `src` must set `types:["node"]`
 - [[2026-07-15-anthropic-door-must-honor-stream-false-model-validation]] — Anthropic door must honor `stream:false` (Claude Code `/model` validation is a non-streaming probe reading `usage.input_tokens`); shipped in `wisp-router@2.0.6`
 - [[2026-07-15-catalog-ts-modularization-plan-deferred]] — catalog.ts modularization (DEFERRED): seam map (9-file end-state), 4-file peel first, shared-kernel rule, green-to-green
 - [[2026-07-15-grok-xai-oauth-provider-shipped-live-verified]] — Grok (xAI OAuth) provider SHIPPED + live-verified: #92–#97 merged, #98 release-prep in PR #105; proxy `x-grok-*` headers confirmed

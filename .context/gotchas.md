@@ -1,7 +1,7 @@
 ---
 type: gotchas-index
 project: wisp
-updated: 2026-07-15
+updated: 2026-07-16
 tags: [context, gotchas]
 ---
 
@@ -9,6 +9,7 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[ts7-drops-types-auto-include-when-types-unset]] — TS 7 drops `@types/*` auto-include when `types` is unset (node/DOM globals vanish; set `types:["node"]`)
 - [[opentui-selects-are-invisible-without-an-explicit-height-and-bare]] — opentui: selects are invisible without an explicit height, and bare exit strands the terminal
 - [[no-fill-in-middle-fim-on-the-zen-endpoint]] — No fill-in-middle (FIM) on the Zen endpoint
 - [[webview-csp-tailwind-v4]] — Webview CSP × Tailwind v4

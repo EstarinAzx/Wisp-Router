@@ -1,14 +1,14 @@
 ﻿---
 type: stack
 project: wisp
-updated: 2026-07-14
+updated: 2026-07-16
 tags: [context, stack]
 ---
 
 # Stack
 
 ## Languages & runtime
-- TypeScript: ~5.4
+- TypeScript: `^7.0.2` (native Go compiler, "Project Corsa"; ships `bin/tsc`). devDep in all 3 packages. **Every tsconfig here must set `"types": ["node"]`** — TS 7 dropped auto-inclusion of `@types/*` (see [[gotchas]]).
 - Node: dev on v22 (the VS Code extension host runtime)
 - VS Code engine: `^1.85.0`
 
