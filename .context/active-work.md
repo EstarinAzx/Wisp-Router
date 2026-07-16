@@ -8,32 +8,23 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-16 by Fable 5 (auto)._
-_At commit: `993e58b` on `main` (in sync with `origin/main`; tag `v2.0.7` pushed)._
+_At commit: `8129879` on `main` (in sync with `origin/main`; latest tag `v2.0.7`)._
 
 ## Current focus
-**wisp-router 2.0.7 released and VERIFIED** (npm thin shell + all 4 platform packages +
-GitHub release assets live). This session: /routing narrow-terminal wrap (WrapSelect), the
-one-tap "Bind Claude subscription models" row, README tech-stack badges, bump + tag `v2.0.7`.
+**Post-2.0.7 idle.** This session shipped one small feature: `claude-wisp` now sets
+`CLAUDE_BINARY=claude-wisp` on the spawned child (`8129879`), so `/relay` loops inside a
+wisp-launched session respawn the wrapper instead of bare `claude`. **Riding on main until
+2.0.8** — no release cut for it.
 
 ## State
-- **/routing narrow-terminal fixes DONE** (`a07a4ce` + `0180a68`), probe-verified headless at
-  50 and 40 cols, user eyeballed and passed:
-  - Long chrome copy hand-wraps via `wrapWords(text, cols)` (opentui's own `wrapMode="wrap"`
-    still garbles — see [[opentui-rows-garble-on-small-terminals-without-wrapmode-none-and]]).
-  - The three /routing dropdowns use the hand-rolled **WrapSelect** (in `packages/tui/src/app.tsx`)
-    instead of the native select: wrapped descriptions, windowed view (`maxRows`), dim
-    "… N more" markers instead of the scroll bar.
-  - The status/feedback line wraps via wrapWords too.
-- **"Bind Claude subscription models"** (`a07a4ce`): bottom row of Routing — Claude Code.
-  Signed in → all four families → anthropic (opus-4-8 / sonnet-5 / haiku-4-5 / fable-5) in one
-  write; signed out → browser sign-in first, bind on token landing (startSignIn grew an
-  optional onSuccess). Mapping is TUI-local `CLAUDE_FAMILY_MODELS`; promote to core if the
-  side panel ever wants the button. `claude-fable-5` added to core's curated ANTHROPIC_MODELS.
-- **README** (`a4f8281`): two badge rows (npm/release/platforms + TS 7/Bun/React 19/
-  VS Code ≥1.104/Vitest), test count fixed to 434.
-- **Release 2.0.7** (`993e58b` + tag `v2.0.7`): run 29474723621 fully green — verified
-  `wisp-router@2.0.7` on npm, all 4 platform packages, GitHub release with 4 binaries.
-- **Gate GREEN:** tui `tsc` + 434 core tests + headless probes + user eyeball.
+- **CLAUDE_BINARY on child DONE** (`8129879`, pushed): added to core's pure `buildClaudeLaunch`
+  env (trio → +1) in `packages/core/src/bridgeAnthropic.ts`; deliberately overrides any
+  inherited value (session running under the wrapper ⇒ legs must too).
+- TDD'd: test updated red-first in `packages/core/tests/bridgeAnthropic.test.ts`; 434/434 pass.
+- **Smoke-tested end-to-end by the user**: Bridge up, `bun src/claude-wisp.ts`, child echoed
+  `claude-wisp`. Installed compiled binaries get it only at the next release.
+- Relay skill doc (`~/.claude/skills/relay/SKILL.md`, off-repo) noted: profile export
+  `$env:CLAUDE_BINARY` only needed on wisp-router < 2.0.8.
 
 ## In flight
 None.
@@ -49,6 +40,8 @@ Ready queue empty. Carried backlog (top first):
 2. **catalog.ts someday-9 remainder** — deferred, low payoff.
 3. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
 4. **Panel-side alias rename** — TUI-only follow-up.
+- **2.0.8 trigger:** main carries the unreleased CLAUDE_BINARY change — fold it into whatever
+  next warrants a release.
 
 ## Skills for next session
 (none clearly apply — top items are verify/human steps)
@@ -58,12 +51,9 @@ Ready queue empty. Carried backlog (top first):
 - (carried) Bridge client-tag heuristic mislabels some Claude Code requests as `(panel)`.
 
 ## Recent context
-- Headless probe caveat (bit this session): `useKeyboard` subscriptions are passive effects —
-  they land a macrotask AFTER the frame commits. In probes, poll with real `setTimeout` timers
-  between keypresses; `waitForFrame` alone presses keys before a fresh screen has subscribed.
-  Full recipe in the gotcha entry.
-- WrapSelect windowing: variable-height items, selection kept visible, `key={mode.section}`
-  guards stale selection across section toggles.
+- Relay's binary resolution order: state-file `binary:` → `$env:CLAUDE_BINARY` → wisp
+  auto-detect → `claude`. The launcher env var slots in at step 2, so no profile export needed
+  once ≥ 2.0.8 is the installed wrapper.
 
 ## Related
 - [[overview]]
