@@ -72,6 +72,17 @@ claude-wisp            # launch Claude Code routed through the Bridge
 
 Not on the Marketplace — download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then **Extensions → ⋯ → Install from VSIX…**. Full walkthrough (quickstart, providers, Bridge, security) in the [extension README](packages/vscode/README.md).
 
+### Slot skill (Claude Code plugin)
+
+Teaches a bridged Claude Code session to run subagents on any Wisp Target: temporarily rebind a sacrificial Claude family route (the **Slot**), spawn the Agent tool through it, and restore the route safely afterwards — with a lease file guarding against crashes and early restores. Needs wisp-router ≥ 2.0.11 (`wisp routing`). Inside Claude Code:
+
+```
+/plugin marketplace add EstarinAzx/Wisp-Router
+/plugin install wisp-slot@wisp-router
+```
+
+The skill activates when you ask for a subagent on a model the Agent tool cannot name, e.g. "run a subagent on gpt-5.6-sol". Source: [`plugins/slot`](plugins/slot).
+
 ## Highlights
 
 - **13 built-in providers + Custom**, in four kinds: API-key (OpenAI-compatible), **Codex** (ChatGPT OAuth, Responses API), **Anthropic** (Claude.ai OAuth, Messages API), and **Grok** (xAI OAuth, Responses API). Grok ≠ the API-key **Groq** row.

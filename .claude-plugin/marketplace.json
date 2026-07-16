@@ -1,0 +1,15 @@
+{
+  "name": "wisp-router",
+  "description": "Wisp Router plugins for Claude Code",
+  "owner": {
+    "name": "EstarinAzx"
+  },
+  "plugins": [
+    {
+      "name": "wisp-slot",
+      "source": "./plugins/slot",
+      "description": "Slot workflow: safely rebind a Claude family route to any Wisp Target, spawn a subagent through it, restore when done",
+      "version": "1.0.0"
+    }
+  ]
+}
