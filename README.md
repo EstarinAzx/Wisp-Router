@@ -53,6 +53,10 @@ Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+m
   <img src="docs/claude-model-picker.png" alt="Claude Code model picker showing Wisp gateway aliases" width="720">
 </p>
 
+<p align="center">
+  <img src="docs/claude-wisp-session.png" alt="Claude Code session on a Wisp gateway model (grok-4.5)" width="720">
+</p>
+
 ## Install
 
 ### TUI + Bridge + Claude Code launcher (npm)
