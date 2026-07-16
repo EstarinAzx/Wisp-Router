@@ -55,8 +55,10 @@ const ACCENT = '#a78bfa';
 const DIM = '#71717a';
 
 // One shared frame spread into every panel box — rounded dim border + accent title, so the
-// whole TUI reads as one system instead of per-screen defaults.
-const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT } as const;
+// whole TUI reads as one system instead of per-screen defaults. flexShrink 0 because a short
+// terminal makes yoga shrink rows to zero height while opentui still paints them — rows overlap
+// into garbage; refusing to shrink means content clips cleanly at the bottom edge instead.
+const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT, flexShrink: 0 } as const;
 
 // ----------------------------------------- Store ----------------------------------------- //
 
@@ -558,11 +560,13 @@ export const App = () => {
 
   return (
     <box flexDirection="column" padding={2}>
-      {/* wrapMode none everywhere in the header — a wrapped row makes opentui overlay every row
-          after it on narrow terminals (garbled frames); clipping always beats garbage */}
-      <text wrapMode="none" fg={ACCENT}>{SPLASH}</text>
+      {/* wrapMode none + flexShrink 0 on EVERY chrome row in this file — a wrapped row makes
+          opentui overlay every row after it on narrow terminals, and a short terminal makes yoga
+          shrink rows to zero height while they still paint (same garble). Clipping always beats
+          garbage. Only real content keeps wrapping: the /test reply + its error text. */}
+      <text wrapMode="none" flexShrink={0} fg={ACCENT}>{SPLASH}</text>
       {/* the green badge is THIS face's own listener only — start/stop re-render via their setStatus */}
-      <text wrapMode="none" fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
+      <text wrapMode="none" flexShrink={0} fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
 
       {mode.kind === 'input' && (
         <>
@@ -578,7 +582,7 @@ export const App = () => {
           </box>
           <box flexDirection="column" marginTop={1}>
             {suggestions.map((c, i) => (
-              <text key={c.name} bg={i === highlight ? '#27272a' : undefined}>
+              <text key={c.name} wrapMode="none" flexShrink={0} bg={i === highlight ? '#27272a' : undefined}>
                 {i === highlight ? <span fg={ACCENT}>{'> '}</span> : '  '}
                 <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
               </text>
@@ -633,12 +637,12 @@ export const App = () => {
 
       {mode.kind === 'key-entry' && (
         <box {...PANEL} title={`API key — ${mode.provider.label}`} marginTop={1}>
-          <text>{secret ? '•'.repeat(secret.length) : ''}<span fg={DIM}>{secret ? '' : 'Paste or type, Enter to save, Esc to cancel'}</span></text>
+          <text wrapMode="none">{secret ? '•'.repeat(secret.length) : ''}<span fg={DIM}>{secret ? '' : 'Paste or type, Enter to save, Esc to cancel'}</span></text>
         </box>
       )}
 
       {mode.kind === 'model-loading' && (
-        <text fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
+        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
       )}
 
       {mode.kind === 'model-pick' && (
@@ -696,7 +700,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'signin-wait' && (
-        <text fg={DIM} marginTop={1}>Browser opened — finish the {mode.provider.label} sign-in there. Esc to cancel.</text>
+        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Browser opened — finish the {mode.provider.label} sign-in there. Esc to cancel.</text>
       )}
 
       {mode.kind === 'test' && (
@@ -704,8 +708,8 @@ export const App = () => {
         <box {...PANEL} title={`/test: ${mode.provider.label} (${mode.model})`} marginTop={1} flexDirection="column">
           {/* raw reply text, streamed as-is — deliberately no markdown, no history (#62) */}
           {mode.text !== '' && <text>{mode.text}</text>}
-          {mode.phase === 'streaming' && <text fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
-          {mode.phase === 'done' && <text fg={DIM}>Done — Esc to close.</text>}
+          {mode.phase === 'streaming' && <text wrapMode="none" fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
+          {mode.phase === 'done' && <text wrapMode="none" fg={DIM}>Done — Esc to close.</text>}
           {mode.phase === 'error' && <text fg="#f87171">{mode.error}</text>}
         </box>
       )}
@@ -752,13 +756,13 @@ export const App = () => {
             options={SLASH_COMMANDS.map((c) => ({ name: `/${c.name}${c.args ? ` ${c.args}` : ''}`, description: c.description, value: c.name }))}
             onSelect={() => backToInput()}
           />
-          <text fg={DIM} marginTop={1}>Enter or Esc closes.</text>
+          <text wrapMode="none" fg={DIM} marginTop={1}>Enter or Esc closes.</text>
         </box>
       )}
 
       {mode.kind === 'routing' && (
         <box {...PANEL} title="Routing map" marginTop={1} flexDirection="column">
-          <text fg={DIM}>Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.</text>
+          <text wrapMode="none" fg={DIM}>Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.</text>
           <select
             focused
             height={4}
@@ -877,7 +881,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'route-model-loading' && (
-        <text fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
+        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
       )}
 
       {mode.kind === 'route-model-pick' && (
@@ -939,7 +943,7 @@ export const App = () => {
         </box>
       )}
 
-      {status !== '' && <text fg={DIM} marginTop={1}>{status}</text>}
+      {status !== '' && <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>{status}</text>}
     </box>
   );
 };
