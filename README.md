@@ -78,6 +78,14 @@ bun run compile    # typecheck + bundle + webview build (packages/vscode)
 - **Extension:** press **F5** → Extension Development Host (the Wisp icon is in *that* window's activity bar). Package a `.vsix` with `bun run package` in `packages/vscode`.
 - **TUI:** `cd packages/tui && bun run dev`. It writes the real `~/.wisp` — set `WISP_HOME` to sandbox.
 
+## Bridge in the TUI
+
+`/bridge` starts the local endpoint. OpenAI + Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it:
+
+<p align="center">
+  <img src="docs/bridge-tui.png" alt="Wisp TUI Bridge panel — bridge up on port 41184" width="720">
+</p>
+
 ## Releases
 
 Tag `v<version>` (must equal the version in `packages/tui/package.json`) and push — the `Release` workflow compiles binaries for win32-x64 / darwin-arm64 / darwin-x64 / linux-x64 via `bun build --compile`, attaches them to a GitHub release, and publishes `wisp-router` (thin shell + platform packages, with a GitHub-release download fallback) to npm.
