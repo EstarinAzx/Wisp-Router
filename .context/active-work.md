@@ -8,28 +8,27 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-16 by Opus 4.8 (auto)._
-_At commit: `7e0de9b` on `main` (4 ahead of `origin/main` @ `9e56287` — NOT pushed)._
+_At commit: `645f86d` on `main` (in sync with `origin/main`)._
 
 ## Current focus
-**Nothing in flight.** This session executed the deferred **catalog.ts modularization — the
-4-file peel** (`shared` / `codex` / `anthropic` / `xai`), green-to-green, landed on `main`.
-Ready queue empty; next work from the carried backlog below.
+**Nothing in flight.** This session fixed the TUI's small-terminal garbling (two commits,
+`f5ec8bf` + `645f86d`, both on origin) and gave every panel a shared facelift. User eyeballed
+and passed. Ready queue empty; next work from the carried backlog below.
 
 ## State
-- **catalog.ts 4-file peel DONE** (4 commits `4bb4e29` → `b8de90d` → `2980f07` → `7e0de9b`).
-  `packages/core/src/catalog.ts` **1293 → 486 lines**; the provider kernel + three providers now
-  live in new files. Decision (now executed): [[2026-07-15-catalog-ts-modularization-plan-deferred]].
-  - `shared.ts` — kernel: models.dev caps, effort ladder, SSE (`parseSseBlock`), tool shapes, `trimmedString`.
-  - `codex.ts` / `anthropic.ts` / `xai.ts` — each provider's creds + request/reply + auth.json + caps.
-  - catalog keeps providers · edit prompt · chat surface · migration · the two dispatchers
-    (`oauthModelOptions`, `effortOptionsFor`) · PKCE.
-- **How it stayed safe:** every provider file depends only on `./shared` + `import type { Provider }`
-  (type-only back-edge, erased → runtime graph `catalog → provider → shared`, acyclic). catalog
-  **re-exports** the four modules, so `@wisp/core`'s barrel surface is byte-identical — **no sibling
-  or face touched an import**, barrel untouched.
-- **Gate GREEN each leg:** `bun run test` (434), core+tui+vscode `tsc --noEmit`. Plus a runtime
-  barrel smoke (all peeled fns callable across modules), `bun run dev`, and live sign-ins — all pass.
-- **Not pushed** — `main` is 4 commits ahead of `origin/main`.
+- **TUI small-terminal fix DONE + shipped to origin.** Two distinct opentui failure modes,
+  both fixed in `packages/tui/src/app.tsx` and probe-verified headless:
+  see [[opentui-rows-garble-on-small-terminals-without-wrapmode-none-and]].
+  - `f5ec8bf` — `wrapMode="none"` on chrome rows (wrap → overlay garble on narrow terminals);
+    Persistent settings.json snippet block **removed from the TUI bridge panel** (claude-wisp
+    is the connect path; VS Code side panel still renders the full snippet, core builder
+    untouched); facelift: shared `PANEL` frame (rounded dim border `#52525b` + accent title)
+    spread into all 18 panel boxes, aligned dim-label/accent-value columns in the bridge panel.
+  - `645f86d` — `flexShrink={0}` on chrome rows + PANEL (short terminal → yoga shrinks rows to
+    0 height but opentui still paints them → overlay garble; now clips cleanly at bottom).
+  - Only real content still wraps: /test reply + its error text.
+- **Gate GREEN:** tui `tsc` + 434 core tests + headless `testRender` smokes at 60 cols and
+  heights 20/14 + user eyeball on a real shrunken window.
 
 ## In flight
 None.
@@ -38,16 +37,18 @@ None.
 None.
 
 ## Pick up here
-Ready queue empty. First, decide whether to **push** the 4 peel commits to origin (nothing forces
-it — pure internal refactor, no release/tag). Then pick from the carried backlog (top first):
+Ready queue empty. Carried backlog (top first):
 1. **Publish VS Code extension 1.7.0 to the Marketplace** — human step: `vsce publish` in
    `packages/vscode` (needs the `EsarinAzx` PAT) or upload `packages/vscode/wisp-1.7.0.vsix`.
    **Never tag `v1.7.0`** (fires the TUI `release.yml`).
 2. **catalog.ts modularization — someday-9 remainder** (deferred, only if it earns it): split
-   catalog's grab-bag further (`providers`/`edit`/`chat`/`migration`/`oauth`), then repoint core
-   siblings to per-concern imports and drop the catalog re-export facade. Low payoff.
+   catalog's grab-bag further, repoint core siblings to per-concern imports, drop the
+   re-export facade. Low payoff.
 3. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
 4. **Panel-side alias rename** — TUI-only follow-up.
+5. (new, only if clipping ever annoys) **ScrollBox for the suggestion list** — bottom rows now
+   hide on tiny windows instead of garbling; opentui has a ScrollBox renderable if scrolling
+   is ever wanted.
 
 ## Skills for next session
 (none clearly apply — backlog items are human-step / deferred)
@@ -58,10 +59,12 @@ it — pure internal refactor, no release/tag). Then pick from the carried backl
 - (carried) Bridge client-tag heuristic mislabels some Claude Code requests as `(panel)`.
 
 ## Recent context
-- The peel used a green-to-green loop: move ONE concern → `bun run test` + typecheck → commit → repeat.
-- Re-export facade (`export * from './shared'` etc. in catalog) is the mechanism that kept every
-  sibling/face import unchanged; dropping it is the deferred someday-9 cleanup, not required.
-- `.context/overview.md` still carries a phantom `M` (LF→CRLF normalization only, no content change).
+- The TUI fix was probe-driven: `testRender` + `captureCharFrame` from `@opentui/react/test-utils`
+  reproduced both garble modes headless in seconds — the recipe is in the gotcha entry.
+- The TUI's `/bridge` panel no longer shows the settings.json snippet; if a user needs the
+  persistent form, it lives in the VS Code side panel (same `buildClaudeCodeSnippets` builder).
+- New TUI panel-chrome rule of thumb: every chrome row gets `wrapMode="none"` + `flexShrink={0}`
+  (or rides `PANEL`); only real streamed content wraps.
 
 ## Related
 - [[overview]]
