@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-16-providers-submenu-is-the-provider-hub-106]] — /providers submenu is the provider hub: Enter opens the row's actions (set active · key set/remove · OAuth sign in/out); slash commands stay (#106, 2.0.9)
 - [[2026-07-16-typescript-7-native-compiler-upgrade]] — upgrade to TypeScript 7.0.2 (native Go compiler); any tsconfig consuming core's `src` must set `types:["node"]`
 - [[2026-07-15-anthropic-door-must-honor-stream-false-model-validation]] — Anthropic door must honor `stream:false` (Claude Code `/model` validation is a non-streaming probe reading `usage.input_tokens`); shipped in `wisp-router@2.0.6`
 - [[2026-07-15-catalog-ts-modularization-plan-deferred]] — catalog.ts modularization: 4-file peel EXECUTED 2026-07-16 (shared/codex/anthropic/xai, catalog 1293→486); someday-9 split still deferred
