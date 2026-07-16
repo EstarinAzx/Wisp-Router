@@ -22,6 +22,21 @@ wisp serve      # headless Bridge host
 claude-wisp     # Claude Code through the Bridge (start the Bridge first)
 ```
 
+## Routing
+
+```sh
+wisp routing                                  # show Family routes and Aliases
+wisp routing --json                           # machine-readable snapshot
+wisp routing set haiku codex/gpt-5.3-codex   # set a Family route
+wisp routing set fast openrouter/openai/gpt-5 # create or retarget an Alias
+wisp routing unset haiku                      # clear a Family route
+wisp routing unset fast                       # remove an Alias
+```
+
+Targets use `<providerId>/<model>` and split on the first `/`, so Provider-native model ids may contain more slashes. A valid target is written even when its Provider lacks an API key or OAuth sign-in; the command exits zero and prints a `warning:` line.
+
+Routing commands edit the shared `~/.wisp/config.json` atomically. A running Bridge reads that file for every request, so the next request uses the new binding without a restart.
+
 State lives in `~/.wisp/` (`config.json` + owner-only `auth.json`), shared with the Wisp VS Code extension.
 
 ## Versioning
