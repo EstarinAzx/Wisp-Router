@@ -1,7 +1,7 @@
 ---
 type: api
 project: wisp
-updated: 2026-07-14
+updated: 2026-07-17
 tags: [context, api, vscode]
 ---
 
@@ -60,7 +60,7 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   → Active Provider fallback**. An Alias/Family hit carries a **pinned model** that beats `resolveModel` for
   that request only; a Target naming a missing Provider → **404** (fail-loud, never silent fallback). The map
   (`RoutingMap` in config.json `routing`) + panel model are read **live per request** — a
-  panel edit applies to the next call, no relaunch. One log line per routed request:
+  panel or `wisp routing set|unset` edit applies to the next call, no relaunch. The CLI uses the same pure map operations, splits a Target on the first `/`, writes accepted edits atomically through `WispHome`, refuses invalid edits without writing, and emits a `warning:` while still writing when credentials are absent. One log line per routed request:
   `[bridge] route <kind> '<name>' -> <provider> model=<pinned>`. Then by Provider kind:
   - **keyed** (openai-chat) → OpenAI SDK `chat.completions.create` (`stream:true`, system re-prepended).
   - **`codex`** (#39) → `handleCodexChat`: `codexStream` (Responses SSE) on `codexAuth.current()` creds +
