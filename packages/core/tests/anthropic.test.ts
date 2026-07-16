@@ -176,9 +176,9 @@ describe('buildAnthropicMessagesBody', () => {
       max_tokens: 16_000,
       system: [
         { type: 'text', text: anthropicAttribution('edit this', '0.19.0') },
-        { type: 'text', text: 'rules' },
+        { type: 'text', text: 'rules', cache_control: { type: 'ephemeral' } },
       ],
-      messages: [{ role: 'user', content: 'edit this' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral' } }] }],
     });
   });
 
@@ -189,10 +189,46 @@ describe('buildAnthropicMessagesBody', () => {
       model: 'claude-sonnet-4-6', maxTokens: 8_000, version: '0.19.0',
       messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }],
     });
-    expect(body.system).toEqual([{ type: 'text', text: anthropicAttribution('hi', '0.19.0') }]);
+    expect(body.system).toEqual([{ type: 'text', text: anthropicAttribution('hi', '0.19.0'), cache_control: { type: 'ephemeral' } }]);
     expect(body.messages).toEqual([
-      { role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' },
+      { role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' },
+      { role: 'user', content: [{ type: 'text', text: 'more', cache_control: { type: 'ephemeral' } }] },
     ]);
+  });
+
+  // #111: the Bridge re-sends the whole conversation every turn — without cache breakpoints the
+  // OAuth path re-bills it all as uncached input (~10x plan-usage weight). Two breakpoints: the
+  // last system block (render order is tools → system, so it covers the tool definitions too) and
+  // the last message's final block (the conversation prefix, advancing turn by turn).
+  describe('prompt-caching breakpoints (#111)', () => {
+    it('marks the last system block and leaves tools unannotated (system breakpoint covers them)', () => {
+      const tools = [{ name: 'readFile', description: 'd', input_schema: { type: 'object' as const, properties: {} } }];
+      const body = buildAnthropicMessagesBody({
+        model: 'm', maxTokens: 1, version: 'v', tools,
+        messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
+      }) as any;
+      expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+      expect(body.system[0].cache_control).toBeUndefined();
+      expect(body.tools).toEqual(tools); // no cache_control on tools — the system breakpoint caches them
+    });
+
+    it('keeps earlier plain turns as bare strings — only the final turn converts to a block', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+        { role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'c' },
+      ] }) as any;
+      expect(body.messages[0].content).toBe('a');
+      expect(body.messages[1].content).toBe('b');
+      expect(body.messages[2].content).toEqual([{ type: 'text', text: 'c', cache_control: { type: 'ephemeral' } }]);
+    });
+
+    it('annotates the last block of an already-block-shaped final turn', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+        { role: 'user', content: 'thanks', toolResults: [{ callId: 'toolu_1', content: 'file body' }] },
+      ] }) as any;
+      const blocks = body.messages[0].content;
+      expect(blocks[0].cache_control).toBeUndefined();
+      expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } });
+    });
   });
 
   // The streaming path needs stream:true on the body; the non-streaming (Inquire) path must omit it.
@@ -505,7 +541,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       role: 'assistant',
       content: [
         { type: 'text', text: 'sure' },
-        { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: { path: 'a.ts' } },
+        { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: { path: 'a.ts' }, cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -516,7 +552,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_1', name: 'x', argsJson: '{}' }] },
     ] }) as any;
-    expect(body.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'x', input: {} }] });
+    expect(body.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'x', input: {}, cache_control: { type: 'ephemeral' } }] });
   });
 
   // A tool result rides on a user turn as a tool_result block, which must come FIRST (before any text).
@@ -528,7 +564,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       role: 'user',
       content: [
         { type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' },
-        { type: 'text', text: 'thanks' },
+        { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -564,7 +600,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
     expect(body.messages).toEqual([
       { role: 'user', content: 'read a.ts' },
       { role: 'assistant', content: [{ type: 'text', text: 'sure' }, { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' }, { type: 'text', text: 'thanks' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' }, { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } }] },
     ]);
   });
 
@@ -584,7 +620,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       content: [
         { type: 'text', text: 'x' },
         { type: 'tool_use', id: 'toolu_a', name: 'a', input: { p: 1 } },
-        { type: 'tool_use', id: 'toolu_b', name: 'b', input: { q: 2 } },
+        { type: 'tool_use', id: 'toolu_b', name: 'b', input: { q: 2 }, cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -601,7 +637,7 @@ describe('buildAnthropicMessagesBody — images', () => {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
-        { type: 'text', text: 'do u see this image?' },
+        { type: 'text', text: 'do u see this image?', cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -613,7 +649,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     ] }) as any;
     expect(body.messages[0]).toEqual({
       role: 'user',
-      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' } }],
+      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' }, cache_control: { type: 'ephemeral' } }],
     });
   });
 
@@ -625,7 +661,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     expect(body.messages[0].content).toEqual([
       { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
-      { type: 'text', text: 'and this?' },
+      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral' } },
     ]);
   });
 });

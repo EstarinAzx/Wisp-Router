@@ -171,7 +171,8 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 // `system` block array, led by the Claude Code attribution block (its fingerprint derived from the first
 // user turn's TEXT — so it MUST stay sourced from `content`). A turn with tool calls/results expands to a
 // content BLOCK array (assistant: text then tool_use; user: tool_result FIRST then text); a plain turn
-// stays a bare string. An empty text block is never emitted. tools ride only when non-empty.
+// stays a bare string — EXCEPT the final turn, which converts to one text block so it can carry the cache
+// breakpoint (#111). An empty text block is never emitted. tools ride only when non-empty.
 export const buildAnthropicMessagesBody = (args: {
   model: string; messages: AnthropicMessage[]; maxTokens: number; version: string; stream?: boolean;
   tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel;
@@ -179,11 +180,12 @@ export const buildAnthropicMessagesBody = (args: {
   const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
   const convo = args.messages.filter((m) => m.role !== 'system');
   const firstUserMessage = convo[0]?.content ?? '';
-  const system = [
+  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
-  const messages = convo.map((m) => {
+  type BuiltTurn = { role: 'user' | 'assistant'; content: string | unknown[] };
+  const messages: BuiltTurn[] = convo.map((m) => {
     if (m.role === 'assistant') {
       // A plain text turn stays a bare string (the #29 shape); only a tool-call turn expands to blocks.
       if (!m.toolCalls?.length) return { role: 'assistant' as const, content: m.content };
@@ -203,6 +205,20 @@ export const buildAnthropicMessagesBody = (args: {
     if (m.content) blocks.push({ type: 'text', text: m.content });
     return { role: 'user' as const, content: blocks };
   });
+  // #111: two cache_control breakpoints, no more. Render order is tools → system → messages, so the
+  // last-system-block marker caches the tool definitions AND the system prompt together; the marker on
+  // the final message's last block caches the conversation prefix and advances turn by turn. Without
+  // these, a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage).
+  const CACHE = { cache_control: { type: 'ephemeral' as const } };
+  system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
+  const last = messages[messages.length - 1];
+  if (last && typeof last.content === 'string') {
+    if (last.content) messages[messages.length - 1] = { role: last.role, content: [{ type: 'text', text: last.content, ...CACHE }] };
+  } else if (last && Array.isArray(last.content) && last.content.length) {
+    // ponytail: cache lookback is 20 blocks — a turn adding more misses the previous entry; add
+    // intermediate breakpoints only if that shows up in practice.
+    last.content[last.content.length - 1] = { ...(last.content[last.content.length - 1] as Record<string, unknown>), ...CACHE };
+  }
   return {
     model: args.model,
     max_tokens: args.maxTokens,
