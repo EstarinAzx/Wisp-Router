@@ -407,13 +407,15 @@ describe('buildClaudeCodeSnippets', () => {
 });
 
 describe('buildClaudeLaunch', () => {
-  // The launcher's whole contract in one shape: the env trio pointing at the local Bridge, argv verbatim.
-  it('builds the env trio from port + secret', () => {
+  // The launcher's whole contract in one shape: the Bridge env trio plus CLAUDE_BINARY (so relay-style
+  // respawners inside the session re-use the wrapper), argv verbatim.
+  it('builds the env trio + CLAUDE_BINARY from port + secret', () => {
     const launch = buildClaudeLaunch(8971, 's3cret_x', []);
     expect(launch.env).toEqual({
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
       ANTHROPIC_API_KEY: 's3cret_x',
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      CLAUDE_BINARY: 'claude-wisp',
     });
   });
 

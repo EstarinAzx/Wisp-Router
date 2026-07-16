@@ -4,7 +4,7 @@
 /*
  * Depends on:
  *   - node child_process / fs / path: spawn `claude`, resolve its Windows shim.
- *   - @wisp/core: buildClaudeLaunch (the pure env-trio + argv contract), DEFAULT_BRIDGE_PORT.
+ *   - @wisp/core: buildClaudeLaunch (the pure env contract — Bridge trio + CLAUDE_BINARY — plus argv), DEFAULT_BRIDGE_PORT.
  *   - ./store: the shared ~/.wisp handle.
  *
  * Data shapes: none of its own — ClaudeLaunch comes from core.

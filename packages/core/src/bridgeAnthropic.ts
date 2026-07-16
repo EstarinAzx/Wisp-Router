@@ -370,17 +370,20 @@ export const buildClaudeCodeSnippets = (address: string, secret: string): Claude
 // ----------------------------- Launcher env assembly: the claude-wisp bin ----------------------------- //
 
 // What the `claude-wisp` launcher (#64) sets on the spawned `claude` child: the same env trio as the
-// snippets above, plus the user's argv passed through verbatim. Pure so the whole launch contract is
-// unit-testable; the bin itself only does IO (probe, spawn, exit mirror).
+// snippets above plus CLAUDE_BINARY, and the user's argv passed through verbatim. Pure so the whole
+// launch contract is unit-testable; the bin itself only does IO (probe, spawn, exit mirror).
 export type ClaudeLaunch = { env: Record<string, string>; args: string[] };
 
-// The Bridge is loopback-only, so the address derives from the port alone. args is a copy — the bin
-// mutating its spawn list must never reach back into process.argv.
+// The Bridge is loopback-only, so the address derives from the port alone. CLAUDE_BINARY tells
+// session-respawning tools inside the child (e.g. relay loops) to re-launch the wrapper, not bare
+// `claude` — overriding any inherited value is right: this session IS running under the wrapper.
+// args is a copy — the bin mutating its spawn list must never reach back into process.argv.
 export const buildClaudeLaunch = (port: number, secret: string, argv: string[]): ClaudeLaunch => ({
   env: {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     ANTHROPIC_API_KEY: secret,
     CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+    CLAUDE_BINARY: 'claude-wisp',
   },
   args: [...argv],
 });
