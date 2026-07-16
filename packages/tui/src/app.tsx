@@ -28,7 +28,7 @@ import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
   oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, isXaiSignedIn, effectiveAliasOnly, buildClaudeCodeSnippets,
+  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, isXaiSignedIn, effectiveAliasOnly,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
@@ -53,6 +53,10 @@ const SPLASH = [
 
 const ACCENT = '#a78bfa';
 const DIM = '#71717a';
+
+// One shared frame spread into every panel box — rounded dim border + accent title, so the
+// whole TUI reads as one system instead of per-screen defaults.
+const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT } as const;
 
 // ----------------------------------------- Store ----------------------------------------- //
 
@@ -554,14 +558,16 @@ export const App = () => {
 
   return (
     <box flexDirection="column" padding={2}>
-      <text fg={ACCENT}>{SPLASH}</text>
+      {/* wrapMode none everywhere in the header — a wrapped row makes opentui overlay every row
+          after it on narrow terminals (garbled frames); clipping always beats garbage */}
+      <text wrapMode="none" fg={ACCENT}>{SPLASH}</text>
       {/* the green badge is THIS face's own listener only — start/stop re-render via their setStatus */}
-      <text fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
+      <text wrapMode="none" fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
 
       {mode.kind === 'input' && (
         <>
           {/* no border title — the wordmark above already brands the box; inner padding = chunkier bar */}
-          <box border marginTop={1} padding={1}>
+          <box {...PANEL} marginTop={1} padding={1}>
             <input
               ref={inputRef}
               placeholder="Type / for commands"
@@ -582,7 +588,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'providers' && (
-        <box border title="Active Provider" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Active Provider" marginTop={1} flexDirection="column">
           {/* select collapses to zero rows without an explicit height; an option is 2 rows with description */}
           {/* the built-in ▶ indicator is off on every select — the glyph is ambiguous-width (double-wide
               on common Windows fonts, smearing into the label); the highlight bar already marks the row */}
@@ -610,7 +616,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'key-pick' && (
-        <box border title="Set key for…" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Set key for…" marginTop={1} flexDirection="column">
           <select
             focused
             height={Math.min(keyedProviders().length * 2, 16)}
@@ -626,7 +632,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'key-entry' && (
-        <box border title={`API key — ${mode.provider.label}`} marginTop={1}>
+        <box {...PANEL} title={`API key — ${mode.provider.label}`} marginTop={1}>
           <text>{secret ? '•'.repeat(secret.length) : ''}<span fg={DIM}>{secret ? '' : 'Paste or type, Enter to save, Esc to cancel'}</span></text>
         </box>
       )}
@@ -636,7 +642,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'model-pick' && (
-        <box border title={`Model — ${mode.provider.label}`} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={`Model — ${mode.provider.label}`} marginTop={1} flexDirection="column">
           {/* descriptions are empty here — hide them so each model is one row */}
           <select
             focused
@@ -659,7 +665,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'model-free' && (
-        <box border title={`Model — ${mode.provider.label} (no live list — type an id)`} marginTop={1}>
+        <box {...PANEL} title={`Model — ${mode.provider.label} (no live list — type an id)`} marginTop={1}>
           <input
             focused
             placeholder={mode.provider.defaultModel || 'model id'}
@@ -673,7 +679,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'oauth-pick' && (
-        <box border title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
           <select
             focused
             height={Math.min(oauthProviders().length * 2, 16)}
@@ -695,7 +701,7 @@ export const App = () => {
 
       {mode.kind === 'test' && (
         // plain-ASCII title on purpose — opentui border titles drop non-ASCII (em-dash/·), see gotchas
-        <box border title={`/test: ${mode.provider.label} (${mode.model})`} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={`/test: ${mode.provider.label} (${mode.model})`} marginTop={1} flexDirection="column">
           {/* raw reply text, streamed as-is — deliberately no markdown, no history (#62) */}
           {mode.text !== '' && <text>{mode.text}</text>}
           {mode.phase === 'streaming' && <text fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
@@ -705,40 +711,35 @@ export const App = () => {
       )}
 
       {mode.kind === 'bridge' && (
-        <box border title="Bridge" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Bridge" marginTop={1} padding={1} flexDirection="column">
           {/* status header first — state + port at a glance, then the connection facts (#80).
               Always "up" by construction: this mode is only entered post-bind, and no stop path
               exists without leaving the screen. Port derives from the frozen address so the header
               can't contradict the copy-paste lines below after an external config edit.
-              Layout rule (real-terminal eyeball): every row is short and single-purpose, and the
-              snippet map lives in its own column box — long mixed rows wrapped at ~70 cols and
-              opentui overlaid every row that followed. */}
-          <text><span fg="#4ade80">● up</span><span fg={DIM}> · port {mode.address.slice(mode.address.lastIndexOf(':') + 1)}</span></text>
-          <text marginTop={1}>OpenAI door:    <span fg={ACCENT}>{mode.address}/v1</span></text>
-          <text>Anthropic door: <span fg={ACCENT}>{mode.address}</span></text>
-          <text>Access secret:  <span fg={ACCENT}>{mode.secret}</span></text>
+              Layout rule: every row is single-purpose with wrapMode none — a wrapped row made
+              opentui overlay every row after it on narrow terminals (the old chaos); clipping
+              beats garbage. The settings.json snippet block was cut for the same reason — its
+              75-col rows were the widest offender; claude-wisp is the one shipped connect path,
+              and the VS Code side panel still renders the full snippet (core builder untouched). */}
+          <text wrapMode="none"><span fg="#4ade80">● up</span><span fg={DIM}> · port {mode.address.slice(mode.address.lastIndexOf(':') + 1)}</span></text>
 
           <box marginTop={1} flexDirection="column">
-            <text>Connect Claude Code</text>
-            <text fg={DIM}>Per session (Claude Code pre-wired):</text>
-            <text fg={ACCENT}>  claude-wisp [args…]</text>
-            <text fg={DIM}>Persistent — project .claude/settings.json:</text>
-            {/* the tested core builder is the ONE snippet source (#80) — the side panel renders the
-                same block; the global ~/.claude form is deliberately absent (PRD #43) */}
-            <box flexDirection="column">
-              {buildClaudeCodeSnippets(mode.address, mode.secret).settingsJson.split('\n').map((l, i) => (
-                <text key={i} fg={ACCENT}>{l}</text>
-              ))}
-            </box>
-            <text fg={DIM}>Bridge must be up — plain claude errors while it's down.</text>
+            <text wrapMode="none"><span fg={DIM}>{'OpenAI door'.padEnd(16)}</span><span fg={ACCENT}>{mode.address}/v1</span></text>
+            <text wrapMode="none"><span fg={DIM}>{'Anthropic door'.padEnd(16)}</span><span fg={ACCENT}>{mode.address}</span></text>
+            <text wrapMode="none"><span fg={DIM}>{'Access secret'.padEnd(16)}</span><span fg={ACCENT}>{mode.secret}</span></text>
           </box>
 
-          <text fg={DIM} marginTop={1}>Esc closes — listener stays up. /bridge stops; /quit kills.</text>
+          <box marginTop={1} flexDirection="column">
+            <text wrapMode="none"><span fg={DIM}>{'Claude Code'.padEnd(16)}</span>claude-wisp [args…]</text>
+            <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
+          </box>
+
+          <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge stops · /quit kills</text>
         </box>
       )}
 
       {mode.kind === 'help' && (
-        <box border title="Commands" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Commands" marginTop={1} flexDirection="column">
           {/* rendered FROM the shared registry (#82) — the palette's autocomplete and this list
               can never disagree. A select, not plain rows: 13+ commands clip a 24-row terminal,
               and the select brings the same height cap + scroll the other pickers use. Enter
@@ -756,7 +757,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'routing' && (
-        <box border title="Routing map" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Routing map" marginTop={1} flexDirection="column">
           <text fg={DIM}>Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.</text>
           <select
             focused
@@ -774,7 +775,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'routing-section' && (
-        <box border title={mode.section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={mode.section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
           {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
           <select
             focused
@@ -805,7 +806,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'alias-name' && (
-        <box border title="New alias name" marginTop={1}>
+        <box {...PANEL} title="New alias name" marginTop={1}>
           <input
             focused
             placeholder="a bridged model name, e.g. fast"
@@ -822,7 +823,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'alias-rename' && (
-        <box border title={`Rename alias ${titleLabel({ kind: 'alias', name: mode.name })}`} marginTop={1}>
+        <box {...PANEL} title={`Rename alias ${titleLabel({ kind: 'alias', name: mode.name })}`} marginTop={1}>
           <input
             focused
             placeholder={mode.name}
@@ -841,7 +842,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'route-provider' && (
-        <box border title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
           <select
             focused
             height={Math.min((PROVIDERS.length + 1) * 2, 16)}
@@ -880,7 +881,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'route-model-pick' && (
-        <box border title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label}`} marginTop={1} flexDirection="column">
+        <box {...PANEL} title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label}`} marginTop={1} flexDirection="column">
           {/* "(current)" only when the row already targets THIS provider — two providers can list the same id */}
           <select
             focused
@@ -904,7 +905,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'route-model-free' && (
-        <box border title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label} (no live list - type an id)`} marginTop={1}>
+        <box {...PANEL} title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label} (no live list - type an id)`} marginTop={1}>
           <input
             focused
             placeholder={mode.provider.defaultModel || 'model id'}
@@ -918,7 +919,7 @@ export const App = () => {
       )}
 
       {mode.kind === 'effort-pick' && (
-        <box border title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
           <select
             focused
             height={Math.min(EFFORT_LADDER.length * 2, 16)}
