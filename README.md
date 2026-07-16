@@ -86,6 +86,18 @@ bun run compile    # typecheck + bundle + webview build (packages/vscode)
   <img src="docs/bridge-tui.png" alt="Wisp TUI Bridge panel — bridge up on port 41184" width="720">
 </p>
 
+## Routing aliases
+
+Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Same list lands in Claude Code's model picker as **From gateway**:
+
+<p align="center">
+  <img src="docs/routing-tui.png" alt="Wisp TUI Routing — custom aliases" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/claude-model-picker.png" alt="Claude Code model picker showing Wisp gateway aliases" width="720">
+</p>
+
 ## Releases
 
 Tag `v<version>` (must equal the version in `packages/tui/package.json`) and push — the `Release` workflow compiles binaries for win32-x64 / darwin-arm64 / darwin-x64 / linux-x64 via `bun build --compile`, attaches them to a GitHub release, and publishes `wisp-router` (thin shell + platform packages, with a GitHub-release download fallback) to npm.
