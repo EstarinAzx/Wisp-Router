@@ -81,10 +81,51 @@ const wrapWords = (text: string, cols: number): string[] => {
   return lines;
 };
 
-// Ellipsis-fit for select rows — the select renderable hard-clips at its right edge (no wrap
-// possible inside it), so overflowing descriptions get an honest '…' instead of a silent cut.
-const fit = (text: string, cols: number): string =>
-  text.length <= cols ? text : `${text.slice(0, Math.max(cols - 1, 0))}…`;
+// A select whose option DESCRIPTIONS wrap — the native select renderable hard-clips its rows,
+// so this renders plain non-wrapping rows itself (name + hand-wrapped description lines) with a
+// windowed view: variable-height items, selection kept visible within maxRows, dim "… N more"
+// marker rows when clipped. Keyboard mirrors the native select: Up/Down (wrapping), Enter fires.
+type WrapOption = { name: string; description: string; value: string };
+const WrapSelect = ({ options, cols, maxRows, onSelect }: {
+  options: WrapOption[];
+  cols: number;
+  maxRows: number;
+  onSelect: (index: number, option: WrapOption) => void;
+}) => {
+  const [idx, setIdx] = useState(0);
+  const top = useRef(0); // first visible item — persisted across renders, adjusted below
+  // sel clamps a stale index (options can shrink under a reused instance) — used everywhere.
+  const sel = Math.min(idx, options.length - 1);
+  useKeyboard((key) => {
+    if (key.name === 'up') setIdx((options.length + sel - 1) % options.length);
+    else if (key.name === 'down') setIdx((sel + 1) % options.length);
+    else if (key.name === 'return' || key.name === 'enter') onSelect(sel, options[sel]);
+  });
+  const items = options.map((o) => ({ o, lines: [o.name, ...wrapWords(o.description, cols - 1)] }));
+  const rowsOf = (from: number, to: number) => items.slice(from, to + 1).reduce((n, it) => n + it.lines.length, 0);
+  // Window: pull the view up to the selection, else push it down until the selection fits.
+  if (sel < top.current) top.current = sel;
+  while (rowsOf(top.current, sel) > maxRows && top.current < sel) top.current++;
+  // Fill downward until the row budget is spent (the selected item always shows, however tall).
+  let end = top.current;
+  for (let used = 0; end < items.length && (end === top.current || used + items[end].lines.length <= maxRows); end++)
+    used += items[end].lines.length;
+  return (
+    <box flexDirection="column">
+      {top.current > 0 && <text wrapMode="none" flexShrink={0} fg={DIM}>{`  … ${top.current} more`}</text>}
+      {items.slice(top.current, end).flatMap(({ lines }, k) => {
+        const i = top.current + k;
+        const on = i === sel;
+        return lines.map((l, j) => (
+          <text key={`${i}:${j}`} wrapMode="none" flexShrink={0} bg={on ? '#27272a' : undefined} fg={j === 0 ? (on ? ACCENT : undefined) : DIM}>
+            {` ${l}`}
+          </text>
+        ));
+      })}
+      {end < items.length && <text wrapMode="none" flexShrink={0} fg={DIM}>{`  … ${items.length - end} more`}</text>}
+    </box>
+  );
+};
 
 // ----------------------------------------- Store ----------------------------------------- //
 
@@ -278,12 +319,10 @@ export const App = () => {
   const testAbort = useRef<AbortController | null>(null);
   const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
   const renderer = useRenderer();
-  // Live text columns for the hand-wrap + ellipsis-fit helpers: terminal minus the outer padding
-  // (2+2) and the PANEL border (1+1); select rows draw one column further in. Floored so a
-  // pathological width can't produce empty wraps.
+  // Live text columns for the hand-wrap helpers: terminal minus the outer padding (2+2) and the
+  // PANEL border (1+1). Floored so a pathological width can't produce empty wraps.
   const { width: termWidth } = useTerminalDimensions();
   const panelCols = Math.max(termWidth - 6, 20);
-  const descCols = panelCols - 1;
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
   // the alternate screen — destroy the renderer first, always.
@@ -826,18 +865,14 @@ export const App = () => {
           {/* hand-wrapped into per-line rows — opentui's own wrap garbles everything below it */}
           {wrapWords("Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.", panelCols)
             .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
-          <select
-            focused
-            height={4}
-            showSelectionIndicator={false}
+          <WrapSelect
+            cols={panelCols}
+            maxRows={12}
             options={[
-              // tight '/' joiner — the full four-family list then fits a ~50-col terminal
-              { name: 'Claude Code', description: fit(`the Family routes (${FAMILY_KEYS.join('/')})`, descCols), value: 'families' },
-              { name: 'Custom', description: fit(`your named Aliases (${routingMap().aliases.length}) + add`, descCols), value: 'aliases' },
+              { name: 'Claude Code', description: `the Family routes (${FAMILY_KEYS.join(' / ')})`, value: 'families' },
+              { name: 'Custom', description: `your named Aliases (${routingMap().aliases.length}) + add`, value: 'aliases' },
             ]}
-            onSelect={(_i, opt) => {
-              if (opt) setMode({ kind: 'routing-section', section: opt.value as 'families' | 'aliases' });
-            }}
+            onSelect={(_i, opt) => setMode({ kind: 'routing-section', section: opt.value as 'families' | 'aliases' })}
           />
         </box>
       )}
@@ -845,28 +880,27 @@ export const App = () => {
       {mode.kind === 'routing-section' && (
         <box {...PANEL} title={mode.section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
           {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
-          <select
-            focused
-            height={Math.min((mode.section === 'families' ? FAMILY_KEYS.length + 1 : routingMap().aliases.length + 1) * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
+          {/* keyed by section so toggling families ↔ aliases can't reuse a stale selection */}
+          <WrapSelect
+            key={mode.section}
+            cols={panelCols}
+            maxRows={14}
             options={mode.section === 'families'
               ? [
                   ...FAMILY_KEYS.map((f) => {
                     const t = routingMap().families[f];
-                    return { name: f, description: fit(t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', descCols), value: `family:${f}` };
+                    return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
                   }),
                   // ' bind' rides the same leading-space convention as ' clear'/' rename' — it can
                   // never collide with a family:/alias: row key.
-                  { name: 'Bind Claude subscription models', description: fit('route all four families to Anthropic (Claude.ai) in one go', descCols), value: ' bind' },
+                  { name: 'Bind Claude subscription models', description: 'route all four families to Anthropic (Claude.ai) in one go', value: ' bind' },
                 ]
               : [
-                  ...routingMap().aliases.map((a) => ({ name: a.name, description: fit(`alias — ${a.target.providerId} (${a.target.model})`, descCols), value: `alias:${a.name}` })),
+                  ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
                   { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
                 ]}
             onSelect={(_i, opt) => {
-              if (!opt) return;
-              const v = String(opt.value);
+              const v = opt.value;
               if (v === 'add') { setMode({ kind: 'alias-name' }); return; }
               if (v === ' bind') { bindClaudeFamilies(); return; }
               const key = v.slice(v.indexOf(':') + 1);
@@ -917,11 +951,9 @@ export const App = () => {
 
       {mode.kind === 'route-provider' && (
         <box {...PANEL} title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
-          <select
-            focused
-            height={Math.min((PROVIDERS.length + 1) * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
+          <WrapSelect
+            cols={panelCols}
+            maxRows={14}
             options={[
               // Alias rows lead with the edit verbs (#79) — no scrolling past every Provider to
               // rename. Only for aliases already IN the map: the add-alias flow passes through here
@@ -929,18 +961,17 @@ export const App = () => {
               // Leading-space values can't collide with Provider ids (ids never start with a space).
               ...(mode.row.kind === 'alias' && routingMap().aliases.some((a) => a.name === (mode.row as { name: string }).name)
                 ? [
-                    { name: 'Rename alias', description: fit('keep the Target, change the bridged name', descCols), value: ' rename' },
+                    { name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' },
                     { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
                   ]
                 : []),
               ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
               // A Family route is cleared, never renamed — its picker keeps clear at the bottom.
               ...(mode.row.kind === 'family'
-                ? [{ name: 'Clear route', description: fit('family falls back to the Active Provider', descCols), value: ' clear' }]
+                ? [{ name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }]
                 : []),
             ]}
             onSelect={(_i, opt) => {
-              if (!opt) return;
               if (opt.value === ' clear') { clearRow(mode.row); return; }
               if (opt.value === ' rename' && mode.row.kind === 'alias') { setMode({ kind: 'alias-rename', name: mode.row.name }); return; }
               const p = PROVIDERS.find((x) => x.id === opt.value);
@@ -1013,7 +1044,12 @@ export const App = () => {
         </box>
       )}
 
-      {status !== '' && <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>{status}</text>}
+      {/* feedback wraps by hand too — tips and bind confirmations outgrow narrow windows */}
+      {status !== '' && (
+        <box flexDirection="column" marginTop={1} flexShrink={0}>
+          {wrapWords(status, termWidth - 4).map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
+        </box>
+      )}
     </box>
   );
 };

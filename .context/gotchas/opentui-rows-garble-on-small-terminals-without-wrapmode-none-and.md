@@ -23,7 +23,13 @@ upgrade path if that ever hurts.
 
 **Headless probe recipe:** `testRender(<jsx/>, { width, height })` → `renderOnce()` →
 `captureCharFrame()` prints the char frame — reproduces both bugs in seconds without a real
-terminal (fixed in `f5ec8bf` + `645f86d`).
+terminal (fixed in `f5ec8bf` + `645f86d`). When driving the app with `mockInput`, don't trust
+`flush()` — React commits lag it; loop with `waitForFrame(predicate)` instead.
+
+**Safe wrap escape hatch (`a07a4ce`):** long chrome copy that must survive narrow terminals is
+wrapped BY HAND — `wrapWords(text, cols)` in `packages/tui/src/app.tsx` splits into separate
+`wrapMode="none"` rows sized from `useTerminalDimensions()` (panel text = width − 6; select
+descriptions get `fit()` ellipsis instead, the select renderable hard-clips and cannot wrap).
 
 ## Related
 
