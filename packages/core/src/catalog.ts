@@ -10,6 +10,16 @@
  */
 
 import { randomBytes, webcrypto, createHash } from 'crypto';
+import {
+  standardEffortToCodex, DEFAULT_EFFORT, sortByReleaseDesc,
+  type ModelCaps, type ModelsDevCatalog,
+  type CodexEffort, type CodexReasoning, type EffortLevel,
+  type CodexResponsesEvent, type SseEvent, type ToolSpec, type AssembledToolCall,
+} from './shared';
+
+// Re-export the kernel so `./catalog`'s surface stays complete — sibling modules and the @wisp/core barrel
+// keep importing these from here unchanged while the code now lives in shared.ts (the green-to-green peel).
+export * from './shared';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -260,41 +270,6 @@ export const modelSupportsVision = (modelId: string): boolean => {
 // constants. A wrong window is just a wrong budget; a guessed vision flag would send images a backend
 // rejects, so vision keeps its fallback heuristic but context does not.
 
-// ----------------------------- models.dev capability source ----------------------------- //
-
-// The REAL per-model capabilities — the primary (dynamic) source that demotes the hardcoded table to a
-// fallback. All optional; the builder fills each gap from the table, then the default.
-export type ModelCaps = { contextInput?: number; maxOutput?: number; vision?: boolean };
-
-// The slices we read from models.dev's api.json (it carries more we ignore). Keyed by provider id
-// (e.g. "opencode-go", "groq"), each with a models map.
-type ModelsDevEntry = { limit?: { context?: number; output?: number }; modalities?: { input?: string[] }; release_date?: string };
-export type ModelsDevCatalog = Record<string, { models?: Record<string, ModelsDevEntry> }>;
-
-// Map one models.dev entry to ModelCaps. Vision = its input modalities include "image" (the reliable
-// signal — NOT the unrelated "attachment" flag). Absent fields stay undefined.
-export const parseModelsDevEntry = (entry: ModelsDevEntry): ModelCaps => ({
-  contextInput: entry.limit?.context,
-  maxOutput: entry.limit?.output,
-  vision: entry.modalities?.input?.includes('image') ?? false,
-});
-
-// Look up a model's caps by provider key + model id; undefined when the catalog/provider/model is absent
-// (the builder then falls back to the table/default).
-export const lookupModelsDevCaps = (catalog: ModelsDevCatalog | undefined, key: string, modelId: string): ModelCaps | undefined => {
-  const entry = catalog?.[key]?.models?.[modelId];
-  return entry ? parseModelsDevEntry(entry) : undefined;
-};
-
-// Order dropdown ids newest-first by models.dev release_date (ISO dates compare lexicographically);
-// undated ids trail alphabetically, so missing metadata can never bury a fresh release.
-const sortByReleaseDesc = (models: Record<string, ModelsDevEntry>, ids: string[]): string[] =>
-  [...ids].sort((a, b) => {
-    const da = models[a]?.release_date ?? '';
-    const db = models[b]?.release_date ?? '';
-    return da !== db ? (db < da ? -1 : 1) : a.localeCompare(b);
-  });
-
 // Build the descriptors Wisp advertises into VS Code's native model picker: one row per USABLE Provider.
 // Usable = has a key AND a resolvable model AND (Custom only) a base URL — else it stays hidden rather
 // than appearing as a dead pick. `caps` (optional) is the dynamic models.dev lookup; each field resolves
@@ -345,8 +320,7 @@ export const buildChatModelInfos = (
 // vscode-free mirrors of the tool-calling shapes, so the message/tool/stream plumbing stays unit-
 // testable. chatProvider.ts extracts the vscode parts into these plain forms and feeds them here.
 
-// A tool the model may call (name + description + JSON-schema input), and its OpenAI function-tool form.
-export type ToolSpec = { name: string; description: string; inputSchema?: object };
+// The OpenAI function-tool form a ToolSpec (see shared.ts) maps to.
 export type OAToolDef = { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } };
 
 // Map VS Code tool defs to OpenAI function tools. A no-arg tool gets a valid object schema, not bare {}:
@@ -404,9 +378,8 @@ export const buildOpenAiChatMessages = (turns: NormalizedTurn[]): OAChatMessage[
   });
 
 // OpenAI streams a tool call across chunks: id + name on the first delta for an index, arguments as
-// fragments on later deltas. Folded form once the stream completes.
+// fragments on later deltas. Folds into the shared AssembledToolCall once the stream completes.
 export type ToolCallDelta = { index: number; id?: string; name?: string; args?: string };
-export type AssembledToolCall = { id: string; name: string; argsJson: string };
 
 // Reassemble streamed tool-call deltas into whole calls. Keyed by stream index so parallel calls stay
 // separate; id/name from whichever fragment carries them, argument fragments concatenated in arrival
@@ -496,16 +469,6 @@ export const isCodexSignedIn = (creds: CodexCreds | undefined): boolean =>
 // The Codex backend speaks the OpenAI *Responses* API, not chat completions: the system prompt is a
 // top-level `instructions` string, the conversation is `input` message items. User/system text parts are
 // `input_text`; assistant (replayed) are `output_text` — the API rejects the wrong type.
-export type CodexEffort = 'low' | 'medium' | 'high' | 'xhigh';
-export type CodexReasoning = { effort: CodexEffort; summary: 'auto' };
-
-// The shared wisp.effort knob's type. Superset of CodexEffort with 'max' on top — 'max' is Anthropic-only
-// (Codex's wire tops at xhigh), so it lives here, NOT in CodexEffort. Normalized per-Provider at send time.
-export type EffortLevel = CodexEffort | 'max';
-
-// Map a stored EffortLevel onto Codex's wire type: 'max' folds to xhigh (its ceiling). Without this a knob
-// left on 'max' after a Provider switch would 400 the Responses call.
-export const standardEffortToCodex = (effort: EffortLevel): CodexEffort => (effort === 'max' ? 'xhigh' : effort);
 
 // One content part of a Responses input message: text (input_text for user/system, output_text for a
 // replayed assistant turn) or an image (input_image as a base64 data-URI / url).
@@ -630,9 +593,6 @@ export const buildCodexResponsesBody = (args: {
   };
 };
 
-// Default reasoning depth — 'medium' preserves the pre-Effort behavior for callers that don't thread one.
-export const DEFAULT_EFFORT: CodexEffort = 'medium';
-
 // The reasoning object to send for a Codex model, or undefined when it must be omitted. gpt-5 / o-series
 // need it; the gpt-4.x and *-spark (fast-loop) variants reject it. The Effort knob supplies the depth.
 export const codexReasoning = (model: string, effort: CodexEffort = DEFAULT_EFFORT): CodexReasoning | undefined => {
@@ -670,27 +630,6 @@ export const codexModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
 };
 
 // ----------------------------- Codex Responses reply ----------------------------- //
-
-// One parsed SSE off the Codex Responses stream: the `event:` name and its `data:` JSON.
-export type CodexResponsesEvent = { event: string; data: any };
-
-// The provider-agnostic shape parseSseBlock returns — both Codex (Responses) and Anthropic (Messages)
-// stream event:/data: SSE, so the same parser feeds both reducers. Aliased so the Anthropic code reads in
-// its own vocabulary.
-export type SseEvent = CodexResponsesEvent;
-
-// Parse ONE SSE block (blank-line-separated event:/data: lines) into an event. data: lines are joined
-// before JSON parsing (SSE splits long payloads across lines). undefined for a block with no event/data,
-// the [DONE] sentinel, or unparseable JSON. Shared by the non-streaming reader and the streaming path.
-export const parseSseBlock = (block: string): CodexResponsesEvent | undefined => {
-  const lines = block.split('\n').map((l) => l.trim()).filter(Boolean);
-  const eventLine = lines.find((l) => l.startsWith('event:'));
-  const dataLines = lines.filter((l) => l.startsWith('data:'));
-  if (!eventLine || dataLines.length === 0) return undefined;
-  const raw = dataLines.map((l) => l.slice('data:'.length).trim()).join('\n');
-  if (raw === '[DONE]') return undefined;
-  try { return { event: eventLine.slice('event:'.length).trim(), data: JSON.parse(raw) }; } catch { return undefined; }
-};
 
 // Pull the answer text out of a *final* Responses object (the `response.completed` payload, or a
 // non-streamed reply). Concatenates every output_text part across output[] message items — reasoning
