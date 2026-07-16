@@ -11,10 +11,9 @@ _Last updated: 2026-07-16 by Fable 5 (auto)._
 _At commit: `993e58b` on `main` (in sync with `origin/main`; tag `v2.0.7` pushed)._
 
 ## Current focus
-**wisp-router 2.0.7 released.** This session: /routing narrow-terminal wrap (WrapSelect), the
-one-tap "Bind Claude subscription models" row, README tech-stack badges, version bump + tag
-`v2.0.7`. Release workflow: all 4 platform builds green; publish job was queued at wrap-up —
-verify npm `wisp-router@2.0.7` + the GitHub release exist before anything release-related.
+**wisp-router 2.0.7 released and VERIFIED** (npm thin shell + all 4 platform packages +
+GitHub release assets live). This session: /routing narrow-terminal wrap (WrapSelect), the
+one-tap "Bind Claude subscription models" row, README tech-stack badges, bump + tag `v2.0.7`.
 
 ## State
 - **/routing narrow-terminal fixes DONE** (`a07a4ce` + `0180a68`), probe-verified headless at
@@ -32,26 +31,24 @@ verify npm `wisp-router@2.0.7` + the GitHub release exist before anything releas
   side panel ever wants the button. `claude-fable-5` added to core's curated ANTHROPIC_MODELS.
 - **README** (`a4f8281`): two badge rows (npm/release/platforms + TS 7/Bun/React 19/
   VS Code ≥1.104/Vitest), test count fixed to 434.
-- **Release 2.0.7** (`993e58b` + tag `v2.0.7`): run 29474723621 — builds 4/4 green,
-  publish queued when session ended.
+- **Release 2.0.7** (`993e58b` + tag `v2.0.7`): run 29474723621 fully green — verified
+  `wisp-router@2.0.7` on npm, all 4 platform packages, GitHub release with 4 binaries.
 - **Gate GREEN:** tui `tsc` + 434 core tests + headless probes + user eyeball.
 
 ## In flight
-- Release run 29474723621 publish job (queued at wrap-up). If it failed: platform packages are
-  best-effort, but the thin shell `wisp-router@2.0.7` MUST be on npm; re-run the job — the
-  workflow is re-run safe (existing release/versions are skipped).
+None.
 
 ## Blocked
 None.
 
 ## Pick up here
-1. **Verify 2.0.7 publish landed** (npm + GitHub release) if not already confirmed.
-2. **Publish VS Code extension 1.7.0 to the Marketplace** — human step: `vsce publish` in
+Ready queue empty. Carried backlog (top first):
+1. **Publish VS Code extension 1.7.0 to the Marketplace** — human step: `vsce publish` in
    `packages/vscode` (needs the `EsarinAzx` PAT) or upload `packages/vscode/wisp-1.7.0.vsix`.
    **Never tag `v1.7.0`** (fires the TUI `release.yml`).
-3. **catalog.ts someday-9 remainder** — deferred, low payoff.
-4. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
-5. **Panel-side alias rename** — TUI-only follow-up.
+2. **catalog.ts someday-9 remainder** — deferred, low payoff.
+3. **Root `.vsix` pile** — stale packaged builds; **ask before purging**.
+4. **Panel-side alias rename** — TUI-only follow-up.
 
 ## Skills for next session
 (none clearly apply — top items are verify/human steps)

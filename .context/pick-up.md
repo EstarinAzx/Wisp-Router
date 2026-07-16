@@ -20,9 +20,8 @@ user eyeballed and passed.
   sign-in first, bind on success. `claude-fable-5` added to curated ANTHROPIC_MODELS.
 
 ## Next task
-**Verify the 2.0.7 release landed.** Run 29474723621: builds were 4/4 green, publish job still
-queued at wrap-up. Check `npm view wisp-router@2.0.7 version` + `gh release view v2.0.7`.
-Publish failed → re-run the job (workflow is re-run safe). Then the carried backlog:
+**Ready queue empty — 2.0.7 release VERIFIED** (npm thin shell + all 4 platform packages +
+GitHub release assets all live). Pick from the carried backlog:
 1. **Publish VS Code extension 1.7.0 to Marketplace** — human step: `vsce publish` in
    `packages/vscode` (EsarinAzx PAT) or upload `packages/vscode/wisp-1.7.0.vsix`.
 2. Root `.vsix` pile — **ask before purging**.
