@@ -10,6 +10,7 @@
   <a href="https://www.npmjs.com/package/wisp-router"><img src="https://img.shields.io/npm/v/wisp-router?logo=npm&logoColor=white" alt="npm version"></a>
   <a href="https://github.com/EstarinAzx/Wisp-Router/releases"><img src="https://img.shields.io/github/v/release/EstarinAzx/Wisp-Router?logo=github" alt="GitHub release"></a>
   <img src="https://img.shields.io/badge/platforms-win%20%7C%20mac%20%7C%20linux-555" alt="Platforms: Windows, macOS, Linux">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/EstarinAzx/Wisp-Router" alt="License: MIT"></a>
 </p>
 
 <p align="center">

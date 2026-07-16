@@ -1,6 +1,7 @@
 {
   "name": "@tsd47216/wisp-router-linux-x64",
   "version": "0.0.0-dev",
+  "license": "MIT",
   "description": "wisp-router compiled binary for Linux x64",
   "os": [
     "linux"

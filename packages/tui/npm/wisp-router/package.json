@@ -1,6 +1,7 @@
 {
   "name": "wisp-router",
   "version": "0.0.0-dev",
+  "license": "MIT",
   "description": "Wisp — BYOK model router: terminal UI, local Bridge (OpenAI + Anthropic doors), and the claude-wisp launcher for Claude Code",
   "bin": {
     "wisp": "bin/wisp.js",

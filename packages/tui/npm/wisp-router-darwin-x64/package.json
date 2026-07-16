@@ -1,6 +1,7 @@
 {
   "name": "@tsd47216/wisp-router-darwin-x64",
   "version": "0.0.0-dev",
+  "license": "MIT",
   "description": "wisp-router compiled binary for macOS x64 (Intel)",
   "os": [
     "darwin"
