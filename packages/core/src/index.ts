@@ -2,7 +2,7 @@
 
 /*
  * Depends on:
- *   - ./catalog, ./routing, ./bridge, ./bridgeAnthropic, ./bridgeServer,
+ *   - ./catalog, ./routing, ./routingCli, ./bridge, ./bridgeAnthropic, ./bridgeServer,
  *     ./modelsDev, ./codexClient, ./anthropicClient, ./xaiClient, ./codexAuth, ./anthropicAuth, ./xaiAuth,
  *     ./home, ./homeStore, ./slash — re-exported as one flat namespace.
  * Data shapes: none of its own — everything comes from the modules below.
@@ -12,6 +12,7 @@
 // and bundles it at build time (ADR-0001).
 export * from './catalog';
 export * from './routing';
+export * from './routingCli';
 export * from './bridge';
 export * from './bridgeAnthropic';
 export * from './bridgeServer';
