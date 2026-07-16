@@ -11,8 +11,10 @@
  *
  * Data shapes:
  *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
- *     'oauth-pick' (sign in/out target) | 'key-entry' (masked) | 'model-free' (typed model id) |
- *     'signin-wait' (browser flow pending) | 'test' (the /test wiring check streaming its reply) |
+ *     'provider-menu' (#106: one row's actions — set active, key set/remove, sign in/out; Enter in
+ *     /providers opens it, actions land back on the list) | 'oauth-pick' (sign in/out target) |
+ *     'key-entry' (masked; origin 'menu' returns into the menu flow) | 'model-free' (typed model id) |
+ *     'signin-wait' (browser flow pending; same origin rule) | 'test' (the /test wiring check streaming its reply) |
  *     'bridge' (listener info: address + secret) | 'help' (the command list, #82) | the
  *     /routing chain (#65, sectioned #79):
  *     'routing' (overview: two sections) → 'routing-section' (Claude Code families / Custom
@@ -131,12 +133,14 @@ const WrapSelect = ({ options, cols, maxRows, onSelect }: {
 
 // The store handle + OAuth managers moved to store.ts with #63 (shared with `wisp serve`).
 
-// Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
-const keyedProviders = (): Provider[] =>
-  PROVIDERS.filter((p) => !isCodexProvider(p) && !isAnthropicProvider(p) && !isXaiProvider(p));
+// The three OAuth kinds sign in via a browser flow — every other row takes an API key.
+const isOAuthProvider = (p: Provider): boolean =>
+  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p);
 
-const oauthProviders = (): Provider[] =>
-  PROVIDERS.filter((p) => isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p));
+// Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
+const keyedProviders = (): Provider[] => PROVIDERS.filter((p) => !isOAuthProvider(p));
+
+const oauthProviders = (): Provider[] => PROVIDERS.filter(isOAuthProvider);
 
 // Sync signed-in read for display — the pure check over the stored bundle (skips codex's async
 // CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
@@ -151,6 +155,37 @@ const saveKey = (p: Provider, key: string): void => {
   // ponytail: read-then-write, not atomic — a cross-process merge-fn in WispHome if it ever bites.
   home.writeAuth({ keys: { ...home.readAuth().keys, [resolveKeyId(p)]: key } });
 };
+
+// The row's key as stored in auth.json — env fallbacks deliberately excluded: this feeds the
+// menu's Remove row, and only a stored key can be removed (#106).
+const storedKey = (p: Provider): string | undefined => home.readAuth().keys?.[resolveKeyId(p)];
+
+// List-row key status, mirroring oauthStatus: stored beats env (a stored key is what actually
+// gets sent when both exist); '' keeps unconfigured rows clean.
+const keyStatus = (p: Provider): string =>
+  storedKey(p) ? 'key set' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env key' : '';
+
+const removeKey = (p: Provider): void => {
+  const keys = { ...home.readAuth().keys };
+  delete keys[resolveKeyId(p)];
+  home.writeAuth({ keys });
+};
+
+// One provider's submenu rows (#106): set-active first (so setting active stays Enter-Enter),
+// then the kind's credential actions. Remove only appears when a stored key exists — the menu
+// never offers a no-op (env-var keys aren't stored, so they can't be removed here).
+const menuRows = (p: Provider): Array<{ name: string; description: string; value: string }> => [
+  { name: 'Use as Active Provider', description: p.id === activeProvider().id ? 'already active' : p.id, value: 'active' },
+  ...(isOAuthProvider(p)
+    ? [
+        { name: 'Sign in', description: `browser flow — ${oauthStatus(p)}`, value: 'signin' },
+        { name: 'Sign out', description: 'clear the stored tokens', value: 'signout' },
+      ]
+    : [
+        { name: 'Set API key', description: 'masked entry', value: 'set-key' },
+        ...(storedKey(p) ? [{ name: 'Remove key', description: 'delete the stored key', value: 'remove-key' }] : []),
+      ]),
+];
 
 const saveModel = (p: Provider, model: string): void => {
   const cfg = home.readConfig();
@@ -281,13 +316,16 @@ const bridge = createTuiBridge(() => {});
 type Mode =
   | { kind: 'input' }
   | { kind: 'providers' }
+  // origin 'menu' on the two reused screens below: entered from the provider menu, so save/cancel
+  // returns into the /providers flow instead of the palette (#106).
+  | { kind: 'provider-menu'; provider: Provider }
   | { kind: 'key-pick' }
-  | { kind: 'key-entry'; provider: Provider }
+  | { kind: 'key-entry'; provider: Provider; origin?: 'menu' }
   | { kind: 'model-loading'; provider: Provider }
   | { kind: 'model-pick'; provider: Provider; options: string[] }
   | { kind: 'model-free'; provider: Provider }
   | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
-  | { kind: 'signin-wait'; provider: Provider }
+  | { kind: 'signin-wait'; provider: Provider; origin?: 'menu' }
   | { kind: 'effort-pick' }
   | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
@@ -323,6 +361,8 @@ export const App = () => {
   // PANEL border (1+1). Floored so a pathological width can't produce empty wraps.
   const { width: termWidth } = useTerminalDimensions();
   const panelCols = Math.max(termWidth - 6, 20);
+  // Palette suggestion rows sit outside any PANEL — only the outer padding (2+2) eats width.
+  const paletteCols = Math.max(termWidth - 4, 20);
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
   // the alternate screen — destroy the renderer first, always.
@@ -332,6 +372,20 @@ export const App = () => {
     if (message) setStatus(message);
     setSecret('');
     setMode({ kind: 'input' });
+  };
+
+  // Menu actions land back on the LIST (#106) — manage several providers in one visit; the
+  // re-render also makes the (active) marker and key/auth statuses reflect what just happened.
+  const backToProviders = (message?: string) => {
+    if (message) setStatus(message);
+    setSecret('');
+    setMode({ kind: 'providers' });
+  };
+
+  // Esc from a menu-origin screen steps back ONE level — to the menu, not the list.
+  const backToMenu = (p: Provider) => {
+    setSecret('');
+    setMode({ kind: 'provider-menu', provider: p });
   };
 
   // The /routing sub-screens step back one level on Esc/apply — to the SECTION they came from
@@ -387,9 +441,10 @@ export const App = () => {
   // Kick off the browser OAuth flow and park on the wait screen. The seq guard mirrors the model-fetch
   // race fix: Esc bumps it, so an abandoned flow resolving minutes later can't rewrite the UI.
   // onSuccess lets a caller chain work after the tokens land (the routing bind) — default just reports.
-  const startSignIn = (p: Provider, onSuccess?: () => void) => {
+  // origin rides into the wait mode so Esc steps back into the menu flow (#106).
+  const startSignIn = (p: Provider, onSuccess?: () => void, origin?: 'menu') => {
     const seq = ++signinSeq.current;
-    setMode({ kind: 'signin-wait', provider: p });
+    setMode({ kind: 'signin-wait', provider: p, origin });
     const auth = isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth;
     auth.signIn().then(
       () => { if (seq === signinSeq.current) (onSuccess ?? (() => backToInput(`Signed in — ${p.label} is ready.`)))(); },
@@ -414,9 +469,9 @@ export const App = () => {
   };
 
   // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
-  const doSignOut = (p: Provider) => {
+  const doSignOut = (p: Provider, origin?: 'menu') => {
     (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth).signOut();
-    backToInput(`Signed out of ${p.label}.`);
+    (origin === 'menu' ? backToProviders : backToInput)(`Signed out of ${p.label}.`);
   };
 
   // Stream the canned /test prompt onto the test screen. Unlike sign-in, Esc aborts the request
@@ -621,7 +676,11 @@ export const App = () => {
       if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
       // Routing steps back one level per Esc (#79): sub-screen → its section → overview → palette.
+      // The provider-menu chain does the same (#106): entry/wait → menu → list → palette.
       mode.kind === 'input' ? exitTui()
+        : mode.kind === 'provider-menu' ? backToProviders()
+        : mode.kind === 'key-entry' && mode.origin === 'menu' ? backToMenu(mode.provider)
+        : mode.kind === 'signin-wait' && mode.origin === 'menu' ? backToMenu(mode.provider)
         : mode.kind === 'alias-name' || mode.kind === 'alias-rename' ? backToSection('aliases', 'Cancelled.')
         : mode.kind === 'route-provider' || mode.kind === 'route-model-loading' || mode.kind === 'route-model-pick' || mode.kind === 'route-model-free'
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
@@ -633,10 +692,12 @@ export const App = () => {
     }
     if (mode.kind !== 'key-entry') return;
     if (key.name === 'return' || key.name === 'enter') {
+      // Menu-origin entries finish back on the provider list (#106); /key keeps the palette.
+      const done = mode.origin === 'menu' ? backToProviders : backToInput;
       const value = secret.trim();
-      if (!value) { backToInput('Empty — key unchanged.'); return; }
+      if (!value) { done('Empty — key unchanged.'); return; }
       saveKey(mode.provider, value);
-      backToInput(`Key saved for ${mode.provider.label}.`);
+      done(`Key saved for ${mode.provider.label}.`);
       return;
     }
     if (key.name === 'backspace') { setSecret((s) => s.slice(0, -1)); return; }
@@ -681,18 +742,37 @@ export const App = () => {
             />
           </box>
           <box flexDirection="column" marginTop={1}>
-            {suggestions.map((c, i) => (
-              <text key={c.name} wrapMode="none" flexShrink={0} bg={i === highlight ? '#27272a' : undefined}>
-                {i === highlight ? <span fg={ACCENT}>{'> '}</span> : '  '}
-                <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
-              </text>
-            ))}
+            {suggestions.flatMap((c, i) => {
+              const on = i === highlight;
+              const bg = on ? '#27272a' : undefined;
+              const head = `/${c.name}${c.args ? ` ${c.args}` : ''}`;
+              // A row that fits stays one line; a clipped one splits into a command line plus
+              // hand-wrapped dim description lines (same rule as WrapSelect — opentui's own wrap
+              // garbles every row below it). 2 = the highlight prefix, 3 = ' — '.
+              if (2 + head.length + 3 + c.description.length <= paletteCols) {
+                return [
+                  <text key={c.name} wrapMode="none" flexShrink={0} bg={bg}>
+                    {on ? <span fg={ACCENT}>{'> '}</span> : '  '}
+                    <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
+                  </text>,
+                ];
+              }
+              return [
+                <text key={c.name} wrapMode="none" flexShrink={0} bg={bg}>
+                  {on ? <span fg={ACCENT}>{'> '}</span> : '  '}
+                  <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''}
+                </text>,
+                ...wrapWords(c.description, Math.max(paletteCols - 4, 10)).map((l, j) => (
+                  <text key={`${c.name}:${j}`} wrapMode="none" flexShrink={0} bg={bg} fg={DIM}>{`    ${l}`}</text>
+                )),
+              ];
+            })}
           </box>
         </>
       )}
 
       {mode.kind === 'providers' && (
-        <box {...PANEL} title="Active Provider" marginTop={1} flexDirection="column">
+        <box {...PANEL} title="Providers" marginTop={1} flexDirection="column">
           {/* select collapses to zero rows without an explicit height; an option is 2 rows with description */}
           {/* the built-in ▶ indicator is off on every select — the glyph is ambiguous-width (double-wide
               on common Windows fonts, smearing into the label); the highlight bar already marks the row */}
@@ -702,7 +782,8 @@ export const App = () => {
             showSelectionIndicator={false}
             showScrollIndicator
             options={PROVIDERS.map((p) => {
-              const auth = oauthStatus(p);
+              // keyed rows get the same at-a-glance status the OAuth rows always had (#106)
+              const auth = oauthStatus(p) || keyStatus(p);
               return {
                 name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
                 description: auth ? `${p.id} — ${auth}` : p.id,
@@ -710,10 +791,35 @@ export const App = () => {
               };
             })}
             onSelect={(_i, opt) => {
-              if (!opt) return;
-              home.writeConfig({ provider: opt.value as string });
-              // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
-              backToInput(`Active Provider → ${String(opt.name).replace(' (active)', '')} — tip: name it in /routing for a clean /model list.`);
+              // Enter opens the row's action menu (#106) — set-active moved to its first row.
+              const p = PROVIDERS.find((x) => x.id === opt?.value);
+              if (p) setMode({ kind: 'provider-menu', provider: p });
+            }}
+          />
+        </box>
+      )}
+
+      {mode.kind === 'provider-menu' && (
+        <box {...PANEL} title={mode.provider.label} marginTop={1} flexDirection="column">
+          <select
+            focused
+            height={Math.min(menuRows(mode.provider).length * 2, 16)}
+            showSelectionIndicator={false}
+            showScrollIndicator
+            options={menuRows(mode.provider)}
+            onSelect={(_i, opt) => {
+              const p = mode.provider;
+              switch (opt?.value) {
+                case 'active':
+                  home.writeConfig({ provider: p.id });
+                  // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
+                  backToProviders(`Active Provider → ${p.label} — tip: name it in /routing for a clean /model list.`);
+                  return;
+                case 'set-key': setMode({ kind: 'key-entry', provider: p, origin: 'menu' }); return;
+                case 'remove-key': removeKey(p); backToProviders(`Stored key removed for ${p.label}.`); return;
+                case 'signin': startSignIn(p, () => backToProviders(`Signed in — ${p.label} is ready.`), 'menu'); return;
+                case 'signout': doSignOut(p, 'menu'); return;
+              }
             }}
           />
         </box>
