@@ -191,6 +191,18 @@ An Alias may not collide with a Provider id. _Avoid_: expecting an Alias to
 appear inside Claude Code's own model menu — that menu is Claude Code's; the
 Alias is typed, then sticks.
 
+**Slot**:
+A **Family route** worn as an assignable handle rather than a family match: the
+user (or Claude Code itself, via the routing CLI) deliberately rebinds a family —
+`haiku` by default, any family on request — so that an external tool's *fixed*
+model choices (e.g. Claude Code's Agent-tool enums) reach an arbitrary **Target**.
+The family is "sacrificed" for the session: while it serves as a Slot, that name
+no longer means the real model family. Restore happens at session end — never
+while an agent driven through the Slot is still running (bindings are read
+per-request, so an early restore silently re-routes a live agent). _Avoid_:
+treating a Slot as a new row kind — it is an ordinary Family route, used
+differently.
+
 **Target**:
 What a **Routing map** row points at: a **Provider** plus a pinned model. The
 pinned model overrides that Provider's panel-selected model for requests through

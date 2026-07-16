@@ -10,34 +10,34 @@ tags: [context, pick-up]
 **Start:** read `.context/overview.md` + `.context/active-work.md` to rehydrate, then continue below.
 
 ## What last session finished
-**wisp-router 2.0.9 released and VERIFIED** — `/providers` submenu hub (#106, `4918cf8`),
-palette description wrap (same commit), Advisor endpoint-gate warning on `/bridge`
-(`9442718`), bump `cb7007a`, tag `v2.0.9`; npm thin shell + 4 platform packages + GitHub
-release assets confirmed live.
-- Submenu: Enter on a provider row → Use as Active · Set/Remove API key (keyed) · Sign
-  in/out (OAuth); actions return to the list; Esc steps one level; slash commands untouched.
-  Remove-key is new. All in `packages/tui/src/app.tsx`.
+**wisp-router 2.0.10 released and VERIFIED** — #111 prompt-caching fix (`e5ec476`):
+the Bridge had dropped Anthropic `cache_control`, making bridged Claude.ai OAuth sessions burn
+~5-10x native plan usage. Wisp now places two ephemeral breakpoints (last system block, final
+message block). Live proof: turn 1 cache-write 9122 tokens; turn 2 cache-read all 9122. Suite
+437/437, extension + TUI tsc clean; release bump `6812751`, tag `v2.0.10`; npm shell + 4
+platform packages + GitHub assets confirmed live.
+
+Also planned **Routing CLI + Slot skill**: spec #107, tickets #108→#109→#110; Slot added to
+`CONTEXT.md`; MVD added to `.context/happy-path.md`.
 
 ## Next task
-**Ready queue empty.** Pick from the carried backlog:
-1. **Publish VS Code extension 1.7.0 to Marketplace** — human step: `vsce publish` in
-   `packages/vscode` (EsarinAzx PAT) or upload `packages/vscode/wisp-1.7.0.vsix`.
-2. Panel-side alias rename (TUI-only follow-up).
-3. Root `.vsix` pile — **ask before purging** · catalog.ts someday-9 (low payoff).
+**#108 — `wisp routing` show + `--json` snapshot** (unblocked, `ready-for-agent`). Then #109
+(set/unset + validation/credential warning), then #110 (personal Slot skill in
+`~/.claude/skills/`). Use `/preset scope 108`.
 
 ## Landmines
-- **⚠️ Do NOT git-tag `v1.7.0`** for the extension — `release.yml` fires on `v*` and guards
-  tag == `packages/tui` version. Extension ships via `.vsix` only.
-- **⚠️ Advisor is endpoint-gated** — won't route through Wisp even bound to Claude OAuth; no
-  code fix, native `claude` for advisor tasks. Don't reopen.
-- **⚠️ TUI chrome rule:** every chrome row `wrapMode="none"` + `flexShrink={0}` (or PANEL);
-  long copy hand-wraps via `wrapWords`; select descriptions only wrap through WrapSelect —
-  the native select renderable hard-clips. See
-  [[opentui-rows-garble-on-small-terminals-without-wrapmode-none-and]].
-- **⚠️ Provider files stay one-way:** import ONLY from `./shared` (+ `import type { Provider }`).
-- **⚠️ New tsconfigs need `"types": ["node"]`** (TS 7 drops auto-include).
-- **npm publish is irreversible** — 2.0.9 spent; next release is 2.0.10+.
-- **Grok ≠ Groq** — Grok is `id:'xai'`; leave `id:'groq'` alone.
+- User must update installed wrapper: `npm i -g wisp-router@2.0.10`, then restart Bridge.
+  Earlier binaries retain the cache-burn bug.
+- Even after #111, routes pointing at `providerId:'anthropic'` still bill the Claude Max plan
+  (now at native cache weight). Claude Code background haiku calls burn Max even when main
+  `/model` is a Codex alias — rebind haiku off `anthropic` for a truly Anthropic-free session.
+- **Slot restore waits for session end, never mid-agent** — routing resolves per request; early
+  restore silently re-routes the live agent.
+- **Never tag extension `v1.7.0`** — `release.yml` fires on every `v*` and expects the TUI
+  package version. Marketplace publish is VSIX/vsce only.
+- TUI chrome: every chrome row `wrapMode="none"` + `flexShrink={0}` (or PANEL).
+- Provider files stay one-way: import ONLY from `./shared` (+ `import type { Provider }`).
+- New tsconfigs need `"types": ["node"]` (TS 7 drops auto-include).
 
 ## Related
-- [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[stack]]
+- [[active-work]] · [[overview]] · [[decisions]] · [[gotchas]] · [[happy-path]]

@@ -9,6 +9,7 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[bridged-family-routes-bound-to-anthropic-burn-max-quota]] — Family routes bound to `anthropic` bill the Claude Max plan — background haiku chores burn it even in "GPT sessions"; rebind haiku off `anthropic` first
 - [[claude-code-advisor-is-endpoint-gated-past-the-bridge]] — Claude Code Advisor is endpoint-gated — can't route through Wisp, no code fix; native `claude` for advisor tasks
 - [[opentui-rows-garble-on-small-terminals-without-wrapmode-none-and]] — opentui: rows garble on small terminals without `wrapMode="none"` (wrap overlay) + `flexShrink={0}` (yoga row-shrink)
 - [[ts7-drops-types-auto-include-when-types-unset]] — TS 7 drops `@types/*` auto-include when `types` is unset (node/DOM globals vanish; set `types:["node"]`)

@@ -1,7 +1,7 @@
 ---
 type: happy-path
 project: wisp
-updated: 2026-07-14
+updated: 2026-07-16
 tags: [happy-path, mvd]
 ---
 # Happy Paths (MVD)
@@ -79,3 +79,22 @@ from this spine on purpose — it is the *other* full face (panel + Inquire +
 Bridge + native picker; the shrink was cancelled, #66), reading the same
 `~/.wisp/` store; a user who also has it installed gets identical Providers
 there with zero extra setup.
+
+## Routing CLI + Slot skill — Claude Code launches a subagent on any Target
+- **Idea:** new `wisp routing` CLI subcommands (show `--json` / set / unset) let bridged Claude Code itself rebind a sacrificial Family route — the **Slot**, default `haiku` — to any Target, then spawn its Agent tool with that family enum, so a subagent runs on a model Claude Code's fixed enums could never name; a personal Slot skill teaches the dance.  **Mode:** ux+beat  **Actor:** bridged Claude Code (driven by the user asking for a subagent on a specific Target)  **Goal:** the subagent completes its task on the chosen Target; the Slot is restored at session end, never mid-agent.
+- **Updated:** 2026-07-16
+
+```mermaid
+flowchart LR
+  ask([User: 'run a subagent on gpt-5.6-sol']) -->|skill fires · wisp routing --json snapshots the map| snap[Slot's current target remembered]
+  snap -->|wisp routing set haiku codex/gpt-5.6-sol · config written atomically| bound[haiku Slot → Codex + pinned sol]
+  bound -->|Agent tool, model: haiku · Bridge reads map fresh per request| agent[Subagent running on Sol via the haiku Slot]
+  agent -->|task streams back through the Bridge · agent finishes| done2[Subagent result delivered]
+  done2 -->|session end · wisp routing set haiku <snapshot> restores| restored([Map back to its pre-session state])
+```
+
+**Note (live-map rule, behind the spine):** the Bridge reads the Routing map
+fresh on every request (ADR-0002), which is what makes the flip take effect
+mid-session with zero restarts — and also why restore waits for session end:
+restoring while the agent still runs would re-route its next turn. Missing
+credentials on the new Target warn at `set` time but never block the write.
