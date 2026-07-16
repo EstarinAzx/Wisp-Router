@@ -178,10 +178,61 @@ describe('runRoutingCommand set', () => {
   });
 });
 
+// ----------------------------- Unset ----------------------------- //
+
+describe('runRoutingCommand unset', () => {
+  it('clears a Family route', async () => {
+    const result = await run(['unset', 'opus']);
+    expect(result).toEqual({
+      nextMap: { ...map, families: { ...map.families, opus: undefined } },
+      lines: [],
+      exitCode: 0,
+    });
+  });
+
+  it('removes an Alias', async () => {
+    const result = await run(['unset', 'fast']);
+    expect(result).toEqual({
+      nextMap: {
+        ...map,
+        aliases: [{ name: 'slashy', target: { providerId: 'openrouter', model: 'vendor/model' } }],
+      },
+      lines: [],
+      exitCode: 0,
+    });
+  });
+
+  it('treats an unknown Alias as a no-op without a write', async () => {
+    await expect(run(['unset', 'missing'])).resolves.toEqual({ lines: [], exitCode: 0 });
+  });
+
+  it('treats an already-unset Family as a no-op without a write', async () => {
+    await expect(run(['unset', 'sonnet'])).resolves.toEqual({ lines: [], exitCode: 0 });
+  });
+
+  it('refuses an empty row name', async () => {
+    await expect(run(['unset', ''])).resolves.toEqual({
+      lines: ['error: Row name cannot be empty.'],
+      exitCode: 1,
+    });
+  });
+});
+
 // ----------------------------- Usage ----------------------------- //
 
 describe('runRoutingCommand usage', () => {
   it('rejects an unknown subcommand', async () => {
     await expect(run(['wat'])).resolves.toEqual({ lines: USAGE, exitCode: 1 });
+  });
+
+  it.each([
+    ['set'],
+    ['set', 'fast'],
+    ['set', 'fast', 'groq/model', 'extra'],
+    ['unset'],
+    ['unset', 'fast', 'extra'],
+    ['--json', 'extra'],
+  ])('rejects wrong argument shape %j', async (...args) => {
+    await expect(run(args)).resolves.toEqual({ lines: USAGE, exitCode: 1 });
   });
 });

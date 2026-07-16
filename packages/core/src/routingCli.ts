@@ -10,7 +10,7 @@
 
 import type { Provider } from './catalog';
 import {
-  FAMILY_KEYS, withAlias, withFamilyRoute,
+  FAMILY_KEYS, withAlias, withFamilyRoute, withoutAlias,
   type FamilyKey, type RoutingMap, type Target,
 } from './routing';
 
@@ -77,6 +77,29 @@ const setCommand = async (
   return { nextMap, lines, exitCode: 0 };
 };
 
+const unsetCommand = (
+  args: string[],
+  map: RoutingMap,
+  providers: Provider[],
+): RoutingCliResult => {
+  if (args.length !== 2) return usage();
+  const [, row] = args;
+  if (!row) return failure('Row name cannot be empty.');
+
+  const family = familyFor(row);
+  if (family) {
+    if (!map.families[family]) return { lines: [], exitCode: 0 };
+    return {
+      nextMap: withFamilyRoute(map, providers, family, undefined)!,
+      lines: [],
+      exitCode: 0,
+    };
+  }
+
+  if (!map.aliases.some((alias) => alias.name === row)) return { lines: [], exitCode: 0 };
+  return { nextMap: withoutAlias(map, row), lines: [], exitCode: 0 };
+};
+
 // Convert argv and injected live state to output without reading files or touching process globals.
 export const runRoutingCommand = async (
   args: string[],
@@ -103,5 +126,6 @@ export const runRoutingCommand = async (
     return { lines, exitCode: 0 };
   }
   if (args[0] === 'set') return setCommand(args, map, providers, hasCredentials);
+  if (args[0] === 'unset') return unsetCommand(args, map, providers);
   return usage();
 };
