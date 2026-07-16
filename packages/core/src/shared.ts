@@ -97,3 +97,10 @@ export type ToolSpec = { name: string; description: string; inputSchema?: object
 // The folded form of a streamed tool call once the stream completes — id, name, and the accumulated
 // argument JSON. Returned by all three reducers (chat assembleToolCalls / Codex / Anthropic).
 export type AssembledToolCall = { id: string; name: string; argsJson: string };
+
+// ----------------------------- Parsing helpers ----------------------------- //
+
+// A trimmed non-empty string, else undefined — so blank/null/non-string fields don't become "present".
+// Shared by the Codex + Grok auth.json importers (parseCodexAuthJson / parseGrokAuthJson).
+export const trimmedString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.trim() : undefined;
