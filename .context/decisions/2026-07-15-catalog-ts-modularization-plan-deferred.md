@@ -1,15 +1,25 @@
 ---
 type: decision
 project: wisp
-updated: 2026-07-15
-tags: [context, decisions, refactor, deferred]
+updated: 2026-07-16
+tags: [context, decisions, refactor, executed]
 ---
 
-# catalog.ts modularization — seam map + phased plan (DEFERRED)
+# catalog.ts modularization — seam map + phased plan (4-file peel EXECUTED)
 
-**Status:** deferred — approach decided, execution not scheduled. Owner will init later.
-Nothing is broken: `packages/core/src/catalog.ts` is ~1,300 lines of **pure** data + functions,
-fully covered by 431 green tests. This is cohesion cleanup, not a bug fix.
+**Status:** the 4-file peel is **DONE** (2026-07-16, commits `4bb4e29` → `b8de90d` → `2980f07` →
+`7e0de9b`). `packages/core/src/catalog.ts` **1293 → 486 lines**; `shared.ts` + `codex.ts` +
+`anthropic.ts` + `xai.ts` extracted per the map below. catalog **re-exports** all four, so the
+`@wisp/core` barrel surface is byte-identical — no sibling or face touched an import. Each provider
+file depends only on `./shared` + `import type { Provider }` (type-only back-edge → runtime graph
+`catalog → provider → shared`, acyclic). Green-to-green: 434 tests + core/tui/vscode `tsc` clean at
+every leg; a runtime barrel smoke, `bun run dev`, and live sign-ins all pass. The remaining
+**someday-9** split (providers/edit/chat/oauth/migration, then repoint siblings to per-concern
+imports and drop the re-export facade) stays **deferred** — low payoff, "only if it earns it."
+
+_Original plan below, kept for the record._
+Nothing was broken: `packages/core/src/catalog.ts` was ~1,300 lines of **pure** data + functions,
+fully covered by (then) 431 green tests. This was cohesion cleanup, not a bug fix.
 
 **Plan:** split `catalog.ts` (today ~13 unrelated concerns in one file) into per-concern files,
 keeping `index.ts` (the `@wisp/core` barrel) re-exporting everything flat — so **the faces change
