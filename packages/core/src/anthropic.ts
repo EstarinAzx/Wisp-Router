@@ -66,7 +66,7 @@ export const parseAnthropicCreds = (raw: string | undefined): AnthropicCreds | u
 
 // Curated Claude model ids — the OFFLINE FALLBACK for anthropicModelsFrom. The anthropic row's
 // defaultModel must stay a member.
-export const ANTHROPIC_MODELS: string[] = ['claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+export const ANTHROPIC_MODELS: string[] = ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 
 // Live Claude dropdown ids from models.dev — undated aliases only (dated -YYYYMMDD snapshots duplicate
 // them). Deliberately NO family whitelist: a brand-new family name must appear, never be filtered out.

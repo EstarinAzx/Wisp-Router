@@ -23,7 +23,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { useKeyboard, usePaste, useRenderer } from '@opentui/react';
+import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
@@ -59,6 +59,32 @@ const DIM = '#71717a';
 // terminal makes yoga shrink rows to zero height while opentui still paints them — rows overlap
 // into garbage; refusing to shrink means content clips cleanly at the bottom edge instead.
 const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT, flexShrink: 0 } as const;
+
+// ----------------------------------------- Narrow terminals ----------------------------------------- //
+
+// opentui's own wrapMode="wrap" overlays every row that follows the wrapped one (the garble the
+// PANEL note describes), so long chrome copy is wrapped BY HAND: plain word-wrap into separate
+// non-wrapping rows sized to the live terminal width. A word longer than a line hard-splits.
+const wrapWords = (text: string, cols: number): string[] => {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    for (let rest = word; ; ) {
+      const candidate = line ? `${line} ${rest}` : rest;
+      if (candidate.length <= cols) { line = candidate; break; }
+      if (line) { lines.push(line); line = ''; continue; }
+      lines.push(rest.slice(0, cols));
+      rest = rest.slice(cols);
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+};
+
+// Ellipsis-fit for select rows — the select renderable hard-clips at its right edge (no wrap
+// possible inside it), so overflowing descriptions get an honest '…' instead of a silent cut.
+const fit = (text: string, cols: number): string =>
+  text.length <= cols ? text : `${text.slice(0, Math.max(cols - 1, 0))}…`;
 
 // ----------------------------------------- Store ----------------------------------------- //
 
@@ -134,6 +160,15 @@ const titleLabel = (row: RouteRow): string => rowLabel(row).replace(/[^\x20-\x7e
 
 const rowTarget = (map: RoutingMap, row: RouteRow): Target | undefined =>
   row.kind === 'family' ? map.families[row.family] : map.aliases.find((a) => a.name === row.name)?.target;
+
+// The one-tap "bind Claude subscription models" mapping: each Family route's natural Claude.ai
+// model. TUI-local data — promote to core if the side panel ever grows the same button.
+const CLAUDE_FAMILY_MODELS: Record<FamilyKey, string> = {
+  opus: 'claude-opus-4-8',
+  sonnet: 'claude-sonnet-5',
+  haiku: 'claude-haiku-4-5',
+  fable: 'claude-fable-5',
+};
 
 // ----------------------------------------- /test ----------------------------------------- //
 
@@ -220,7 +255,8 @@ type Mode =
   | { kind: 'help' }
   // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new
   // alias / pick a row's Provider → pick its model. 'alias-rename' edits an existing alias's NAME
-  // in place (Target kept) — reached from the row's Provider picker.
+  // in place (Target kept) — reached from the row's Provider picker. The families section also
+  // carries the one-tap "Bind Claude subscription models" row (sign in first if needed).
   | { kind: 'routing' }
   | { kind: 'routing-section'; section: 'families' | 'aliases' }
   | { kind: 'alias-name' }
@@ -242,6 +278,12 @@ export const App = () => {
   const testAbort = useRef<AbortController | null>(null);
   const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
   const renderer = useRenderer();
+  // Live text columns for the hand-wrap + ellipsis-fit helpers: terminal minus the outer padding
+  // (2+2) and the PANEL border (1+1); select rows draw one column further in. Floored so a
+  // pathological width can't produce empty wraps.
+  const { width: termWidth } = useTerminalDimensions();
+  const panelCols = Math.max(termWidth - 6, 20);
+  const descCols = panelCols - 1;
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
   // the alternate screen — destroy the renderer first, always.
@@ -305,14 +347,31 @@ export const App = () => {
 
   // Kick off the browser OAuth flow and park on the wait screen. The seq guard mirrors the model-fetch
   // race fix: Esc bumps it, so an abandoned flow resolving minutes later can't rewrite the UI.
-  const startSignIn = (p: Provider) => {
+  // onSuccess lets a caller chain work after the tokens land (the routing bind) — default just reports.
+  const startSignIn = (p: Provider, onSuccess?: () => void) => {
     const seq = ++signinSeq.current;
     setMode({ kind: 'signin-wait', provider: p });
     const auth = isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth;
     auth.signIn().then(
-      () => { if (seq === signinSeq.current) backToInput(`Signed in — ${p.label} is ready.`); },
+      () => { if (seq === signinSeq.current) (onSuccess ?? (() => backToInput(`Signed in — ${p.label} is ready.`)))(); },
       (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
     );
+  };
+
+  // The families screen's one-tap bind: point all four Family routes at the Anthropic subscription
+  // models. Signed out → run the browser sign-in first and bind the moment the tokens land.
+  const bindClaudeFamilies = () => {
+    const p = PROVIDERS.find(isAnthropicProvider);
+    if (!p) return;
+    const apply = () => {
+      // withFamilyRoute can't refuse here — the Target names a catalog row by construction.
+      let map = routingMap();
+      for (const f of FAMILY_KEYS) map = withFamilyRoute(map, PROVIDERS, f, { providerId: p.id, model: CLAUDE_FAMILY_MODELS[f] })!;
+      home.writeConfig({ routing: map });
+      // short on purpose — the status row is single-line chrome that clips on narrow terminals
+      backToSection('families', `Families → ${p.label} subscription models.`);
+    };
+    isAnthropicSignedIn(home.readAuth().anthropic) ? apply() : startSignIn(p, apply);
   };
 
   // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
@@ -563,7 +622,9 @@ export const App = () => {
       {/* wrapMode none + flexShrink 0 on EVERY chrome row in this file — a wrapped row makes
           opentui overlay every row after it on narrow terminals, and a short terminal makes yoga
           shrink rows to zero height while they still paint (same garble). Clipping always beats
-          garbage. Only real content keeps wrapping: the /test reply + its error text. */}
+          garbage. Long chrome copy that must survive narrow terminals is hand-wrapped via
+          wrapWords into per-line rows instead. Only real content keeps opentui wrapping: the
+          /test reply + its error text. */}
       <text wrapMode="none" flexShrink={0} fg={ACCENT}>{SPLASH}</text>
       {/* the green badge is THIS face's own listener only — start/stop re-render via their setStatus */}
       <text wrapMode="none" flexShrink={0} fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
@@ -762,14 +823,17 @@ export const App = () => {
 
       {mode.kind === 'routing' && (
         <box {...PANEL} title="Routing map" marginTop={1} flexDirection="column">
-          <text wrapMode="none" fg={DIM}>Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.</text>
+          {/* hand-wrapped into per-line rows — opentui's own wrap garbles everything below it */}
+          {wrapWords("Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.", panelCols)
+            .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
           <select
             focused
             height={4}
             showSelectionIndicator={false}
             options={[
-              { name: 'Claude Code', description: `the Family routes (${FAMILY_KEYS.join(' / ')})`, value: 'families' },
-              { name: 'Custom', description: `your named Aliases (${routingMap().aliases.length}) + add`, value: 'aliases' },
+              // tight '/' joiner — the full four-family list then fits a ~50-col terminal
+              { name: 'Claude Code', description: fit(`the Family routes (${FAMILY_KEYS.join('/')})`, descCols), value: 'families' },
+              { name: 'Custom', description: fit(`your named Aliases (${routingMap().aliases.length}) + add`, descCols), value: 'aliases' },
             ]}
             onSelect={(_i, opt) => {
               if (opt) setMode({ kind: 'routing-section', section: opt.value as 'families' | 'aliases' });
@@ -783,22 +847,28 @@ export const App = () => {
           {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
           <select
             focused
-            height={Math.min((mode.section === 'families' ? FAMILY_KEYS.length : routingMap().aliases.length + 1) * 2, 16)}
+            height={Math.min((mode.section === 'families' ? FAMILY_KEYS.length + 1 : routingMap().aliases.length + 1) * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
             options={mode.section === 'families'
-              ? FAMILY_KEYS.map((f) => {
-                  const t = routingMap().families[f];
-                  return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
-                })
+              ? [
+                  ...FAMILY_KEYS.map((f) => {
+                    const t = routingMap().families[f];
+                    return { name: f, description: fit(t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', descCols), value: `family:${f}` };
+                  }),
+                  // ' bind' rides the same leading-space convention as ' clear'/' rename' — it can
+                  // never collide with a family:/alias: row key.
+                  { name: 'Bind Claude subscription models', description: fit('route all four families to Anthropic (Claude.ai) in one go', descCols), value: ' bind' },
+                ]
               : [
-                  ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
+                  ...routingMap().aliases.map((a) => ({ name: a.name, description: fit(`alias — ${a.target.providerId} (${a.target.model})`, descCols), value: `alias:${a.name}` })),
                   { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
                 ]}
             onSelect={(_i, opt) => {
               if (!opt) return;
               const v = String(opt.value);
               if (v === 'add') { setMode({ kind: 'alias-name' }); return; }
+              if (v === ' bind') { bindClaudeFamilies(); return; }
               const key = v.slice(v.indexOf(':') + 1);
               setMode({
                 kind: 'route-provider',
@@ -859,14 +929,14 @@ export const App = () => {
               // Leading-space values can't collide with Provider ids (ids never start with a space).
               ...(mode.row.kind === 'alias' && routingMap().aliases.some((a) => a.name === (mode.row as { name: string }).name)
                 ? [
-                    { name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' },
+                    { name: 'Rename alias', description: fit('keep the Target, change the bridged name', descCols), value: ' rename' },
                     { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
                   ]
                 : []),
               ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
               // A Family route is cleared, never renamed — its picker keeps clear at the bottom.
               ...(mode.row.kind === 'family'
-                ? [{ name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }]
+                ? [{ name: 'Clear route', description: fit('family falls back to the Active Provider', descCols), value: ' clear' }]
                 : []),
             ]}
             onSelect={(_i, opt) => {
