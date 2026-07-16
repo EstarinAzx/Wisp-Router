@@ -1,7 +1,7 @@
 ---
 type: gotchas-index
 project: wisp
-updated: 2026-07-16
+updated: 2026-07-17
 tags: [context, gotchas]
 ---
 
@@ -9,6 +9,8 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[accidental-tui-open-rewrites-all-family-routes]] — An agent's accidental `wisp` TUI open can silently rewrite ALL family routes (quick-setup); snapshots taken after preserve the damage
+- [[powershell-profile-env-masks-session-env]] — PowerShell profile sets ANTHROPIC_BASE_URL, so PowerShell env checks claim every session is bridged; use Bash to read real process env
 - [[bridged-family-routes-bound-to-anthropic-burn-max-quota]] — Family routes bound to `anthropic` bill the Claude Max plan — background haiku chores burn it even in "GPT sessions"; rebind haiku off `anthropic` first
 - [[claude-code-advisor-is-endpoint-gated-past-the-bridge]] — Claude Code Advisor is endpoint-gated — can't route through Wisp, no code fix; native `claude` for advisor tasks
 - [[opentui-rows-garble-on-small-terminals-without-wrapmode-none-and]] — opentui: rows garble on small terminals without `wrapMode="none"` (wrap overlay) + `flexShrink={0}` (yoga row-shrink)

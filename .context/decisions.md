@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-07-16
+updated: 2026-07-17
 tags: [context, decisions]
 ---
 
@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-17-slot-skill-lease-file-explicit-restore]] — Slot skill: lease file + explicit guarded restore, no SessionEnd hook (no guaranteed skill-finally); Agent model = family words only (#110)
 - [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]] — Anthropic cache breakpoints are Wisp-placed (two ephemeral markers, inbound cache_control stays ignored); removing them restores a ~10x plan-usage burn (#111, 2.0.10)
 - [[2026-07-16-routing-cli-plus-slot-skill-not-mcp]] — Routing CLI + Slot skill, not MCP: `wisp routing` subcommands + sacrificial-Slot pattern; credential check warns, never refuses (spec #107)
 - [[2026-07-16-providers-submenu-is-the-provider-hub-106]] — /providers submenu is the provider hub: Enter opens the row's actions (set active · key set/remove · OAuth sign in/out); slash commands stay (#106, 2.0.9)

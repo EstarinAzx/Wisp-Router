@@ -11,18 +11,28 @@ tags: [context, pick-up]
 
 ## What last session finished
 
-**#109 merged and closed** — PR #112 squash-merged to `main` as `08b45f8`. `wisp routing set <row> <target>` and `unset <row>` now edit the shared map with core validation, first-slash parsing, advisory credential warnings, and atomic persistence. Merged-main verification: 464/464 tests and both TypeScript checks clean; one live isolated Bridge stayed running while its next Haiku request changed Targets.
+**#110 closed + wisp-router 2.0.11 released.** Personal Slot skill lives at
+`~/.claude/skills/slot/SKILL.md` (committed `c805764` in `~/.claude`, template-mirrored
+`9a9df80`): snapshot → lease → rebind Slot family → spawn Agent via family word → hold →
+guarded restore. TDD trail: baseline failed early-restore, 3/3 green with the skill, live
+bridged proof via serve route log (`claude-haiku-4-5… -> codex model=gpt-5.6-terra`).
+Release `v2.0.11` (`71176e8`): CI green, npm verified, global upgraded — published
+`wisp routing` now works without the source checkout.
 
 ## Next task
 
-**#110 — personal Slot skill.** Run `/preset scope 110`; read #110 + parent spec #107. Build under `~/.claude/skills/`, not this repo. Default Slot = `haiku`, configurable family; snapshot before set; surface any `warning:` before spawning; restore only after the Slot-driven agent finishes. Check ecosystem-kb decisions before adding it, then verify a real bridged subagent and restore the original map.
+**Close spec #107** — all children (#108, #109, #110) are shipped and closed. Comment with
+the evidence (2.0.11 release + Slot skill + live proof) and close. After that the tracker is
+backlog-only (#69 copilot-wisp launcher, #68 TUI chat mode); ask the user what's next.
 
 ## Landmines
 
-- Never restore a Slot while its agent is still running: routing resolves per request, so early restore silently reroutes that agent's next turn.
-- Aliases do not appear in Claude Code's fixed Agent-model enum; the skill must use a Family route.
-- Preserve the exact pre-run binding, including an originally-unset Family route.
-- The installed global `wisp` binary needs a release containing #109 before the personal skill can rely on it outside source checkout.
+- Never restore a Slot while its agent runs — Bridge resolves per request; task id ≠ done.
+- An accidental bare `wisp` open from an agent can rewrite ALL family routes (see
+  [[accidental-tui-open-rewrites-all-family-routes]]); diff the map after any TUI mishap.
+- PowerShell env checks lie about bridging (profile sets ANTHROPIC_BASE_URL) — use Bash
+  (see [[powershell-profile-env-masks-session-env]]).
+- Family routes bound to `anthropic/*` burn Max quota ([[gotchas]]).
 
 ## Related
 
