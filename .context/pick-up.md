@@ -11,27 +11,28 @@ tags: [context, pick-up]
 
 ## What last session finished
 
-**#110 closed + wisp-router 2.0.11 released.** Personal Slot skill lives at
-`~/.claude/skills/slot/SKILL.md` (committed `c805764` in `~/.claude`, template-mirrored
-`9a9df80`): snapshot → lease → rebind Slot family → spawn Agent via family word → hold →
-guarded restore. TDD trail: baseline failed early-restore, 3/3 green with the skill, live
-bridged proof via serve route log (`claude-haiku-4-5… -> codex model=gpt-5.6-terra`).
-Release `v2.0.11` (`71176e8`): CI green, npm verified, global upgraded — published
-`wisp routing` now works without the source checkout.
+**#107 closed + Slot skill shipped as a plugin.** Spec #107 closed with the evidence comment
+(children #108–#110, 2.0.11 release, live bridged proof). Repo now doubles as a Claude Code
+plugin marketplace (`fbac359`): root `.claude-plugin/marketplace.json` lists `wisp-slot` from
+`plugins/slot/` — a generalized SKILL.md (`~` paths, `$ANTHROPIC_BASE_URL` probe, npm-upgrade
+note). Both manifests pass `claude plugin validate`. README: plugin install block added,
+`/routing` + `wisp routing` CLI named under Routing aliases, stale Copilot CLI mention removed.
 
 ## Next task
 
-**Close spec #107** — all children (#108, #109, #110) are shipped and closed. Comment with
-the evidence (2.0.11 release + Slot skill + live proof) and close. After that the tracker is
-backlog-only (#69 copilot-wisp launcher, #68 TUI chat mode); ask the user what's next.
+**None queued — tracker is backlog-only.** Ask the user to pick: #69 (copilot-wisp launcher),
+#68 (TUI chat mode), or #57 (ready-for-human PRD umbrella). No default was chosen.
 
 ## Landmines
 
+- Slot skill exists TWICE — personal `~/.claude/skills/slot` (machine-specific) vs repo
+  `plugins/slot` (generalized). Procedure fixes go to both; never `/plugin install wisp-slot`
+  on this machine ([[slot-skill-has-two-copies-personal-vs-plugin]]).
 - Never restore a Slot while its agent runs — Bridge resolves per request; task id ≠ done.
-- An accidental bare `wisp` open from an agent can rewrite ALL family routes (see
-  [[accidental-tui-open-rewrites-all-family-routes]]); diff the map after any TUI mishap.
+- An accidental bare `wisp` open from an agent can rewrite ALL family routes
+  ([[accidental-tui-open-rewrites-all-family-routes]]); diff the map after any TUI mishap.
 - PowerShell env checks lie about bridging (profile sets ANTHROPIC_BASE_URL) — use Bash
-  (see [[powershell-profile-env-masks-session-env]]).
+  ([[powershell-profile-env-masks-session-env]]).
 - Family routes bound to `anthropic/*` burn Max quota ([[gotchas]]).
 
 ## Related

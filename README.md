@@ -28,7 +28,7 @@
 Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, your **Claude.ai subscription** (both via OAuth, no API key), or any OpenAI-compatible API key (OpenAI, Groq, Mistral, OpenRouter, Ollama, and more) — into the tools you already code with:
 
 - **VS Code** — providers show up as native models in Copilot's **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker, with streaming, tool calling, vision, and live per-model context windows.
-- **Claude Code & Copilot CLI** — the **Bridge** exposes the same providers as a local endpoint speaking two dialects (OpenAI `/v1/chat/completions` + Anthropic `/v1/messages`); the `claude-wisp` bin launches Claude Code already wired to it.
+- **Claude Code** — the **Bridge** exposes the same providers as a local endpoint speaking two dialects (OpenAI `/v1/chat/completions` + Anthropic `/v1/messages`); the `claude-wisp` bin launches Claude Code already wired to it.
 - **Terminal** — the **Wisp TUI** manages providers, keys, OAuth sign-ins, and routing, and hosts the Bridge headlessly (`wisp serve`).
 
 The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
@@ -43,7 +43,7 @@ The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model
 
 ## Routing aliases
 
-Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Same list lands in Claude Code's model picker as **From gateway**:
+Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Edit the map with the **`/routing`** command in the TUI, or non-interactively via the `wisp routing` CLI (`wisp routing` shows the map, `--json` for scripts; `set`/`unset` edit a row). Same list lands in Claude Code's model picker as **From gateway**:
 
 <p align="center">
   <img src="docs/routing-tui.png" alt="Wisp TUI Routing — custom aliases" width="720">
