@@ -56,7 +56,7 @@ Recovery is explicit. The skill surfaces the saved state and restores only after
    - If output contains a `warning:` line, show it before spawning. Continue only after the user chooses to proceed; otherwise restore immediately.
 6. **Spawn.** Call Agent with `model` set to the selected family name. Wisp resolves that family to the temporary Target. Wisp Aliases are not valid substitutes for this Agent model value.
 7. **Hold.** Keep the binding while any agent launched through this lease is still running. Multiple agents may share the lease only when deliberately launched as one batch; restore waits for all of them.
-8. **Guard restoration.** After all Slot-driven agents finish, read routing again. Restore only if the Slot still points at the temporary Target. If another actor changed it, surface the conflict and leave both routing and lease untouched rather than clobbering newer state.
+8. **Guard restoration.** After all Slot-driven agents finish, read routing again. Restore only if the Slot still points at the temporary Target. If another actor already changed it, surface the conflict and leave both routing and lease untouched rather than clobbering newer state. This is a best-effort read-before-write guard: the current CLI has no compare-and-set operation, so it cannot close a race where another actor writes between this read and the restore command.
 9. **Restore.** Restore a prior Target with `wisp routing set`; restore an originally absent route with `wisp routing unset`. Read routing once more and confirm the selected family matches the saved state. Delete the lease only after successful verification.
 
 ## Safety Rules
