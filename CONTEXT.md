@@ -221,6 +221,13 @@ it, and the extension keeps only VS Code chat routing. _Avoid_: calling the TUI 
 chat or an agent — plain text is not sent to a model (the `/test` command is the
 one deliberate exception).
 
+**Screen**:
+One full-panel view the **Wisp TUI** shows at a time — the palette, a picker, a
+wait or info panel. Exactly one Screen is visible; Esc backs out of it. Screens
+group by the slash-command flow that opens them (`/providers`, `/routing`,
+`/test`). _Avoid_: calling a Screen a "component" — a component is a reusable
+widget a Screen is built from (e.g. a select list); a Screen is the whole view.
+
 **Wisp home**:
 The per-user shared store (`~/.wisp/`) both faces read: settings, catalog state,
 and the **Routing map** in a config file; API keys and OAuth tokens in
