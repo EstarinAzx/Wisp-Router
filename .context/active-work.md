@@ -7,53 +7,56 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-17 by Fable 5 (TUI-ops planning session — spec #120 + tickets)._
-_At commit: `cc75a1d` on `main`, tagged `v2.0.12` (release confirmed green + published)._
+_Last updated: 2026-07-17 by Fable 5 (relay chain leg 1 — TUI ops batch implemented)._
+_At commit: `92b6023` on branch `tui-ops-batch` (3 commits ahead of `main`@`cc75a1d`/v2.0.12)._
 
 ## Current focus
 
-**TUI ops batch (spec #120)** planned and ticketed: #121 (/bridge ensure-on + `/bridge off`),
-#122 (/show-log Log Screen), #123 (headless `wisp providers` / `wisp models <provider>`);
-#124 parked backlog (wisp-slot session-awareness). Implementation runs next session as a
-`/relay` + `/preset loop-arg` chain — see [[pick-up]]. Grill decision:
-[[2026-07-17-bridge-idempotent-on-showlog-panel-command-first-headless-cli]].
+**TUI ops batch (spec #120) SHIPPED on branch `tui-ops-batch`** — all three tickets closed,
+loop-arg relay chain stopped (goal met). Work rode a branch, not main (user override this
+session). Branch is unmerged and unpushed; merge/PR + release tagging are the next session's
+call — see [[pick-up]].
 
 ## State
 
-- **In flight:** nothing — v2.0.12 confirmed (workflow green, npm shows 2.0.12; one late
-  spam-filter re-check still prudent).
-- **Done this session:** select scrollbars made mouse-interactive, app-side (opentui's
-  SelectRenderable is keyboard-only — see [[gotchas]]):
-  - `b38b53e` — `SELECT_MOUSE` in `src/widgets.tsx`, spread into all 8 native `<select>`s;
-    thumb-column drag → `setSelectedIndex`.
-  - `6dd4bbf` — responsiveness: renderer capture at mousedown (fast flicks no longer die),
-    2-cell grab zone.
-  - `0b0faeb` — wheel scroll (delta-aware) + click-a-row-selects-it; selection moves verified
-    side-effect free (no `onChange` anywhere).
-  - `cc75a1d` — release bump 2.0.12 + span baseline re-embed (`bun run spans --update`).
-  - First TUI test file: `packages/tui/tests/selectScrollDrag.test.ts` (6 tests, real mouse
-    pipeline; `tests/` deliberately outside the tsc include — see [[stack]]).
+- **In flight:** nothing — chain complete.
+- **Done this session (one commit per ticket, each gated by core vitest + tsc both packages +
+  tui bun test + a real-App/entry-point verify against a sandbox WISP_HOME):**
+  - `71fc0f6` #121 — `/bridge` ensure-on (start if stopped + show Screen; running → re-show
+    only), `off` the single argument and only stop, "Bridge is not running." when stopped;
+    palette entry + Bridge Screen footer updated; slash-parse test added.
+  - `b53b1af` #122 — `/show-log`: 500-line ring buffer (`packages/tui/src/logBuffer.ts`) fed
+    by the Bridge's log seam (no-op callback replaced), collects Screen-open-or-not; Log
+    Screen tails it via `<scrollbox stickyScroll stickyStart="bottom">` — native auto-follow /
+    scroll-to-pause / bottom-resumes + mouse-draggable scrollbar (no SELECT_MOUSE — that shim
+    is `<select>`-only). New test file `packages/tui/tests/logBuffer.test.ts` (7 tests, incl.
+    sticky behavior on the real renderable).
+  - `92b6023` #123 — headless `wisp providers` + `wisp models <provider>`: command-first argv
+    dispatch, pure core seam `packages/core/src/discoveryCli.ts` (7 vitest tests, stubbed
+    fetch); `fetchModelOptions` extracted from `providerScreens.tsx` to renderer-free
+    `packages/tui/src/modelFetch.ts` (throwing `fetchModelList` for the CLI, swallowing
+    wrapper keeps the pickers' free-text fallback; old import path re-exported). Unknown id →
+    non-zero + `wisp providers` hint; fetch failures print the backend's own words.
 - **Blocked:** None.
 
 ## Pick up here
 
-See [[pick-up]]. Next task: confirm the v2.0.12 release run is green end-to-end (all 4 platform
-builds + npm publish), then spot-check `npm view wisp-router version` — the npm spam filter has
-silently removed green publishes before ([[gotchas]]).
+See [[pick-up]]. Next: merge/PR decision for `tui-ops-batch`, then release tagging (batch
+rides the next release; tag must equal `packages/tui/package.json` version).
 
 ## Open questions
 
-None.
+- Merge `tui-ops-batch` to main directly or via PR? (solo repo — user's call; nothing pushed yet)
 
 ## Recent context
 
-- New landmine pair for selects: every new native `<select>` must spread **both**
-  `SELECT_COLORS` and `SELECT_MOUSE`; any `@opentui/*` bump must re-run `bun test` in
-  `packages/tui` (SELECT_MOUSE reads pinned privates — [[gotchas]]).
-- opentui wheel events only reach the select when the pointer is over it — the renderer's
-  "fallback to focused" scroll path is unreachable in practice (root wins the hit test).
-- Screen-module import seams unchanged (#117–#119): payload types from `./modes`, look from
-  `./theme`, widgets from `./widgets`, `fetchModelOptions` from `./providerScreens`.
+- Test suite totals now: core vitest 473, tui bun test 13 (2 files).
+- Spec #120 left open deliberately (closes when the batch ships in a release, or user closes);
+  #124 (wisp-slot session-awareness) stays parked ready-for-human.
+- opentui `scrollbox` (0.4.3) carries stickyScroll/stickyStart natively — reach for it before
+  hand-rolling any follow/scroll behavior; SELECT_MOUSE stays select-only.
+- Headless command pattern now has TWO precedents: routingCli + discoveryCli (pure core seam,
+  thin lazy-imported TUI wrapper, renderer-free — no Screen imports).
 
 ## Related
 
