@@ -12,11 +12,15 @@ tags: [context, pick-up]
 ## Where you are
 
 **You are on branch `claude/context-rehydration-oargfe`, NOT `main`.** A remote
-session made one fix here (commit `f33785d`) that is pushed but **not merged and
+session made two fixes here (`f33785d`, `a5ab0f2`), pushed but **not merged and
 not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up). The
-installed `wisp-router`/`claude-wisp` binary does NOT have this fix yet.
+installed `wisp-router`/`claude-wisp` binary does NOT have these fixes yet. Both
+are in `buildAnthropicMessagesBody` (`packages/core/src/anthropic.ts`) and only
+touch the Anthropic-OAuth (Claude.ai Messages) path — Codex/Grok/API-key
+providers use automatic prefix caching (no `cache_control`) and were never
+affected.
 
-## What last session did — #111 cache-breakpoint follow-up
+## What last session did — two #111 cache follow-ups
 
 **`f33785d` fix(core): spread cache breakpoints so fat tool turns don't re-bill.**
 Closes a residual hole in the shipped #111 fix (`e5ec476`).
@@ -38,6 +42,21 @@ Closes a residual hole in the shipped #111 fix (`e5ec476`).
 - **Verified:** `bun run compile` clean, `bun run test` = 474 (added a fat-turn
   regression: no gap >20 blocks, total breakpoints ≤4). No `packages/tui`
   changes, so **no span-baseline recapture and no version bump were needed.**
+
+**`a5ab0f2` fix(core): use 1h cache TTL on Anthropic breakpoints.** The
+reconstructed markers used the 5-minute default ephemeral TTL, so a bridged
+session's cached prefix expired after 5 min idle and re-wrote on the next
+message — native Claude Code keeps its prefix warm ~1h. Switched the CACHE const
+to `ttl:'1h'` (GA on first-party; the same TTL native uses over OAuth). Closes
+the last quota-relevant parity gap for stop-and-go usage. Tradeoff: 1h writes
+cost 2x vs 1.25x, worth it since an interactive session re-reads the prefix many
+times. `bun run test` = 474 (all `cache_control` assertions now expect
+`{ type: 'ephemeral', ttl: '1h' }`; the inbound-drop tests in
+`bridgeAnthropic.test.ts` stay 5m — they're what Claude Code SENDS and Wisp
+ignores, not what Wisp emits).
+
+**Net effect:** for an active bridged session the Anthropic-OAuth path now caches
+like native unwisped Claude — no 10x re-bill, and the prefix survives idle gaps.
 
 ## Next task — ship it, then optional follow-ups
 
