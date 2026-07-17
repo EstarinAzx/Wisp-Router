@@ -50,6 +50,14 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
       <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
     </box>
 
+    {/* the plugin makes bridged sessions self-aware (badge + Slot skill) — nudge here,
+        where Claude Code gets wired, so users learn it exists. Hand-wrapped like the
+        advisor warning below. */}
+    <box marginTop={1} flexDirection="column">
+      {wrapWords('Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: /plugin marketplace add EstarinAzx/Wisp-Router', cols - 2)
+        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
+    </box>
+
     {/* Advisor is endpoint-gated upstream — its calls never hit the configurable base URL,
         so the Bridge can't intercept them and no fix exists on our side. Warn here, where
         Claude Code gets wired. Hand-wrapped (panel rows never use opentui wrap); -2 = the
