@@ -51,7 +51,8 @@ import {
 } from './routingScreens';
 import { PaletteScreen } from './paletteScreen';
 import { TestScreen, streamTestReply } from './testScreen';
-import { BridgeScreen, HelpScreen } from './infoScreens';
+import { BridgeScreen, HelpScreen, LogScreen } from './infoScreens';
+import { createRingLog } from './logBuffer';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -73,10 +74,12 @@ export { streamTestReply } from './testScreen';
 
 // ----------------------------------------- Bridge ----------------------------------------- //
 
-// One host instance for the session — /bridge toggles it. Log is dropped like the auth managers'
-// (no output channel in a raw-mode TUI); the bridge screen shows the state instead. The listener
-// dies with the process on /quit — headless hosting is `wisp serve`, not a TUI leftover.
-const bridge = createTuiBridge(() => {});
+// One host instance for the session — /bridge starts it, /bridge off stops it. The log seam
+// feeds the /show-log ring buffer (#122) — the same lines `wisp serve` prints, collected for
+// the process lifetime whether the Log Screen is open or not. The listener dies with the
+// process on /quit — headless hosting is `wisp serve`, not a TUI leftover.
+const bridgeLog = createRingLog();
+const bridge = createTuiBridge((line) => bridgeLog.push(line));
 
 // ----------------------------------------- App ----------------------------------------- //
 
@@ -375,6 +378,8 @@ export const App = () => {
         setStatus(on ? 'Alias rows show their pinned model id.' : 'Alias rows show bare names.');
         return;
       }
+      // Opens with the Bridge in any state (#122) — the Screen itself shows the not-running hint.
+      case 'show-log': setMode({ kind: 'log' }); return;
       case 'help': setMode({ kind: 'help' }); return;
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
@@ -426,7 +431,7 @@ export const App = () => {
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
         : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
-        : mode.kind === 'bridge' || mode.kind === 'help' ? backToInput() // info screens just close — nothing to cancel
+        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' ? backToInput() // info screens just close — nothing to cancel
         : backToInput('Cancelled.');
       return;
     }
@@ -519,6 +524,8 @@ export const App = () => {
       )}
 
       {mode.kind === 'bridge' && <BridgeScreen address={mode.address} secret={mode.secret} cols={panelCols} />}
+
+      {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} />}
 
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
 

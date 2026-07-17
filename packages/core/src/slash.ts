@@ -27,6 +27,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'effort', args: '[level]', description: 'Set the shared reasoning Effort (Codex + Anthropic)' },
   { name: 'test', args: '<provider|alias>', description: 'Fire one canned prompt through a Provider or Alias' },
   { name: 'bridge', args: '[off]', description: 'Show the Bridge (starts it if stopped) — /bridge off is the only stop' },
+  { name: 'show-log', description: "Show the Bridge's log (collects while the Bridge runs, even closed)" },
   { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },
   { name: 'modelids', args: '[on|off]', description: "Alias rows in Claude Code's /model list carry their pinned model id" },
   { name: 'help', description: 'List every command with its arguments' },

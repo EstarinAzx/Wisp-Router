@@ -1,22 +1,27 @@
-// ---------------- infoScreens.tsx — the static info Screens: /bridge connection facts + /help command list ---------------- //
+// ---------------- infoScreens.tsx — the info Screens: /bridge facts + /help list + /show-log tail ---------------- //
 
 /*
  * Depends on:
+ *   - react: useState/useEffect — LogScreen re-renders per pushed line while open (#122).
  *   - @wisp/core: SLASH_COMMANDS — /help renders FROM the shared registry (#82).
  *   - ./theme: ACCENT/DIM/PANEL/SELECT_COLORS — the shared look.
  *   - ./widgets: wrapWords — hand-wrapped panel copy.
+ *   - ./logBuffer: RingLog — the Bridge log the Log Screen tails (#122).
  *
  * Data shapes:
- *   - Both Screens are pure: BridgeScreen renders the 'bridge' Mode payload (address + secret
- *     frozen at bind time — ensureBridgeSecret's disk write must not live in JSX), HelpScreen
- *     takes only its close callback. The shell keeps the /bridge starter and Esc routing.
+ *   - BridgeScreen + HelpScreen are pure: BridgeScreen renders the 'bridge' Mode payload
+ *     (address + secret frozen at bind time — ensureBridgeSecret's disk write must not live
+ *     in JSX), HelpScreen takes only its close callback. LogScreen subscribes to the ring.
+ *     The shell keeps the /bridge starter and Esc routing.
  *
  * Extracted from app.tsx with #119.
  */
 
+import { useEffect, useState } from 'react';
 import { SLASH_COMMANDS } from '@wisp/core';
 import { ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
 import { wrapWords, SELECT_MOUSE } from './widgets';
+import type { RingLog } from './logBuffer';
 
 // ----------------------------------------- /bridge ----------------------------------------- //
 
@@ -58,6 +63,30 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
     <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge off stops · /quit kills</text>
   </box>
 );
+
+// ----------------------------------------- /show-log ----------------------------------------- //
+
+// The Bridge log tail (#122) — scrollbox stickyScroll gives auto-follow with scroll-to-pause
+// and a mouse-draggable native scrollbar; no SELECT_MOUSE needed (that's the <select> shim).
+export const LogScreen = ({ log, running }: { log: RingLog; running: boolean }) => {
+  // subscribe → tick: one re-render per pushed line while the Screen is open
+  const [, setTick] = useState(0);
+  useEffect(() => log.subscribe(() => setTick((t) => t + 1)), [log]);
+  const lines = log.lines();
+  return (
+    <box {...PANEL} title="Bridge log" marginTop={1} padding={1} flexDirection="column">
+      <text wrapMode="none" flexShrink={0}>
+        {running ? <span fg="#4ade80">● bridge up</span> : <span fg={DIM}>○ bridge not running — /bridge starts it</span>}
+      </text>
+      <scrollbox height={16} marginTop={1} stickyScroll stickyStart="bottom" scrollY>
+        {lines.length === 0
+          ? <text wrapMode="none" fg={DIM}>{running ? 'No traffic yet.' : 'Nothing logged yet.'}</text>
+          : lines.map((l, i) => <text key={i} wrapMode="none" fg={DIM}>{l}</text>)}
+      </scrollbox>
+      <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — scroll up pauses follow, bottom resumes · buffer keeps collecting</text>
+    </box>
+  );
+};
 
 // ----------------------------------------- /help ----------------------------------------- //
 

@@ -108,6 +108,13 @@ describe('SLASH_COMMANDS — the real palette', () => {
     expect(SLASH_COMMANDS.find((c) => c.name === 'signout')?.args).toBe('[codex|anthropic|xai]');
   });
 
+  // #122: /show-log opens the Bridge log Screen; no arguments.
+  it('carries /show-log (#122)', () => {
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain('show-log');
+    expect(parseSlash('/show-log')).toEqual({ command: 'show-log', args: [] });
+    expect(suggestSlash('/sho').map((c) => c.name)).toContain('show-log');
+  });
+
   // #121: /bridge grows its one argument — `off` is the only stop; bare /bridge is ensure-on.
   it('carries the /bridge off argument (#121)', () => {
     expect(SLASH_COMMANDS.find((c) => c.name === 'bridge')?.args).toBe('[off]');
