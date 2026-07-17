@@ -43,4 +43,5 @@ try {
 const leasePath = path.join(os.homedir(), '.claude', 'slot', 'lease.json');
 if (fs.existsSync(leasePath)) badge = badge.replace(/\]$/, ' ⚠LEASE]');
 
-process.stdout.write(badge);
+// Wisp cyan — joins the colored badge row (caveman orange, elucidate purple, ponytail pink).
+process.stdout.write(`\x1b[38;5;87m${badge}\x1b[0m`);
