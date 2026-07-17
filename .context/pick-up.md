@@ -24,8 +24,10 @@ decision entry all synced. Breadcrumb comment on #124.
 ## Next task
 
 **None queued.** Candidates: backlog #68/#69, or a fresh `/preset init` idea.
-Main is 2 commits ahead of origin — push when convenient (no release needed;
-#124 touched no package code, npm stays 2.0.13).
+Main pushed and in sync with origin (no release needed; #124 touched no package
+code, npm stays 2.0.13). Late follow-ups landed same day: slot triage fast path
+(plain rebinds skip the checklist), cyan badge, ASCII `!LEASE` marker — plugin
+cache refreshed to 1.1.1 (`claude plugin update wisp-slot@wisp-router`, full id).
 
 ## Landmines
 
