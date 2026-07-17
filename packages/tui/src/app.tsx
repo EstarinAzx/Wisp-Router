@@ -8,20 +8,14 @@
  *     getModelsDevCatalog for the OAuth model lists, stream clients for /test.
  *   - ./store: the shared ~/.wisp handle + OAuth managers (#63 — extracted so `wisp serve` shares them).
  *   - ./bridge: the TUI's Bridge host wiring (#63).
+ *   - ./modes: the Mode union + RouteRow (#116 — extracted so Screen modules can type payloads).
+ *   - ./theme: splash/colors/panel/select styling (#116 — the select-transparency landmine's home).
+ *   - ./widgets: wrapWords + WrapSelect (#116 — cross-flow building blocks).
  *
  * Data shapes:
- *   - Mode: the screen state machine — 'input' (palette) | provider/key/model/effort pickers |
- *     'provider-menu' (#106: one row's actions — set active, key set/remove, sign in/out; Enter in
- *     /providers opens it, actions land back on the list) | 'oauth-pick' (sign in/out target) |
- *     'key-entry' (masked; origin 'menu' returns into the menu flow) | 'model-free' (typed model id) |
- *     'signin-wait' (browser flow pending; same origin rule) | 'test' (the /test wiring check streaming its reply) |
- *     'bridge' (listener info: address + secret) | 'help' (the command list, #82) | the
- *     /routing chain (#65, sectioned #79):
- *     'routing' (overview: two sections) → 'routing-section' (Claude Code families / Custom
- *     aliases) → 'alias-name' / 'alias-rename' / 'route-provider' → 'route-model-*' (pick or
- *     free text). Every non-input mode returns to 'input' on Esc, except the routing screens,
+ *   - Mode + RouteRow: imported from ./modes — the screen state machine this shell owns and
+ *     drives. Every non-input mode returns to 'input' on Esc, except the routing screens,
  *     which step back one level: sub-screen → its section → overview → palette.
- *   - RouteRow: which Routing-map row is being edited — a fixed Family or a named Alias.
  */
 
 import { useRef, useState } from 'react';
@@ -38,108 +32,10 @@ import {
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
+import type { Mode, RouteRow } from './modes';
+import { SPLASH, ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
+import { wrapWords, WrapSelect } from './widgets';
 import pkg from '../package.json';
-
-// ----------------------------------------- Splash ----------------------------------------- //
-
-// Hand-rolled ASCII art instead of <ascii-font>: deterministic across font packs, zero API risk.
-// The trailing low block is a cursor-style underscore — the wordmark reads "Wisp_".
-const SPLASH = [
-  '██╗    ██╗██╗███████╗██████╗ ',
-  '██║    ██║██║██╔════╝██╔══██╗',
-  '██║ █╗ ██║██║███████╗██████╔╝',
-  '██║███╗██║██║╚════██║██╔═══╝ ',
-  '╚███╔███╔╝██║███████║██║     ██████╗',
-  ' ╚══╝╚══╝ ╚═╝╚══════╝╚═╝     ╚═════╝',
-].join('\n');
-
-const ACCENT = '#a78bfa';
-const DIM = '#71717a';
-
-// One shared frame spread into every panel box — rounded dim border + accent title, so the
-// whole TUI reads as one system instead of per-screen defaults. flexShrink 0 because a short
-// terminal makes yoga shrink rows to zero height while opentui still paints them — rows overlap
-// into garbage; refusing to shrink means content clips cleanly at the bottom edge instead.
-const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT, flexShrink: 0 } as const;
-
-// Native selects default to an opaque #1a1a1a fill when focused (plus #334455/yellow selection) —
-// an opaque slab in a terminal with a background image. Spread into every <select> so they match
-// the transparent hand-rolled WrapSelect rows: only the selected row gets a bar.
-const SELECT_COLORS = {
-  backgroundColor: 'transparent',
-  focusedBackgroundColor: 'transparent',
-  selectedBackgroundColor: '#27272a',
-  selectedTextColor: ACCENT,
-  descriptionColor: DIM,
-  selectedDescriptionColor: DIM,
-} as const;
-
-// ----------------------------------------- Narrow terminals ----------------------------------------- //
-
-// opentui's own wrapMode="wrap" overlays every row that follows the wrapped one (the garble the
-// PANEL note describes), so long chrome copy is wrapped BY HAND: plain word-wrap into separate
-// non-wrapping rows sized to the live terminal width. A word longer than a line hard-splits.
-const wrapWords = (text: string, cols: number): string[] => {
-  const lines: string[] = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    for (let rest = word; ; ) {
-      const candidate = line ? `${line} ${rest}` : rest;
-      if (candidate.length <= cols) { line = candidate; break; }
-      if (line) { lines.push(line); line = ''; continue; }
-      lines.push(rest.slice(0, cols));
-      rest = rest.slice(cols);
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
-};
-
-// A select whose option DESCRIPTIONS wrap — the native select renderable hard-clips its rows,
-// so this renders plain non-wrapping rows itself (name + hand-wrapped description lines) with a
-// windowed view: variable-height items, selection kept visible within maxRows, dim "… N more"
-// marker rows when clipped. Keyboard mirrors the native select: Up/Down (wrapping), Enter fires.
-type WrapOption = { name: string; description: string; value: string };
-const WrapSelect = ({ options, cols, maxRows, onSelect }: {
-  options: WrapOption[];
-  cols: number;
-  maxRows: number;
-  onSelect: (index: number, option: WrapOption) => void;
-}) => {
-  const [idx, setIdx] = useState(0);
-  const top = useRef(0); // first visible item — persisted across renders, adjusted below
-  // sel clamps a stale index (options can shrink under a reused instance) — used everywhere.
-  const sel = Math.min(idx, options.length - 1);
-  useKeyboard((key) => {
-    if (key.name === 'up') setIdx((options.length + sel - 1) % options.length);
-    else if (key.name === 'down') setIdx((sel + 1) % options.length);
-    else if (key.name === 'return' || key.name === 'enter') onSelect(sel, options[sel]);
-  });
-  const items = options.map((o) => ({ o, lines: [o.name, ...wrapWords(o.description, cols - 1)] }));
-  const rowsOf = (from: number, to: number) => items.slice(from, to + 1).reduce((n, it) => n + it.lines.length, 0);
-  // Window: pull the view up to the selection, else push it down until the selection fits.
-  if (sel < top.current) top.current = sel;
-  while (rowsOf(top.current, sel) > maxRows && top.current < sel) top.current++;
-  // Fill downward until the row budget is spent (the selected item always shows, however tall).
-  let end = top.current;
-  for (let used = 0; end < items.length && (end === top.current || used + items[end].lines.length <= maxRows); end++)
-    used += items[end].lines.length;
-  return (
-    <box flexDirection="column">
-      {top.current > 0 && <text wrapMode="none" flexShrink={0} fg={DIM}>{`  … ${top.current} more`}</text>}
-      {items.slice(top.current, end).flatMap(({ lines }, k) => {
-        const i = top.current + k;
-        const on = i === sel;
-        return lines.map((l, j) => (
-          <text key={`${i}:${j}`} wrapMode="none" flexShrink={0} bg={on ? '#27272a' : undefined} fg={j === 0 ? (on ? ACCENT : undefined) : DIM}>
-            {` ${l}`}
-          </text>
-        ));
-      })}
-      {end < items.length && <text wrapMode="none" flexShrink={0} fg={DIM}>{`  … ${items.length - end} more`}</text>}
-    </box>
-  );
-};
 
 // ----------------------------------------- Store ----------------------------------------- //
 
@@ -235,9 +131,6 @@ const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => 
 
 // ----------------------------------------- /routing ----------------------------------------- //
 
-// Which Routing-map row a picker chain is editing — a fixed Family or a named Alias (#65).
-type RouteRow = { kind: 'family'; family: FamilyKey } | { kind: 'alias'; name: string };
-
 const routingMap = (): RoutingMap => home.readConfig().routing ?? EMPTY_ROUTING_MAP;
 
 const rowLabel = (row: RouteRow): string => (row.kind === 'family' ? row.family : row.name);
@@ -324,38 +217,6 @@ export async function* streamTestReply(p: Provider, model: string, signal: Abort
 const bridge = createTuiBridge(() => {});
 
 // ----------------------------------------- App ----------------------------------------- //
-
-type Mode =
-  | { kind: 'input' }
-  | { kind: 'providers' }
-  // origin 'menu' on the two reused screens below: entered from the provider menu, so save/cancel
-  // returns into the /providers flow instead of the palette (#106).
-  | { kind: 'provider-menu'; provider: Provider }
-  | { kind: 'key-pick' }
-  | { kind: 'key-entry'; provider: Provider; origin?: 'menu' }
-  | { kind: 'model-loading'; provider: Provider }
-  | { kind: 'model-pick'; provider: Provider; options: string[] }
-  | { kind: 'model-free'; provider: Provider }
-  | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
-  | { kind: 'signin-wait'; provider: Provider; origin?: 'menu' }
-  | { kind: 'effort-pick' }
-  | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
-  // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
-  // and can write auth.json — a side effect that must not live in JSX).
-  | { kind: 'bridge'; address: string; secret: string }
-  | { kind: 'help' }
-  // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new
-  // alias / pick a row's Provider → pick its model. 'alias-rename' edits an existing alias's NAME
-  // in place (Target kept) — reached from the row's Provider picker. The families section also
-  // carries the one-tap "Bind Claude subscription models" row (sign in first if needed).
-  | { kind: 'routing' }
-  | { kind: 'routing-section'; section: 'families' | 'aliases' }
-  | { kind: 'alias-name' }
-  | { kind: 'alias-rename'; name: string }
-  | { kind: 'route-provider'; row: RouteRow }
-  | { kind: 'route-model-loading'; row: RouteRow; provider: Provider }
-  | { kind: 'route-model-pick'; row: RouteRow; provider: Provider; options: string[] }
-  | { kind: 'route-model-free'; row: RouteRow; provider: Provider };
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
