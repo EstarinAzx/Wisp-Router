@@ -4,16 +4,19 @@
  * Depends on:
  *   - @opentui/react: JSX intrinsics (box/text/input/select) + useKeyboard/usePaste hooks.
  *   - @opentui/core: InputRenderable — ref type for clearing the palette input after a command.
- *   - @wisp/core: PROVIDERS catalog + resolvers, slash parse/suggest, stream clients for /test.
+ *   - @wisp/core: PROVIDERS catalog + resolvers + slash parse/suggest.
  *   - ./store: the shared ~/.wisp handle + OAuth managers (#63 — extracted so `wisp serve` shares them).
  *   - ./bridge: the TUI's Bridge host wiring (#63).
  *   - ./modes: the Mode union + RouteRow (#116 — extracted so Screen modules can type payloads).
  *   - ./theme: splash/colors/panel/select styling (#116 — the select-transparency landmine's home).
- *   - ./widgets: wrapWords + WrapSelect + onSubmitText (#116/#117 — cross-flow building blocks).
+ *   - ./widgets: wrapWords (#116) — the status row's hand-wrap; the other widgets live with their flows.
  *   - ./providerScreens: the ten provider-flow Screens + that flow's helpers (#117) — the
  *     shell imports the Screens plus EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey.
  *   - ./routingScreens: the eight routing-flow Screens + that flow's row helpers (#118) — the
  *     shell imports the Screens plus routingMap, rowLabel, sectionOf, CLAUDE_FAMILY_MODELS.
+ *   - ./paletteScreen: the palette Screen (#119) — the shell keeps line/selIdx and Enter semantics.
+ *   - ./testScreen: the test Screen + streamTestReply (#119) — re-exported below for headless use.
+ *   - ./infoScreens: the static bridge/help info Screens (#119).
  *
  * Data shapes:
  *   - Mode + RouteRow: imported from ./modes — the screen state machine this shell owns and
@@ -25,19 +28,17 @@ import { useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable } from '@opentui/core';
 import {
-  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
+  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider,
-  DEFAULT_EFFORT, isAnthropicSignedIn, effectiveAliasOnly,
-  resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, xaiStream, sseBlocks,
-  chatCompletionTextDelta, standardEffortToCodex,
+  isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
-import { SPLASH, ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
-import { wrapWords, onSubmitText } from './widgets';
+import { SPLASH, ACCENT, DIM } from './theme';
+import { wrapWords } from './widgets';
 import {
   EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey,
   ProvidersScreen, ProviderMenuScreen, KeyPickScreen, KeyEntryScreen, ModelLoadingScreen,
@@ -48,6 +49,9 @@ import {
   RoutingScreen, RoutingSectionScreen, AliasNameScreen, AliasRenameScreen, RouteProviderScreen,
   RouteModelLoadingScreen, RouteModelPickScreen, RouteModelFreeScreen,
 } from './routingScreens';
+import { PaletteScreen } from './paletteScreen';
+import { TestScreen, streamTestReply } from './testScreen';
+import { BridgeScreen, HelpScreen } from './infoScreens';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -63,61 +67,9 @@ import pkg from '../package.json';
 
 // ----------------------------------------- /test ----------------------------------------- //
 
-// The wiring check's canned prompt — proves the round trip, nothing more (#62: not a chat).
-const TEST_PROMPT = 'Reply with one short sentence confirming you can hear me.';
-
-// Fire the canned prompt through one Provider and yield raw answer-text deltas. Dispatch mirrors the
-// Bridge's three kinds (bridgeServer.startProviderStream): Codex → Responses stream, Anthropic →
-// Messages stream, keyed → plain fetch on <base>/chat/completions. Failures throw with the Provider's
-// real message — the caller renders them loud, never falls back. Exported so the wiring check itself
-// can be exercised headless (no TTY) — the screen around it is plain state rendering.
-export async function* streamTestReply(p: Provider, model: string, signal: AbortSignal): AsyncGenerator<string> {
-  const cfg = home.readConfig();
-  const baseUrl = resolveBaseUrl(p, cfg.customBaseUrl ?? '');
-  const message = { role: 'user' as const, content: TEST_PROMPT };
-  if (isCodexProvider(p)) {
-    const creds = await codexAuth.current();
-    if (!creds) throw new Error(`${p.label} is not signed in — /signin codex.`);
-    for await (const ev of codexStream({ creds, baseUrl, model, messages: [message], effort: standardEffortToCodex(cfg.effort ?? DEFAULT_EFFORT), signal }))
-      if (ev.type === 'text') yield ev.value;
-    return;
-  }
-  if (isAnthropicProvider(p)) {
-    const creds = await anthropicAuth.current();
-    if (!creds) throw new Error(`${p.label} is not signed in — /signin anthropic.`);
-    for await (const ev of anthropicStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
-      if (ev.type === 'text') yield ev.value;
-    return;
-  }
-  if (isXaiProvider(p)) {
-    const creds = await xaiAuth.current();
-    if (!creds) throw new Error(`${p.label} is not signed in — /signin xai.`);
-    // baseUrl is the row's proxy base; xaiStream routes grok-4.5 to api.x.ai itself. effort stays the
-    // shared EffortLevel — xaiReasoning gates per model.
-    for await (const ev of xaiStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
-      if (ev.type === 'text') yield ev.value;
-    return;
-  }
-  if (!baseUrl) throw new Error('Custom has no base URL configured.');
-  // Keyless rows (local Ollama) send bare on purpose — a backend that wanted a key answers 401, and
-  // that status+body IS the loud error this check exists to surface. No local key gate.
-  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-    body: JSON.stringify({ model, messages: [message], stream: true }),
-    signal,
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`${p.label} API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
-  }
-  if (!res.body) return;
-  for await (const block of sseBlocks(res.body)) {
-    const delta = chatCompletionTextDelta(block);
-    if (delta) yield delta;
-  }
-}
+// The wiring check (TEST_PROMPT + streamTestReply) moved to testScreen.tsx with #119; the
+// re-export keeps headless imports of streamTestReply from this module working.
+export { streamTestReply } from './testScreen';
 
 // ----------------------------------------- Bridge ----------------------------------------- //
 
@@ -506,45 +458,14 @@ export const App = () => {
       <text wrapMode="none" flexShrink={0} fg={DIM}>BYOK model router · v{pkg.version}{bridge.isRunning() ? <span fg="#4ade80"> · bridge up :{bridgePort()}</span> : null}</text>
 
       {mode.kind === 'input' && (
-        <>
-          {/* no border title — the wordmark above already brands the box; inner padding = chunkier bar */}
-          <box {...PANEL} marginTop={1} padding={1}>
-            <input
-              ref={inputRef}
-              placeholder="Type / for commands"
-              focused
-              onInput={(value: string) => { setLine(value); setSelIdx(0); }}
-              onSubmit={onSubmitText(submitLine)}
-            />
-          </box>
-          <box flexDirection="column" marginTop={1}>
-            {suggestions.flatMap((c, i) => {
-              const on = i === highlight;
-              const bg = on ? '#27272a' : undefined;
-              const head = `/${c.name}${c.args ? ` ${c.args}` : ''}`;
-              // A row that fits stays one line; a clipped one splits into a command line plus
-              // hand-wrapped dim description lines (same rule as WrapSelect — opentui's own wrap
-              // garbles every row below it). 2 = the highlight prefix, 3 = ' — '.
-              if (2 + head.length + 3 + c.description.length <= paletteCols) {
-                return [
-                  <text key={c.name} wrapMode="none" flexShrink={0} bg={bg}>
-                    {on ? <span fg={ACCENT}>{'> '}</span> : '  '}
-                    <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''} <span fg={DIM}>— {c.description}</span>
-                  </text>,
-                ];
-              }
-              return [
-                <text key={c.name} wrapMode="none" flexShrink={0} bg={bg}>
-                  {on ? <span fg={ACCENT}>{'> '}</span> : '  '}
-                  <span fg={ACCENT}>/{c.name}</span>{c.args ? ` ${c.args}` : ''}
-                </text>,
-                ...wrapWords(c.description, Math.max(paletteCols - 4, 10)).map((l, j) => (
-                  <text key={`${c.name}:${j}`} wrapMode="none" flexShrink={0} bg={bg} fg={DIM}>{`    ${l}`}</text>
-                )),
-              ];
-            })}
-          </box>
-        </>
+        <PaletteScreen
+          inputRef={inputRef}
+          cols={paletteCols}
+          suggestions={suggestions}
+          highlight={highlight}
+          onInput={(value: string) => { setLine(value); setSelIdx(0); }}
+          onSubmit={submitLine}
+        />
       )}
 
       {mode.kind === 'providers' && (
@@ -582,72 +503,12 @@ export const App = () => {
       {mode.kind === 'signin-wait' && <SigninWaitScreen provider={mode.provider} />}
 
       {mode.kind === 'test' && (
-        // plain-ASCII title on purpose — opentui border titles drop non-ASCII (em-dash/·), see gotchas
-        <box {...PANEL} title={`/test: ${mode.provider.label} (${mode.model})`} marginTop={1} flexDirection="column">
-          {/* raw reply text, streamed as-is — deliberately no markdown, no history (#62) */}
-          {mode.text !== '' && <text>{mode.text}</text>}
-          {mode.phase === 'streaming' && <text wrapMode="none" fg={DIM}>{mode.text === '' ? 'Waiting for the first token… ' : ''}Esc to cancel.</text>}
-          {mode.phase === 'done' && <text wrapMode="none" fg={DIM}>Done — Esc to close.</text>}
-          {mode.phase === 'error' && <text fg="#f87171">{mode.error}</text>}
-        </box>
+        <TestScreen provider={mode.provider} model={mode.model} text={mode.text} phase={mode.phase} error={mode.error} />
       )}
 
-      {mode.kind === 'bridge' && (
-        <box {...PANEL} title="Bridge" marginTop={1} padding={1} flexDirection="column">
-          {/* status header first — state + port at a glance, then the connection facts (#80).
-              Always "up" by construction: this mode is only entered post-bind, and no stop path
-              exists without leaving the screen. Port derives from the frozen address so the header
-              can't contradict the copy-paste lines below after an external config edit.
-              Layout rule: every row is single-purpose with wrapMode none — a wrapped row made
-              opentui overlay every row after it on narrow terminals (the old chaos); clipping
-              beats garbage. The settings.json snippet block was cut for the same reason — its
-              75-col rows were the widest offender; claude-wisp is the one shipped connect path,
-              and the VS Code side panel still renders the full snippet (core builder untouched). */}
-          <text wrapMode="none"><span fg="#4ade80">● up</span><span fg={DIM}> · port {mode.address.slice(mode.address.lastIndexOf(':') + 1)}</span></text>
+      {mode.kind === 'bridge' && <BridgeScreen address={mode.address} secret={mode.secret} cols={panelCols} />}
 
-          <box marginTop={1} flexDirection="column">
-            <text wrapMode="none"><span fg={DIM}>{'OpenAI door'.padEnd(16)}</span><span fg={ACCENT}>{mode.address}/v1</span></text>
-            <text wrapMode="none"><span fg={DIM}>{'Anthropic door'.padEnd(16)}</span><span fg={ACCENT}>{mode.address}</span></text>
-            <text wrapMode="none"><span fg={DIM}>{'Access secret'.padEnd(16)}</span><span fg={ACCENT}>{mode.secret}</span></text>
-          </box>
-
-          <box marginTop={1} flexDirection="column">
-            <text wrapMode="none"><span fg={DIM}>{'Claude Code'.padEnd(16)}</span>claude-wisp [args…]</text>
-            <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
-          </box>
-
-          {/* Advisor is endpoint-gated upstream — its calls never hit the configurable base URL,
-              so the Bridge can't intercept them and no fix exists on our side. Warn here, where
-              Claude Code gets wired. Hand-wrapped (panel rows never use opentui wrap); -2 = the
-              panel's inner padding. Plain-text amber, no glyph — ⚠ is ambiguous-width and smears
-              on common Windows fonts, same reason the select indicator is off. */}
-          <box marginTop={1} flexDirection="column">
-            {wrapWords("Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.", panelCols - 2)
-              .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg="#fbbf24">{l}</text>)}
-          </box>
-
-          <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge stops · /quit kills</text>
-        </box>
-      )}
-
-      {mode.kind === 'help' && (
-        <box {...PANEL} title="Commands" marginTop={1} flexDirection="column">
-          {/* rendered FROM the shared registry (#82) — the palette's autocomplete and this list
-              can never disagree. A select, not plain rows: 13+ commands clip a 24-row terminal,
-              and the select brings the same height cap + scroll the other pickers use. Enter
-              only closes — firing (or toggling!) a command from a help list would surprise. */}
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(SLASH_COMMANDS.length * 2, 12)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={SLASH_COMMANDS.map((c) => ({ name: `/${c.name}${c.args ? ` ${c.args}` : ''}`, description: c.description, value: c.name }))}
-            onSelect={() => backToInput()}
-          />
-          <text wrapMode="none" fg={DIM} marginTop={1}>Enter or Esc closes.</text>
-        </box>
-      )}
+      {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
 
       {mode.kind === 'routing' && (
         <RoutingScreen cols={panelCols} onPick={(section) => setMode({ kind: 'routing-section', section })} />

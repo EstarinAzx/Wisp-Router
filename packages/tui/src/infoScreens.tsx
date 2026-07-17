@@ -1,0 +1,82 @@
+// ---------------- infoScreens.tsx — the static info Screens: /bridge connection facts + /help command list ---------------- //
+
+/*
+ * Depends on:
+ *   - @wisp/core: SLASH_COMMANDS — /help renders FROM the shared registry (#82).
+ *   - ./theme: ACCENT/DIM/PANEL/SELECT_COLORS — the shared look.
+ *   - ./widgets: wrapWords — hand-wrapped panel copy.
+ *
+ * Data shapes:
+ *   - Both Screens are pure: BridgeScreen renders the 'bridge' Mode payload (address + secret
+ *     frozen at bind time — ensureBridgeSecret's disk write must not live in JSX), HelpScreen
+ *     takes only its close callback. The shell keeps the /bridge starter and Esc routing.
+ *
+ * Extracted from app.tsx with #119.
+ */
+
+import { SLASH_COMMANDS } from '@wisp/core';
+import { ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
+import { wrapWords } from './widgets';
+
+// ----------------------------------------- /bridge ----------------------------------------- //
+
+// The Bridge info panel — connection facts for the session's own listener.
+export const BridgeScreen = ({ address, secret, cols }: { address: string; secret: string; cols: number }) => (
+  <box {...PANEL} title="Bridge" marginTop={1} padding={1} flexDirection="column">
+    {/* status header first — state + port at a glance, then the connection facts (#80).
+        Always "up" by construction: this mode is only entered post-bind, and no stop path
+        exists without leaving the screen. Port derives from the frozen address so the header
+        can't contradict the copy-paste lines below after an external config edit.
+        Layout rule: every row is single-purpose with wrapMode none — a wrapped row made
+        opentui overlay every row after it on narrow terminals (the old chaos); clipping
+        beats garbage. The settings.json snippet block was cut for the same reason — its
+        75-col rows were the widest offender; claude-wisp is the one shipped connect path,
+        and the VS Code side panel still renders the full snippet (core builder untouched). */}
+    <text wrapMode="none"><span fg="#4ade80">● up</span><span fg={DIM}> · port {address.slice(address.lastIndexOf(':') + 1)}</span></text>
+
+    <box marginTop={1} flexDirection="column">
+      <text wrapMode="none"><span fg={DIM}>{'OpenAI door'.padEnd(16)}</span><span fg={ACCENT}>{address}/v1</span></text>
+      <text wrapMode="none"><span fg={DIM}>{'Anthropic door'.padEnd(16)}</span><span fg={ACCENT}>{address}</span></text>
+      <text wrapMode="none"><span fg={DIM}>{'Access secret'.padEnd(16)}</span><span fg={ACCENT}>{secret}</span></text>
+    </box>
+
+    <box marginTop={1} flexDirection="column">
+      <text wrapMode="none"><span fg={DIM}>{'Claude Code'.padEnd(16)}</span>claude-wisp [args…]</text>
+      <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
+    </box>
+
+    {/* Advisor is endpoint-gated upstream — its calls never hit the configurable base URL,
+        so the Bridge can't intercept them and no fix exists on our side. Warn here, where
+        Claude Code gets wired. Hand-wrapped (panel rows never use opentui wrap); -2 = the
+        panel's inner padding. Plain-text amber, no glyph — ⚠ is ambiguous-width and smears
+        on common Windows fonts, same reason the select indicator is off. */}
+    <box marginTop={1} flexDirection="column">
+      {wrapWords("Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.", cols - 2)
+        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg="#fbbf24">{l}</text>)}
+    </box>
+
+    <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge stops · /quit kills</text>
+  </box>
+);
+
+// ----------------------------------------- /help ----------------------------------------- //
+
+// The /help panel — the command list, closed by Enter or Esc (the shell routes Esc).
+export const HelpScreen = ({ onDone }: { onDone: () => void }) => (
+  <box {...PANEL} title="Commands" marginTop={1} flexDirection="column">
+    {/* rendered FROM the shared registry (#82) — the palette's autocomplete and this list
+        can never disagree. A select, not plain rows: 13+ commands clip a 24-row terminal,
+        and the select brings the same height cap + scroll the other pickers use. Enter
+        only closes — firing (or toggling!) a command from a help list would surprise. */}
+    <select
+      focused
+      {...SELECT_COLORS}
+      height={Math.min(SLASH_COMMANDS.length * 2, 12)}
+      showSelectionIndicator={false}
+      showScrollIndicator
+      options={SLASH_COMMANDS.map((c) => ({ name: `/${c.name}${c.args ? ` ${c.args}` : ''}`, description: c.description, value: c.name }))}
+      onSelect={() => onDone()}
+    />
+    <text wrapMode="none" fg={DIM} marginTop={1}>Enter or Esc closes.</text>
+  </box>
+);
