@@ -22,9 +22,10 @@ import { ACCENT, DIM } from './theme';
 // ----------------------------------------- Select scrollbar drag ----------------------------------------- //
 
 // opentui's SelectRenderable is keyboard-only: showScrollIndicator paints a thumb glyph in the
-// last column but wires no mouse handling at all. These handlers make that column live — press or
-// drag on it maps the row back to a selection index (setSelectedIndex scrolls to keep it visible,
-// so the list follows the thumb). Spread into every native <select> alongside SELECT_COLORS.
+// last column but wires no mouse handling at all. These handlers make the whole surface live —
+// thumb-column press/drag scrubs, a row click selects it, and the wheel steps the selection
+// (setSelectedIndex/moveUp/moveDown scroll to keep the selection visible, so the list follows).
+// Spread into every native <select> alongside SELECT_COLORS.
 let scrollDragTarget: SelectRenderable | null = null;
 
 const dragToIndex = (sel: SelectRenderable, e: MouseEvent) => {
@@ -37,18 +38,25 @@ const dragToIndex = (sel: SelectRenderable, e: MouseEvent) => {
 export const SELECT_MOUSE = {
   onMouseDown: (e: MouseEvent) => {
     const sel = e.target as SelectRenderable | null;
+    if (!sel) return;
     // Grab zone is the last TWO columns — a 1-cell thumb is a sweet-spot hunt with a real mouse.
-    if (!sel || e.x - sel.x < sel.width - 2) return;
-    // Mirror the paint condition — only react where a thumb is actually drawn.
-    if (!sel.showScrollIndicator || sel.options.length <= (sel as any).maxVisibleItems) return;
-    scrollDragTarget = sel;
-    // Capture the drag at the RENDERER now: opentui otherwise binds capture to whatever the
-    // first drag event lands on, so a fast flick off the select kills the whole gesture.
-    // setCapturedRenderable is private but the dep is pinned exact (0.4.3).
-    (sel.ctx as any).setCapturedRenderable?.(sel);
-    dragToIndex(sel, e);
-    e.preventDefault();
-    e.stopPropagation();
+    // Mirror the paint condition too: only scrub where a thumb is actually drawn.
+    const onThumb = e.x - sel.x >= sel.width - 2
+      && sel.showScrollIndicator && sel.options.length > (sel as any).maxVisibleItems;
+    if (onThumb) {
+      scrollDragTarget = sel;
+      // Capture the drag at the RENDERER now: opentui otherwise binds capture to whatever the
+      // first drag event lands on, so a fast flick off the select kills the whole gesture.
+      // setCapturedRenderable is private but the dep is pinned exact (0.4.3).
+      (sel.ctx as any).setCapturedRenderable?.(sel);
+      dragToIndex(sel, e);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    // Anywhere else: a click on a row moves the selection there (never activates — Enter does).
+    const row = (sel as any).scrollOffset + Math.floor((e.y - sel.y) / (sel as any).linesPerItem);
+    if (row >= 0 && row < sel.options.length) sel.setSelectedIndex(row);
   },
   onMouseDrag: (e: MouseEvent) => {
     if (!scrollDragTarget) return;
@@ -57,6 +65,14 @@ export const SELECT_MOUSE = {
   },
   onMouseUp: () => {
     scrollDragTarget = null;
+  },
+  // Wheel anywhere over the list steps the selection.
+  onMouseScroll: (e: MouseEvent) => {
+    const sel = e.target as SelectRenderable | null;
+    if (!sel || !e.scroll) return;
+    const step = Math.max(1, e.scroll.delta);
+    if (e.scroll.direction === 'up') sel.moveUp(step);
+    else if (e.scroll.direction === 'down') sel.moveDown(step);
   },
 } as const;
 

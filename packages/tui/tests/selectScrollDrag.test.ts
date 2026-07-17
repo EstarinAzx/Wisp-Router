@@ -41,10 +41,11 @@ test('dragging the scrollbar column moves the selection', async () => {
   renderer.destroy();
 });
 
-test('dragging over the list body (not the scrollbar) leaves the selection alone', async () => {
+test('pressing a row selects it; body drags do not scrub like the scrollbar', async () => {
   const { sel, mockMouse, renderer } = await setup();
+  // down on item 1's row (2 rows per item) selects it; the drag away must not keep scrubbing
   await mockMouse.drag(5, 2, 5, 8);
-  expect(sel.getSelectedIndex()).toBe(0);
+  expect(sel.getSelectedIndex()).toBe(1);
   renderer.destroy();
 });
 
@@ -64,5 +65,23 @@ test('the column left of the thumb also starts a drag (2-cell grab zone)', async
   const { sel, mockMouse, renderer } = await setup();
   await mockMouse.drag(28, 1, 28, 9);
   expect(sel.getSelectedIndex()).toBe(ITEMS.length - 1);
+  renderer.destroy();
+});
+
+test('mouse wheel over the list steps the selection', async () => {
+  const { sel, mockMouse, renderer } = await setup();
+  await mockMouse.scroll(15, 5, 'down');
+  await mockMouse.scroll(15, 5, 'down');
+  expect(sel.getSelectedIndex()).toBe(2);
+  await mockMouse.scroll(15, 5, 'up');
+  expect(sel.getSelectedIndex()).toBe(1);
+  renderer.destroy();
+});
+
+test('clicking a row selects it', async () => {
+  const { sel, mockMouse, renderer } = await setup();
+  // descriptions on → 2 rows per item; y=4 is item 2's name row
+  await mockMouse.click(5, 4);
+  expect(sel.getSelectedIndex()).toBe(2);
   renderer.destroy();
 });
