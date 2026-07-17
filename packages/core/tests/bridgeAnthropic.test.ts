@@ -142,6 +142,21 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parsed.turns[0].toolResults).toEqual([{ callId: 'toolu_9', content: 'part1part2' }]);
   });
 
+  // A failed tool call carries is_error:true — the flag rides through to the normalized turn so the
+  // backend keeps Claude Code's explicit failure signal (not just the error text). A success omits it.
+  it('carries tool_result is_error through to the normalized turn', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_ok', content: 'done' },
+        { type: 'tool_result', tool_use_id: 'toolu_bad', content: 'boom', is_error: true },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0].toolResults).toEqual([
+      { callId: 'toolu_ok', content: 'done' },
+      { callId: 'toolu_bad', content: 'boom', isError: true },
+    ]);
+  });
+
   // An image content block becomes a normalized image (media_type → mimeType, data → dataBase64).
   it('maps an image block to images', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [

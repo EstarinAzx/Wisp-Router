@@ -23,7 +23,7 @@ import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 // message-only. cache_control and other beta annotations ride along and are simply never read.
 type AntTextBlock = { type: 'text'; text: string };
 type AntToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
-type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[] };
+type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[]; is_error?: boolean };
 type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock;
 type AntMessage = { role: 'user' | 'assistant' | 'system'; content: string | AntContentBlock[] };
@@ -81,11 +81,11 @@ const normalizeToolChoice = (tc: AntToolChoice | undefined): NormalizedToolChoic
 // itself flattened to a string (the normalized toolResults content is plain text, as the OpenAI door's is).
 const splitUserBlocks = (blocks: AntContentBlock[]): {
   text: string;
-  toolResults: { callId: string; content: string }[];
+  toolResults: { callId: string; content: string; isError?: boolean }[];
   images: { mimeType: string; dataBase64: string }[];
 } => {
   let text = '';
-  const toolResults: { callId: string; content: string }[] = [];
+  const toolResults: { callId: string; content: string; isError?: boolean }[] = [];
   const images: { mimeType: string; dataBase64: string }[] = [];
   // An image block, wherever it sits, joins the turn's images[] — the normalized shape has no per-result slot.
   const takeImage = (b: AntContentBlock | undefined): void => {
@@ -94,7 +94,8 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
   for (const b of blocks) {
     if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
     else if (b?.type === 'tool_result') {
-      toolResults.push({ callId: b.tool_use_id, content: blockText(b.content) });
+      // is_error rides through so the backend keeps Claude Code's explicit "this tool failed" signal.
+      toolResults.push({ callId: b.tool_use_id, content: blockText(b.content), ...(b.is_error ? { isError: true } : {}) });
       // Claude Code's Read-on-image puts the pixels INSIDE tool_result content — hoist them, don't drop them.
       if (Array.isArray(b.content)) for (const inner of b.content) takeImage(inner);
     } else takeImage(b);

@@ -343,7 +343,9 @@ export type NormalizedTurn = {
   role: 'user' | 'assistant';
   text: string;
   toolCalls: { id: string; name: string; argsJson: string }[];
-  toolResults: { callId: string; content: string }[];
+  // isError carries Anthropic's tool_result.is_error flag (a failed tool call) through the Anthropic door;
+  // the OpenAI door has no equivalent field and leaves it unread.
+  toolResults: { callId: string; content: string; isError?: boolean }[];
   images?: { mimeType: string; dataBase64: string }[];
 };
 

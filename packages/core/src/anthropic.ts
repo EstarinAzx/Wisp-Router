@@ -112,7 +112,7 @@ export type AnthropicMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
   toolCalls?: { id: string; name: string; argsJson: string }[];
-  toolResults?: { callId: string; content: string }[];
+  toolResults?: { callId: string; content: string; isError?: boolean }[];
   images?: { mimeType: string; dataBase64: string }[];
 };
 
@@ -199,7 +199,7 @@ export const buildAnthropicMessagesBody = (args: {
     if (!m.toolResults?.length && !images.length) return { role: 'user' as const, content: m.content };
     const blocks: unknown[] = [];
     // tool_result blocks lead so the assistant(tool_use) → tool_result order the API wants holds.
-    for (const tr of m.toolResults ?? []) blocks.push({ type: 'tool_result', tool_use_id: tr.callId, content: tr.content });
+    for (const tr of m.toolResults ?? []) blocks.push({ type: 'tool_result', tool_use_id: tr.callId, content: tr.content, ...(tr.isError ? { is_error: true } : {}) });
     // Images before the text — Anthropic's recommended ordering for vision turns.
     for (const img of images) blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mimeType, data: img.dataBase64 } });
     if (m.content) blocks.push({ type: 'text', text: m.content });

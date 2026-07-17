@@ -589,6 +589,20 @@ describe('buildAnthropicMessagesBody — tools', () => {
     });
   });
 
+  // A failed tool result re-emits is_error:true on its tool_result block; a successful one omits the flag.
+  it('re-emits tool_result is_error only for a failed tool call', () => {
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+      { role: 'user', content: '', toolResults: [
+        { callId: 'toolu_ok', content: 'done' },
+        { callId: 'toolu_bad', content: 'boom', isError: true },
+      ] },
+    ] }) as any;
+    const blocks = body.messages[0].content;
+    expect(blocks[0]).toEqual({ type: 'tool_result', tool_use_id: 'toolu_ok', content: 'done' });
+    expect(blocks[1].is_error).toBe(true);
+    expect(blocks[1].tool_use_id).toBe('toolu_bad');
+  });
+
   // Malformed argument JSON degrades to {} rather than throwing (a backend can stream partial/bad JSON).
   it('degrades unparseable tool-call arguments to an empty object', () => {
     const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
