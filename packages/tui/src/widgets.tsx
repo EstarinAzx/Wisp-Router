@@ -37,16 +37,21 @@ const dragToIndex = (sel: SelectRenderable, e: MouseEvent) => {
 export const SELECT_MOUSE = {
   onMouseDown: (e: MouseEvent) => {
     const sel = e.target as SelectRenderable | null;
-    if (!sel || e.x - sel.x !== sel.width - 1) return;
+    // Grab zone is the last TWO columns — a 1-cell thumb is a sweet-spot hunt with a real mouse.
+    if (!sel || e.x - sel.x < sel.width - 2) return;
     // Mirror the paint condition — only react where a thumb is actually drawn.
     if (!sel.showScrollIndicator || sel.options.length <= (sel as any).maxVisibleItems) return;
     scrollDragTarget = sel;
+    // Capture the drag at the RENDERER now: opentui otherwise binds capture to whatever the
+    // first drag event lands on, so a fast flick off the select kills the whole gesture.
+    // setCapturedRenderable is private but the dep is pinned exact (0.4.3).
+    (sel.ctx as any).setCapturedRenderable?.(sel);
     dragToIndex(sel, e);
     e.preventDefault();
     e.stopPropagation();
   },
   onMouseDrag: (e: MouseEvent) => {
-    if (!scrollDragTarget || e.target !== scrollDragTarget) return;
+    if (!scrollDragTarget) return;
     dragToIndex(scrollDragTarget, e);
     e.stopPropagation();
   },
