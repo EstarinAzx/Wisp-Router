@@ -22,14 +22,13 @@ points. Breadcrumb comments on all three issues.
 
 ## Next task
 
-**Land the branch, then tag the release.**
-1. Merge decision: `tui-ops-batch` → main (direct merge or PR — solo repo, user's call;
-   `/preset ship` opens the PR if wanted).
-2. After merge: release = bump `packages/tui/package.json` version + `bun run spans --update`
-   (version bump rides it — never move-only) + tag equal to that version or release.yml
-   refuses. Re-check `npm view wisp-router version` after publish ([[gotchas]] — spam filter
-   has removed green publishes).
-3. Spec #120 closes when the batch ships; #124 stays parked ready-for-human.
+**None queued — batch landed and released.** Same session continued past the chain:
+`tui-ops-batch` fast-forwarded into main, `a98fa15` = chore(release): 2.0.13, tag `v2.0.13`
+pushed, release run 29563170826 green (4 platforms + publish), `npm view wisp-router version`
+→ 2.0.13, spec #120 closed, branch deleted. One late `npm view` re-check remains prudent
+([[gotchas]] — spam filter has removed green publishes hours later). Open candidates: #124
+(wisp-slot session-awareness, parked ready-for-human), backlog #68/#69, or a fresh `/preset
+init` idea.
 
 ## Landmines
 

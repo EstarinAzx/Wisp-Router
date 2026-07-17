@@ -7,15 +7,14 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-17 by Fable 5 (relay chain leg 1 — TUI ops batch implemented)._
-_At commit: `92b6023` on branch `tui-ops-batch` (3 commits ahead of `main`@`cc75a1d`/v2.0.12)._
+_Last updated: 2026-07-17 by Fable 5 (relay chain + merge + release, one session)._
+_At commit: `a98fa15` on `main`, tagged `v2.0.13` (release green, npm confirms 2.0.13)._
 
 ## Current focus
 
-**TUI ops batch (spec #120) SHIPPED on branch `tui-ops-batch`** — all three tickets closed,
-loop-arg relay chain stopped (goal met). Work rode a branch, not main (user override this
-session). Branch is unmerged and unpushed; merge/PR + release tagging are the next session's
-call — see [[pick-up]].
+**TUI ops batch (spec #120) RELEASED as v2.0.13** — chain shipped #121–#123 on
+`tui-ops-batch`, branch fast-forwarded to main and deleted, release run 29563170826 green
+(4 platforms + npm publish), spec closed. Nothing in flight — see [[pick-up]] for candidates.
 
 ## State
 
