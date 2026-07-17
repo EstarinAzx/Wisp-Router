@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "bun src/index.tsx",
-    "compile": "tsc -p ./"
+    "compile": "tsc -p ./",
+    "spans": "bun scripts/span-baseline.tsx"
   },
   "dependencies": {
     "@opentui/core": "0.4.3",
