@@ -4,13 +4,14 @@
  * Depends on:
  *   - @opentui/react: JSX intrinsics (box/text/input/select) + useKeyboard/usePaste hooks.
  *   - @opentui/core: InputRenderable — ref type for clearing the palette input after a command.
- *   - @wisp/core: PROVIDERS catalog + resolvers, slash parse/suggest, oauthModelOptions +
- *     getModelsDevCatalog for the OAuth model lists, stream clients for /test.
+ *   - @wisp/core: PROVIDERS catalog + resolvers, slash parse/suggest, stream clients for /test.
  *   - ./store: the shared ~/.wisp handle + OAuth managers (#63 — extracted so `wisp serve` shares them).
  *   - ./bridge: the TUI's Bridge host wiring (#63).
  *   - ./modes: the Mode union + RouteRow (#116 — extracted so Screen modules can type payloads).
  *   - ./theme: splash/colors/panel/select styling (#116 — the select-transparency landmine's home).
- *   - ./widgets: wrapWords + WrapSelect (#116 — cross-flow building blocks).
+ *   - ./widgets: wrapWords + WrapSelect + onSubmitText (#116/#117 — cross-flow building blocks).
+ *   - ./providerScreens: the ten provider-flow Screens + that flow's helpers (#117) — the
+ *     shell imports the Screens plus EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey.
  *
  * Data shapes:
  *   - Mode + RouteRow: imported from ./modes — the screen state machine this shell owns and
@@ -23,8 +24,8 @@ import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@open
 import type { InputRenderable } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveBaseUrl, resolveKeyId, resolveModel,
-  oauthModelOptions, getModelsDevCatalog, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  DEFAULT_EFFORT, isCodexSignedIn, isAnthropicSignedIn, isXaiSignedIn, effectiveAliasOnly,
+  isCodexProvider, isAnthropicProvider, isXaiProvider,
+  DEFAULT_EFFORT, isAnthropicSignedIn, effectiveAliasOnly,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
@@ -34,100 +35,19 @@ import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
 import { SPLASH, ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
-import { wrapWords, WrapSelect } from './widgets';
+import { wrapWords, WrapSelect, onSubmitText } from './widgets';
+import {
+  EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey,
+  ProvidersScreen, ProviderMenuScreen, KeyPickScreen, KeyEntryScreen, ModelLoadingScreen,
+  ModelPickScreen, ModelFreeScreen, OauthPickScreen, SigninWaitScreen, EffortPickScreen,
+} from './providerScreens';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
 
-// The store handle + OAuth managers moved to store.ts with #63 (shared with `wisp serve`).
-
-// The three OAuth kinds sign in via a browser flow — every other row takes an API key.
-const isOAuthProvider = (p: Provider): boolean =>
-  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p);
-
-// Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
-const keyedProviders = (): Provider[] => PROVIDERS.filter((p) => !isOAuthProvider(p));
-
-const oauthProviders = (): Provider[] => PROVIDERS.filter(isOAuthProvider);
-
-// Sync signed-in read for display — the pure check over the stored bundle (skips codex's async
-// CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
-const oauthStatus = (p: Provider): string =>
-  isCodexProvider(p) ? (isCodexSignedIn(home.readAuth().codex) ? 'signed in' : 'signed out')
-  : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? 'signed in' : 'signed out')
-  : isXaiProvider(p) ? (isXaiSignedIn(home.readAuth().xai) ? 'signed in' : 'signed out')
-  : '';
-
-const saveKey = (p: Provider, key: string): void => {
-  // Merge is shallow — spread the existing keys map or this write would drop sibling keys.
-  // ponytail: read-then-write, not atomic — a cross-process merge-fn in WispHome if it ever bites.
-  home.writeAuth({ keys: { ...home.readAuth().keys, [resolveKeyId(p)]: key } });
-};
-
-// The row's key as stored in auth.json — env fallbacks deliberately excluded: this feeds the
-// menu's Remove row, and only a stored key can be removed (#106).
-const storedKey = (p: Provider): string | undefined => home.readAuth().keys?.[resolveKeyId(p)];
-
-// List-row key status, mirroring oauthStatus: stored beats env (a stored key is what actually
-// gets sent when both exist); '' keeps unconfigured rows clean.
-const keyStatus = (p: Provider): string =>
-  storedKey(p) ? 'key set' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env key' : '';
-
-const removeKey = (p: Provider): void => {
-  const keys = { ...home.readAuth().keys };
-  delete keys[resolveKeyId(p)];
-  home.writeAuth({ keys });
-};
-
-// One provider's submenu rows (#106): set-active first (so setting active stays Enter-Enter),
-// then the kind's credential actions. Remove only appears when a stored key exists — the menu
-// never offers a no-op (env-var keys aren't stored, so they can't be removed here).
-const menuRows = (p: Provider): Array<{ name: string; description: string; value: string }> => [
-  { name: 'Use as Active Provider', description: p.id === activeProvider().id ? 'already active' : p.id, value: 'active' },
-  ...(isOAuthProvider(p)
-    ? [
-        { name: 'Sign in', description: `browser flow — ${oauthStatus(p)}`, value: 'signin' },
-        { name: 'Sign out', description: 'clear the stored tokens', value: 'signout' },
-      ]
-    : [
-        { name: 'Set API key', description: 'masked entry', value: 'set-key' },
-        ...(storedKey(p) ? [{ name: 'Remove key', description: 'delete the stored key', value: 'remove-key' }] : []),
-      ]),
-];
-
-const saveModel = (p: Provider, model: string): void => {
-  const cfg = home.readConfig();
-  home.writeConfig({ models: { ...cfg.models, [p.id]: model } });
-};
-
-// ----------------------------------------- Sign-in + effort ----------------------------------------- //
-
-// The full stored ladder. 'max' is Anthropic-only on the wire, but the send-time clamps
-// (standardEffortToCodex, anthropicThinkingEffort) fold it, so offering it globally is safe.
-const EFFORT_LADDER: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
-
-// ----------------------------------------- Model lists ----------------------------------------- //
-
-// A Provider's pickable models: curated list for the OAuth kinds, live GET <base>/models for keyed
-// rows (same probe the extension uses). undefined = no list → the caller falls back to free text.
-const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => {
-  const catalog = await getModelsDevCatalog().catch(() => undefined);
-  const curated = oauthModelOptions(p, catalog);
-  if (curated) return curated;
-  const base = resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '');
-  if (!base) return undefined;
-  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
-  try {
-    const res = await fetch(`${base}/models`, {
-      headers: key ? { Authorization: `Bearer ${key}` } : undefined,
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { data?: Array<{ id?: string }> };
-    const ids = (body.data ?? []).map((m) => m.id).filter((id): id is string => !!id).sort();
-    return ids.length ? ids : undefined;
-  } catch { return undefined; }
-};
+// The store handle + OAuth managers moved to store.ts with #63 (shared with `wisp serve`);
+// the provider flow's key/model storage helpers, EFFORT_LADDER, and fetchModelOptions moved
+// to providerScreens.tsx with #117 — the shell imports what its starters need.
 
 // ----------------------------------------- /routing ----------------------------------------- //
 
@@ -303,12 +223,6 @@ export const App = () => {
       setMode((m) => m.kind !== 'route-model-loading' || m.row !== row ? m
         : options ? { kind: 'route-model-pick', row, provider: p, options }
         : { kind: 'route-model-free', row, provider: p }));
-  };
-
-  // opentui's JSX inherits React's DOM intrinsics, so onSubmit must also satisfy the DOM form
-  // signature — take unknown and keep only the string opentui actually sends.
-  const onSubmitText = (handle: (value: string) => void) => (value: unknown) => {
-    if (typeof value === 'string') handle(value);
   };
 
   // Kick off the browser OAuth flow and park on the wait screen. The seq guard mirrors the model-fetch
@@ -645,147 +559,38 @@ export const App = () => {
       )}
 
       {mode.kind === 'providers' && (
-        <box {...PANEL} title="Providers" marginTop={1} flexDirection="column">
-          {/* select collapses to zero rows without an explicit height; an option is 2 rows with description */}
-          {/* the built-in ▶ indicator is off on every select — the glyph is ambiguous-width (double-wide
-              on common Windows fonts, smearing into the label); the highlight bar already marks the row */}
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(PROVIDERS.length * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={PROVIDERS.map((p) => {
-              // keyed rows get the same at-a-glance status the OAuth rows always had (#106)
-              const auth = oauthStatus(p) || keyStatus(p);
-              return {
-                name: p.id === activeProvider().id ? `${p.label} (active)` : p.label,
-                description: auth ? `${p.id} — ${auth}` : p.id,
-                value: p.id,
-              };
-            })}
-            onSelect={(_i, opt) => {
-              // Enter opens the row's action menu (#106) — set-active moved to its first row.
-              const p = PROVIDERS.find((x) => x.id === opt?.value);
-              if (p) setMode({ kind: 'provider-menu', provider: p });
-            }}
-          />
-        </box>
+        <ProvidersScreen onPick={(p) => setMode({ kind: 'provider-menu', provider: p })} />
       )}
 
       {mode.kind === 'provider-menu' && (
-        <box {...PANEL} title={mode.provider.label} marginTop={1} flexDirection="column">
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(menuRows(mode.provider).length * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={menuRows(mode.provider)}
-            onSelect={(_i, opt) => {
-              const p = mode.provider;
-              switch (opt?.value) {
-                case 'active':
-                  home.writeConfig({ provider: p.id });
-                  // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
-                  backToProviders(`Active Provider → ${p.label} — tip: name it in /routing for a clean /model list.`);
-                  return;
-                case 'set-key': setMode({ kind: 'key-entry', provider: p, origin: 'menu' }); return;
-                case 'remove-key': removeKey(p); backToProviders(`Stored key removed for ${p.label}.`); return;
-                case 'signin': startSignIn(p, () => backToProviders(`Signed in — ${p.label} is ready.`), 'menu'); return;
-                case 'signout': doSignOut(p, 'menu'); return;
-              }
-            }}
-          />
-        </box>
+        <ProviderMenuScreen
+          provider={mode.provider}
+          onDone={backToProviders}
+          onSetKey={() => setMode({ kind: 'key-entry', provider: mode.provider, origin: 'menu' })}
+          onSignIn={() => startSignIn(mode.provider, () => backToProviders(`Signed in — ${mode.provider.label} is ready.`), 'menu')}
+          onSignOut={() => doSignOut(mode.provider, 'menu')}
+        />
       )}
 
       {mode.kind === 'key-pick' && (
-        <box {...PANEL} title="Set key for…" marginTop={1} flexDirection="column">
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(keyedProviders().length * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={keyedProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
-            onSelect={(_i, opt) => {
-              const p = PROVIDERS.find((x) => x.id === opt?.value);
-              if (p) setMode({ kind: 'key-entry', provider: p });
-            }}
-          />
-        </box>
+        <KeyPickScreen onPick={(p) => setMode({ kind: 'key-entry', provider: p })} />
       )}
 
-      {mode.kind === 'key-entry' && (
-        <box {...PANEL} title={`API key — ${mode.provider.label}`} marginTop={1}>
-          <text wrapMode="none">{secret ? '•'.repeat(secret.length) : ''}<span fg={DIM}>{secret ? '' : 'Paste or type, Enter to save, Esc to cancel'}</span></text>
-        </box>
-      )}
+      {mode.kind === 'key-entry' && <KeyEntryScreen provider={mode.provider} secret={secret} />}
 
-      {mode.kind === 'model-loading' && (
-        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
-      )}
+      {mode.kind === 'model-loading' && <ModelLoadingScreen provider={mode.provider} />}
 
       {mode.kind === 'model-pick' && (
-        <box {...PANEL} title={`Model — ${mode.provider.label}`} marginTop={1} flexDirection="column">
-          {/* descriptions are empty here — hide them so each model is one row */}
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(mode.options.length, 14)}
-            showDescription={false}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={mode.options.map((id) => ({
-              name: id === resolveModel(home.readConfig().models ?? {}, mode.provider) ? `${id} (current)` : id,
-              description: '',
-              value: id,
-            }))}
-            onSelect={(_i, opt) => {
-              if (!opt) return;
-              saveModel(mode.provider, opt.value as string);
-              backToInput(`${mode.provider.label} model → ${opt.value}`);
-            }}
-          />
-        </box>
+        <ModelPickScreen provider={mode.provider} options={mode.options} onDone={backToInput} />
       )}
 
-      {mode.kind === 'model-free' && (
-        <box {...PANEL} title={`Model — ${mode.provider.label} (no live list — type an id)`} marginTop={1}>
-          <input
-            focused
-            placeholder={mode.provider.defaultModel || 'model id'}
-            onSubmit={onSubmitText((value) => {
-              const id = value.trim();
-              if (id) { saveModel(mode.provider, id); backToInput(`${mode.provider.label} model → ${id}`); }
-              else backToInput('Empty — model unchanged.');
-            })}
-          />
-        </box>
-      )}
+      {mode.kind === 'model-free' && <ModelFreeScreen provider={mode.provider} onDone={backToInput} />}
 
       {mode.kind === 'oauth-pick' && (
-        <box {...PANEL} title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(oauthProviders().length * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={oauthProviders().map((p) => ({ name: p.label, description: p.id, value: p.id }))}
-            onSelect={(_i, opt) => {
-              const p = oauthProviders().find((x) => x.id === opt?.value);
-              if (!p) return;
-              mode.action === 'signin' ? startSignIn(p) : doSignOut(p);
-            }}
-          />
-        </box>
+        <OauthPickScreen action={mode.action} onSignIn={startSignIn} onSignOut={doSignOut} />
       )}
 
-      {mode.kind === 'signin-wait' && (
-        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Browser opened — finish the {mode.provider.label} sign-in there. Esc to cancel.</text>
-      )}
+      {mode.kind === 'signin-wait' && <SigninWaitScreen provider={mode.provider} />}
 
       {mode.kind === 'test' && (
         // plain-ASCII title on purpose — opentui border titles drop non-ASCII (em-dash/·), see gotchas
@@ -1019,27 +824,7 @@ export const App = () => {
         </box>
       )}
 
-      {mode.kind === 'effort-pick' && (
-        <box {...PANEL} title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(EFFORT_LADDER.length * 2, 16)}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={EFFORT_LADDER.map((e) => ({
-              name: e === (home.readConfig().effort ?? DEFAULT_EFFORT) ? `${e} (current)` : e,
-              description: e === 'max' ? 'Anthropic only — folds to xhigh on Codex' : '',
-              value: e,
-            }))}
-            onSelect={(_i, opt) => {
-              if (!opt) return;
-              home.writeConfig({ effort: opt.value as EffortLevel });
-              backToInput(`Effort → ${opt.value}`);
-            }}
-          />
-        </box>
-      )}
+      {mode.kind === 'effort-pick' && <EffortPickScreen onDone={backToInput} />}
 
       {/* feedback wraps by hand too — tips and bind confirmations outgrow narrow windows */}
       {status !== '' && (

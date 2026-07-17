@@ -17,6 +17,15 @@ import { useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { ACCENT, DIM } from './theme';
 
+// ----------------------------------------- Submit adapter ----------------------------------------- //
+
+// opentui's JSX inherits React's DOM intrinsics, so onSubmit must also satisfy the DOM form
+// signature — take unknown and keep only the string opentui actually sends. Moved from the
+// shell with #117 — every flow's inputs share it.
+export const onSubmitText = (handle: (value: string) => void) => (value: unknown) => {
+  if (typeof value === 'string') handle(value);
+};
+
 // ----------------------------------------- Word wrap ----------------------------------------- //
 
 // opentui's own wrapMode="wrap" overlays every row that follows the wrapped one (the garble the
