@@ -311,7 +311,19 @@ export const App = () => {
         return;
       }
       case 'bridge': {
-        if (bridge.isRunning()) { bridge.stop(); setStatus('Bridge stopped.'); return; }
+        // #121 ensure-on: bare /bridge starts (if needed) and shows the Screen; `off` is the only
+        // stop — glancing at the panel can never kill a live Bridge.
+        const arg = target.args[0]?.toLowerCase();
+        if (arg && arg !== 'off') { setStatus('/bridge takes off (or no argument)'); return; }
+        if (arg === 'off') {
+          if (!bridge.isRunning()) { setStatus('Bridge is not running.'); return; }
+          bridge.stop(); setStatus('Bridge stopped.'); return;
+        }
+        if (bridge.isRunning()) {
+          // already up → re-show the Screen only; the listener is never touched
+          setMode({ kind: 'bridge', address: bridgeAddress(), secret: ensureBridgeSecret() });
+          return;
+        }
         // isRunning() stays false until the bind lands, so without this guard a double /bridge would
         // race a second server onto the same port and orphan the first one's handle.
         if (bridgeStarting.current) { setStatus('Bridge is starting…'); return; }
@@ -323,7 +335,7 @@ export const App = () => {
             // Show the info screen only if the user is still on the palette (a slow bind must not yank a
             // screen they navigated to) — the status line announces the start wherever they are.
             setMode((m) => m.kind === 'input' ? info : m);
-            setStatus('Bridge started — /bridge again to stop.');
+            setStatus('Bridge started — /bridge off to stop.');
           },
           (err) => {
             bridgeStarting.current = false;

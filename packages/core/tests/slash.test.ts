@@ -108,6 +108,15 @@ describe('SLASH_COMMANDS — the real palette', () => {
     expect(SLASH_COMMANDS.find((c) => c.name === 'signout')?.args).toBe('[codex|anthropic|xai]');
   });
 
+  // #121: /bridge grows its one argument — `off` is the only stop; bare /bridge is ensure-on.
+  it('carries the /bridge off argument (#121)', () => {
+    expect(SLASH_COMMANDS.find((c) => c.name === 'bridge')?.args).toBe('[off]');
+    expect(parseSlash('/bridge off')).toEqual({ command: 'bridge', args: ['off'] });
+    // args keep their case — the shell lowercases when matching `off`
+    expect(parseSlash('/BRIDGE OFF')).toEqual({ command: 'bridge', args: ['OFF'] });
+    expect(parseSlash('/bridge')).toEqual({ command: 'bridge', args: [] });
+  });
+
   it('parses and suggests the #82 commands like their siblings', () => {
     expect(parseSlash('/modelids on')).toEqual({ command: 'modelids', args: ['on'] });
     expect(parseSlash('/help')).toEqual({ command: 'help', args: [] });

@@ -55,7 +55,7 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
         .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg="#fbbf24">{l}</text>)}
     </box>
 
-    <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge stops · /quit kills</text>
+    <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge off stops · /quit kills</text>
   </box>
 );
 

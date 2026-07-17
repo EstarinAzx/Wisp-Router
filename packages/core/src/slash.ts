@@ -26,7 +26,7 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'signout', args: '[codex|anthropic|xai]', description: 'Sign out of Codex, Anthropic, or Grok' },
   { name: 'effort', args: '[level]', description: 'Set the shared reasoning Effort (Codex + Anthropic)' },
   { name: 'test', args: '<provider|alias>', description: 'Fire one canned prompt through a Provider or Alias' },
-  { name: 'bridge', description: 'Toggle the Bridge listener (shows address + access secret)' },
+  { name: 'bridge', args: '[off]', description: 'Show the Bridge (starts it if stopped) — /bridge off is the only stop' },
   { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },
   { name: 'modelids', args: '[on|off]', description: "Alias rows in Claude Code's /model list carry their pinned model id" },
   { name: 'help', description: 'List every command with its arguments' },
