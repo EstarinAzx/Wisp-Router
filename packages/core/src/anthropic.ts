@@ -205,19 +205,43 @@ export const buildAnthropicMessagesBody = (args: {
     if (m.content) blocks.push({ type: 'text', text: m.content });
     return { role: 'user' as const, content: blocks };
   });
-  // #111: two cache_control breakpoints, no more. Render order is tools → system → messages, so the
-  // last-system-block marker caches the tool definitions AND the system prompt together; the marker on
-  // the final message's last block caches the conversation prefix and advances turn by turn. Without
-  // these, a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage).
+  // #111: cache_control breakpoints. Render order is tools → system → messages, so the last-system-block
+  // marker caches the tool definitions AND the system prompt together (the big stable prefix). Without a
+  // marker a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage) — the
+  // Bridge flattens away the markers Claude Code sent, so we reconstruct our own here.
   const CACHE = { cache_control: { type: 'ephemeral' as const } };
   system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
+
+  // A bare-string final turn can't carry a marker — expand it to a single text block (earlier plain turns
+  // keep the #29 bare-string shape).
   const last = messages[messages.length - 1];
-  if (last && typeof last.content === 'string') {
-    if (last.content) messages[messages.length - 1] = { role: last.role, content: [{ type: 'text', text: last.content, ...CACHE }] };
-  } else if (last && Array.isArray(last.content) && last.content.length) {
-    // ponytail: cache lookback is 20 blocks — a turn adding more misses the previous entry; add
-    // intermediate breakpoints only if that shows up in practice.
-    last.content[last.content.length - 1] = { ...(last.content[last.content.length - 1] as Record<string, unknown>), ...CACHE };
+  if (last && typeof last.content === 'string' && last.content) {
+    messages[messages.length - 1] = { role: last.role, content: [{ type: 'text', text: last.content }] };
+  }
+
+  // ponytail: Anthropic's automatic cache lookback only reaches ~20 content blocks back from an explicit
+  // marker, so a single turn that appends more than that — heavy parallel tool calls collapse into one
+  // message of many blocks — overshoots the window and silently re-bills the conversation prefix. Spend the
+  // breakpoints left after system (4 per request, max) walking backward from the end, one every STEP blocks,
+  // so no gap between consecutive markers exceeds the window. A short conversation never reaches STEP, so
+  // this places exactly the one end-of-history marker — identical to the original two-breakpoint body.
+  const STEP = 15;
+  const MSG_BREAKPOINTS = 3; // 4 per-request max − 1 spent on the system block
+  // Every content block in message order; a bare-string turn is one block for distance but carries no
+  // object to annotate (null), so a marker due at its position slides back to the next markable block.
+  const anchors: ({ msg: number; blk: number } | null)[] = [];
+  messages.forEach((m, mi) => {
+    if (Array.isArray(m.content)) m.content.forEach((_, bi) => anchors.push({ msg: mi, blk: bi }));
+    else anchors.push(null);
+  });
+  for (let i = anchors.length - 1, since = STEP, placed = 0; i >= 0 && placed < MSG_BREAKPOINTS; i--, since++) {
+    if (since < STEP) continue;
+    const a = anchors[i];
+    if (!a) continue; // bare-string turn at a step boundary — keep scanning back for a markable block
+    const blocks = messages[a.msg].content as Record<string, unknown>[];
+    blocks[a.blk] = { ...blocks[a.blk], ...CACHE };
+    placed++;
+    since = 0;
   }
   return {
     model: args.model,

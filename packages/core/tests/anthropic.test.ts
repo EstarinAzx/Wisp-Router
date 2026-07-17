@@ -197,9 +197,10 @@ describe('buildAnthropicMessagesBody', () => {
   });
 
   // #111: the Bridge re-sends the whole conversation every turn — without cache breakpoints the
-  // OAuth path re-bills it all as uncached input (~10x plan-usage weight). Two breakpoints: the
-  // last system block (render order is tools → system, so it covers the tool definitions too) and
-  // the last message's final block (the conversation prefix, advancing turn by turn).
+  // OAuth path re-bills it all as uncached input (~10x plan-usage weight). The last system block
+  // (render order is tools → system, so it covers the tool definitions too) plus up to three message
+  // markers walking back from the end — one every ~15 blocks so no gap exceeds Anthropic's ~20-block
+  // cache lookback, which a single heavy parallel-tool turn would otherwise overshoot.
   describe('prompt-caching breakpoints (#111)', () => {
     it('marks the last system block and leaves tools unannotated (system breakpoint covers them)', () => {
       const tools = [{ name: 'readFile', description: 'd', input_schema: { type: 'object' as const, properties: {} } }];
@@ -228,6 +229,25 @@ describe('buildAnthropicMessagesBody', () => {
       const blocks = body.messages[0].content;
       expect(blocks[0].cache_control).toBeUndefined();
       expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } });
+    });
+
+    // A single heavy parallel-tool turn collapses into one message of many blocks. With only the final
+    // block marked, the next turn's lookback overshoots the ~20-block window and re-bills the prefix.
+    // Intermediate markers keep every gap ≤ the window, and total breakpoints stay within the 4/request cap.
+    it('spreads intermediate breakpoints so no gap exceeds the 20-block lookback on a fat turn', () => {
+      const toolResults = Array.from({ length: 40 }, (_, i) => ({ callId: `toolu_${i}`, content: `r${i}` }));
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+        { role: 'user', content: '', toolResults },
+      ] }) as any;
+      const blocks = body.messages[0].content as any[];
+      const marked = blocks.flatMap((b, i) => (b.cache_control ? [i] : []));
+      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral' }); // the growing edge is always marked
+      expect(marked.length).toBeLessThanOrEqual(3); // 4/request cap − 1 for the system block
+      // Every gap between consecutive markers — and from the first marker back to the covered tail — is
+      // within the lookback window.
+      for (let i = 1; i < marked.length; i++) expect(marked[i] - marked[i - 1]).toBeLessThanOrEqual(20);
+      const systemMarks = body.system.filter((b: any) => b.cache_control).length;
+      expect(systemMarks + marked.length).toBeLessThanOrEqual(4); // never exceed the per-request breakpoint cap
     });
   });
 
