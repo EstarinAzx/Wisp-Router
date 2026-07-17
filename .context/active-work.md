@@ -7,18 +7,21 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-17 by Fable 5 (scrollbar-interactivity session + release 2.0.12)._
-_At commit: `cc75a1d` on `main`, tagged `v2.0.12` (pushed with the wrap-up)._
+_Last updated: 2026-07-17 by Fable 5 (TUI-ops planning session — spec #120 + tickets)._
+_At commit: `cc75a1d` on `main`, tagged `v2.0.12` (release confirmed green + published)._
 
 ## Current focus
 
-Release **v2.0.12** just went out: the TUI-split source (#115–#119), the select-transparency fix,
-and this session's select mouse-interactivity work. Tag push triggers
-`.github/workflows/release.yml` (4 native runners → GitHub release → npm `wisp-router`).
+**TUI ops batch (spec #120)** planned and ticketed: #121 (/bridge ensure-on + `/bridge off`),
+#122 (/show-log Log Screen), #123 (headless `wisp providers` / `wisp models <provider>`);
+#124 parked backlog (wisp-slot session-awareness). Implementation runs next session as a
+`/relay` + `/preset loop-arg` chain — see [[pick-up]]. Grill decision:
+[[2026-07-17-bridge-idempotent-on-showlog-panel-command-first-headless-cli]].
 
 ## State
 
-- **In flight:** the release workflow run for `v2.0.12` — needs a green check, nothing else.
+- **In flight:** nothing — v2.0.12 confirmed (workflow green, npm shows 2.0.12; one late
+  spam-filter re-check still prudent).
 - **Done this session:** select scrollbars made mouse-interactive, app-side (opentui's
   SelectRenderable is keyboard-only — see [[gotchas]]):
   - `b38b53e` — `SELECT_MOUSE` in `src/widgets.tsx`, spread into all 8 native `<select>`s;

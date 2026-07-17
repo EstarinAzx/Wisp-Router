@@ -11,20 +11,25 @@ tags: [context, pick-up]
 
 ## What last session finished
 
-**Select mouse interactivity + release v2.0.12.** opentui selects were keyboard-only; now
-thumb-column drag scrubs, wheel steps, row click selects (`SELECT_MOUSE` in
-`packages/tui/src/widgets.tsx`, spread into all 8 `<select>`s) — `b38b53e` + `6dd4bbf` +
-`0b0faeb`, tested by `packages/tui/tests/selectScrollDrag.test.ts` (first TUI bun tests).
-Release commit `cc75a1d` bumped 2.0.12 + re-embedded the span baseline; tag `v2.0.12` pushed.
+**v2.0.12 confirmed shipped + TUI ops batch planned.** Release run for `v2.0.12` green
+(all platforms + publish), `npm view wisp-router version` → `2.0.12` (re-check once more —
+npm spam filter has removed green publishes late; [[gotchas]]). Then a grill settled the
+TUI ops batch (decision:
+[[2026-07-17-bridge-idempotent-on-showlog-panel-command-first-headless-cli]]):
+spec **#120** published, sliced into tickets **#121** (/bridge ensure-on + `/bridge off`),
+**#122** (/show-log ring-buffer Log Screen), **#123** (headless `wisp providers` +
+`wisp models <provider>`), plus parked backlog **#124** (wisp-slot session-awareness,
+ready-for-human). `.claude/loop-arg.md` re-seeded with the #121→#122→#123 goal.
 
 ## Next task
 
-**Babysit the v2.0.12 release run.** `gh run list --workflow=release.yml` → the run for tag
-`v2.0.12` must go green (4 platform builds + publish). Then verify
-`npm view wisp-router version` returns `2.0.12` — and check again later: the npm spam filter
-has removed green publishes minutes after ([[gotchas]] → npm spam filter). If a platform
-package 403s, that's best-effort by design (the shim falls back to the GitHub release
-download); only the thin shell hard-fails. Good fit for `/loop /preset ci-babysit`.
+**Run the ticket chain under relay.** `/relay N=3 /preset loop-arg` — self-paced (no
+interval; user preference), one ticket per firing, `.context/` rehydrates each leg.
+GOAL + NEXT already seeded in `.claude/loop-arg.md` (arg-less invocation is fine — the
+seed guard ignores re-injected args). Stale relay state from the finished #114 chain sits
+at `.claude/relay/loop-arg.md` (`stop: true`); a fresh `/relay` invocation re-seeds it —
+if it balks, delete that file first. Chain-end: wrap-up hands release tagging to the next
+note (tagging is outside the loop goal).
 
 ## Landmines
 
@@ -35,7 +40,8 @@ download); only the thin shell hard-fails. Good fit for `/loop /preset ci-babysi
 - `bun run spans --update` only ever rides a version bump — never a move-only change.
 - Tag must equal `packages/tui/package.json` version or release.yml refuses.
 - Screen modules import from `./modes`/`./theme`/`./widgets`/`./providerScreens` — never from
-  the shell (circular).
+  the shell (circular). #123's headless command path must stay renderer-free (no Screen
+  imports; extract the model-fetch helper out of the provider Screens module if needed).
 - Slot skill exists TWICE — personal `~/.claude/skills/slot` vs repo `plugins/slot`; fixes go
   to both ([[slot-skill-has-two-copies-personal-vs-plugin]]).
 - Never restore a Slot while its agent runs ([[accidental-tui-open-rewrites-all-family-routes]]).
@@ -45,3 +51,4 @@ download); only the thin shell hard-fails. Good fit for `/loop /preset ci-babysi
 ## Related
 
 - [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
+- [[2026-07-17-bridge-idempotent-on-showlog-panel-command-first-headless-cli]]
