@@ -13,6 +13,7 @@
 export * from './catalog';
 export * from './routing';
 export * from './routingCli';
+export * from './discoveryCli';
 export * from './bridge';
 export * from './bridgeAnthropic';
 export * from './bridgeServer';

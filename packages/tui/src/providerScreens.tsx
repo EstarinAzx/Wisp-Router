@@ -2,8 +2,8 @@
 
 /*
  * Depends on:
- *   - @wisp/core: PROVIDERS catalog + resolvers, OAuth kind/signed-in checks, oauthModelOptions +
- *     getModelsDevCatalog for the OAuth model lists.
+ *   - @wisp/core: PROVIDERS catalog + resolvers, OAuth kind/signed-in checks.
+ *   - ./modelFetch: fetchModelOptions re-export — the fetch itself moved out with #123.
  *   - ./store: the shared ~/.wisp handle + Active-Provider read — key/model storage and the
  *     at-a-glance row statuses.
  *   - ./theme: PANEL/DIM/SELECT_COLORS — the shared look.
@@ -21,7 +21,7 @@
  */
 
 import {
-  PROVIDERS, resolveBaseUrl, resolveKeyId, resolveModel, oauthModelOptions, getModelsDevCatalog,
+  PROVIDERS, resolveKeyId, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isCodexSignedIn, isAnthropicSignedIn,
   isXaiSignedIn, DEFAULT_EFFORT,
   type Provider, type EffortLevel,
@@ -99,26 +99,9 @@ export const EFFORT_LADDER: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', '
 
 // ----------------------------------------- Model lists ----------------------------------------- //
 
-// A Provider's pickable models: curated list for the OAuth kinds, live GET <base>/models for keyed
-// rows (same probe the extension uses). undefined = no list → the caller falls back to free text.
-export const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => {
-  const catalog = await getModelsDevCatalog().catch(() => undefined);
-  const curated = oauthModelOptions(p, catalog);
-  if (curated) return curated;
-  const base = resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '');
-  if (!base) return undefined;
-  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
-  try {
-    const res = await fetch(`${base}/models`, {
-      headers: key ? { Authorization: `Bearer ${key}` } : undefined,
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return undefined;
-    const body = (await res.json()) as { data?: Array<{ id?: string }> };
-    const ids = (body.data ?? []).map((m) => m.id).filter((id): id is string => !!id).sort();
-    return ids.length ? ids : undefined;
-  } catch { return undefined; }
-};
+// Moved to modelFetch.ts with #123 (headless `wisp models` needs the fetch renderer-free);
+// re-exported so the shell's import path keeps working.
+export { fetchModelOptions } from './modelFetch';
 
 // ----------------------------------------- Screens ----------------------------------------- //
 

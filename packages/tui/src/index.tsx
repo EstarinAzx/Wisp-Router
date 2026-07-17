@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// -------- index.tsx — wisp entry: serve / routing / claude-wisp / TUI dispatch -------- //
+// -------- index.tsx — wisp entry: serve / routing / providers / models / claude-wisp / TUI dispatch -------- //
 /*
  * Depends on:
  *   - ./serve: the headless Bridge host (#63).
  *   - ./routingCli: the renderer-free Routing snapshot/write command (#108).
+ *   - ./discoveryCli: the renderer-free `wisp providers` + `wisp models` commands (#123).
  *   - ./claude-wisp: the Claude Code launcher (#64) — reached via `wisp claude-wisp …` (#67).
  *   - @opentui/core + @opentui/react + ./app: the TUI face.
  * Data shapes: none.
@@ -18,6 +19,12 @@ if (process.argv[2] === 'serve') {
 } else if (process.argv[2] === 'routing') {
   const { runRoutingCli } = await import('./routingCli');
   process.exitCode = await runRoutingCli(process.argv.slice(3));
+} else if (process.argv[2] === 'providers') {
+  const { runProvidersCli } = await import('./discoveryCli');
+  process.exitCode = runProvidersCli();
+} else if (process.argv[2] === 'models') {
+  const { runModelsCli } = await import('./discoveryCli');
+  process.exitCode = await runModelsCli(process.argv.slice(3));
 } else if (process.argv[2] === 'claude-wisp') {
   // Drop the dispatch token so the launcher's verbatim argv contract (argv.slice(2) → claude) holds.
   process.argv.splice(2, 1);
