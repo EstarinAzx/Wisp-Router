@@ -5,19 +5,26 @@ updated: 2026-07-17
 tags: [context, gotcha]
 ---
 
-# The Slot skill has two copies — personal (machine-specific) vs plugin (generalized)
+# The Slot skill lives in the plugin — and plugin edits need a cache refresh
 
-The skill exists twice, deliberately diverged:
+History: the skill existed twice, deliberately diverged (personal machine-specific
+copy in `~/.claude/skills/slot/` vs the generalized plugin copy). **Ended
+2026-07-17:** the personal copy is retired to `~/.claude/_deprecated/slot/`; the
+plugin `wisp-slot@wisp-router` is the one copy everywhere, installed on this
+machine from a **local directory marketplace** pointing at this checkout.
 
-- **Personal:** `~/.claude/skills/slot/SKILL.md` — hardcoded Windows lease path, fixed
-  Bridge port probe, source-checkout fallback for pre-2.0.11 globals. The active copy on
-  this machine.
-- **Plugin:** `plugins/slot/skills/slot/SKILL.md` in the repo — `~` paths,
-  `$ANTHROPIC_BASE_URL` probe, npm-upgrade note. What other users install.
+Traps that remain:
 
-Traps: a behavioral fix to the procedure (Iron Rule, lease semantics, restore guard) must
-be applied to **both** copies — they don't sync. And never `/plugin install wisp-slot` on
-this machine: it would load a second `slot` skill next to the personal one.
+- Directory marketplaces still install a **versioned snapshot** into
+  `~/.claude/plugins/cache/wisp-router/wisp-slot/<version>/` — editing
+  `plugins/slot/**` in the repo does NOT reach the live skill/hook until
+  `claude plugin update wisp-slot` (and a version bump gives a fresh cache dir).
+- The statusline badge is the exception: elucidate's composed wrapper
+  (`~/.claude/skills/elucidate-plugin/src/hooks/statusline-wrapper.ps1`) calls
+  the badge script at the **checkout path** (stable across versions, unlike the
+  cache), so badge edits are live immediately — asymmetric with hook edits.
+- The old "never `/plugin install wisp-slot` on this machine" rule is dead —
+  reversed by the same decision that retired the personal copy.
 
 ## Related
 

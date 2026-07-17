@@ -10,7 +10,7 @@ tags: [context, gotchas]
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
 - [[select-mouse-leans-on-opentui-privates]] — SELECT_MOUSE (scrollbar drag/wheel/row click) reads opentui privates, pinned 0.4.3; new selects must spread it, upgrades must re-run `bun test` in packages/tui
-- [[slot-skill-has-two-copies-personal-vs-plugin]] — Slot skill exists twice (personal `~/.claude/skills/slot` vs repo `plugins/slot`); fix both on any procedure change, never install the plugin locally
+- [[slot-skill-has-two-copies-personal-vs-plugin]] — Slot skill is plugin-only now (personal copy retired 2026-07-17); repo edits to `plugins/slot/**` need `claude plugin update wisp-slot` (versioned cache) — except the statusline badge, which the wrapper runs from the checkout
 - [[accidental-tui-open-rewrites-all-family-routes]] — An agent's accidental `wisp` TUI open can silently rewrite ALL family routes (quick-setup); snapshots taken after preserve the damage
 - [[powershell-profile-env-masks-session-env]] — PowerShell profile sets ANTHROPIC_BASE_URL, so PowerShell env checks claim every session is bridged; use Bash to read real process env
 - [[bridged-family-routes-bound-to-anthropic-burn-max-quota]] — Family routes bound to `anthropic` bill the Claude Max plan — background haiku chores burn it even in "GPT sessions"; rebind haiku off `anthropic` first

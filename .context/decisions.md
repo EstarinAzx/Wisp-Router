@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-17-slot-plugin-only-session-awareness-hook-badge]] — wisp-slot 1.1.0: SessionStart hook + statusline badge (env+home detection, node, family-level badge); personal skill copy retired — plugin via local directory marketplace is the one copy (#124)
 - [[2026-07-17-bridge-idempotent-on-showlog-panel-command-first-headless-cli]] — /bridge = ensure-on + show, /bridge off only stop; /show-log ring-buffer Screen; headless CLI command-first (`wisp providers`, `wisp models <provider>`); wisp-slot session-awareness parked
 - [[2026-07-17-slot-skill-ships-as-repo-plugin-marketplace]] — Slot skill ships as Claude Code plugin `wisp-slot`; repo doubles as the plugin marketplace (reverses #107's out-of-scope line)
 - [[2026-07-17-slot-skill-lease-file-explicit-restore]] — Slot skill: lease file + explicit guarded restore, no SessionEnd hook (no guaranteed skill-finally); Agent model = family words only (#110)
