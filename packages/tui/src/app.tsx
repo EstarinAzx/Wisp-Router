@@ -12,6 +12,8 @@
  *   - ./widgets: wrapWords + WrapSelect + onSubmitText (#116/#117 — cross-flow building blocks).
  *   - ./providerScreens: the ten provider-flow Screens + that flow's helpers (#117) — the
  *     shell imports the Screens plus EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey.
+ *   - ./routingScreens: the eight routing-flow Screens + that flow's row helpers (#118) — the
+ *     shell imports the Screens plus routingMap, rowLabel, sectionOf, CLAUDE_FAMILY_MODELS.
  *
  * Data shapes:
  *   - Mode + RouteRow: imported from ./modes — the screen state machine this shell owns and
@@ -28,19 +30,24 @@ import {
   DEFAULT_EFFORT, isAnthropicSignedIn, effectiveAliasOnly,
   resolveRoute, EMPTY_ROUTING_MAP, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
-  FAMILY_KEYS, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias,
-  type Provider, type EffortLevel, type RoutingMap, type FamilyKey, type Target,
+  FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
+  type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
 import { SPLASH, ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
-import { wrapWords, WrapSelect, onSubmitText } from './widgets';
+import { wrapWords, onSubmitText } from './widgets';
 import {
   EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey,
   ProvidersScreen, ProviderMenuScreen, KeyPickScreen, KeyEntryScreen, ModelLoadingScreen,
   ModelPickScreen, ModelFreeScreen, OauthPickScreen, SigninWaitScreen, EffortPickScreen,
 } from './providerScreens';
+import {
+  routingMap, rowLabel, sectionOf, CLAUDE_FAMILY_MODELS,
+  RoutingScreen, RoutingSectionScreen, AliasNameScreen, AliasRenameScreen, RouteProviderScreen,
+  RouteModelLoadingScreen, RouteModelPickScreen, RouteModelFreeScreen,
+} from './routingScreens';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -51,25 +58,8 @@ import pkg from '../package.json';
 
 // ----------------------------------------- /routing ----------------------------------------- //
 
-const routingMap = (): RoutingMap => home.readConfig().routing ?? EMPTY_ROUTING_MAP;
-
-const rowLabel = (row: RouteRow): string => (row.kind === 'family' ? row.family : row.name);
-
-// Border-title-safe label: opentui silently drops a whole title over one non-ASCII char, and alias
-// names are free text (the panel accepts anything) — replace the offenders, never lose the title.
-const titleLabel = (row: RouteRow): string => rowLabel(row).replace(/[^\x20-\x7e]/g, '?');
-
-const rowTarget = (map: RoutingMap, row: RouteRow): Target | undefined =>
-  row.kind === 'family' ? map.families[row.family] : map.aliases.find((a) => a.name === row.name)?.target;
-
-// The one-tap "bind Claude subscription models" mapping: each Family route's natural Claude.ai
-// model. TUI-local data — promote to core if the side panel ever grows the same button.
-const CLAUDE_FAMILY_MODELS: Record<FamilyKey, string> = {
-  opus: 'claude-opus-4-8',
-  sonnet: 'claude-sonnet-5',
-  haiku: 'claude-haiku-4-5',
-  fable: 'claude-fable-5',
-};
+// The routing-row helpers moved to routingScreens.tsx with #118 — the shell's starters import
+// routingMap/rowLabel/sectionOf/CLAUDE_FAMILY_MODELS from there.
 
 // ----------------------------------------- /test ----------------------------------------- //
 
@@ -188,7 +178,6 @@ export const App = () => {
     if (message) setStatus(message);
     setMode({ kind: 'routing-section', section });
   };
-  const sectionOf = (row: RouteRow): 'families' | 'aliases' => row.kind === 'family' ? 'families' : 'aliases';
 
   // Persist one row's new Target through core's pure edits. A refusal (only reachable if a Provider
   // id slipped past the alias-name precheck) persists nothing.
@@ -661,167 +650,63 @@ export const App = () => {
       )}
 
       {mode.kind === 'routing' && (
-        <box {...PANEL} title="Routing map" marginTop={1} flexDirection="column">
-          {/* hand-wrapped into per-line rows — opentui's own wrap garbles everything below it */}
-          {wrapWords("Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.", panelCols)
-            .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
-          <WrapSelect
-            cols={panelCols}
-            maxRows={12}
-            options={[
-              { name: 'Claude Code', description: `the Family routes (${FAMILY_KEYS.join(' / ')})`, value: 'families' },
-              { name: 'Custom', description: `your named Aliases (${routingMap().aliases.length}) + add`, value: 'aliases' },
-            ]}
-            onSelect={(_i, opt) => setMode({ kind: 'routing-section', section: opt.value as 'families' | 'aliases' })}
-          />
-        </box>
+        <RoutingScreen cols={panelCols} onPick={(section) => setMode({ kind: 'routing-section', section })} />
       )}
 
       {mode.kind === 'routing-section' && (
-        <box {...PANEL} title={mode.section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
-          {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
-          {/* keyed by section so toggling families ↔ aliases can't reuse a stale selection */}
-          <WrapSelect
-            key={mode.section}
-            cols={panelCols}
-            maxRows={14}
-            options={mode.section === 'families'
-              ? [
-                  ...FAMILY_KEYS.map((f) => {
-                    const t = routingMap().families[f];
-                    return { name: f, description: t ? `${t.providerId} (${t.model})` : 'not routed — Active Provider answers', value: `family:${f}` };
-                  }),
-                  // ' bind' rides the same leading-space convention as ' clear'/' rename' — it can
-                  // never collide with a family:/alias: row key.
-                  { name: 'Bind Claude subscription models', description: 'route all four families to Anthropic (Claude.ai) in one go', value: ' bind' },
-                ]
-              : [
-                  ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
-                  { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
-                ]}
-            onSelect={(_i, opt) => {
-              const v = opt.value;
-              if (v === 'add') { setMode({ kind: 'alias-name' }); return; }
-              if (v === ' bind') { bindClaudeFamilies(); return; }
-              const key = v.slice(v.indexOf(':') + 1);
-              setMode({
-                kind: 'route-provider',
-                row: v.startsWith('family:') ? { kind: 'family', family: key as FamilyKey } : { kind: 'alias', name: key },
-              });
-            }}
-          />
-        </box>
+        <RoutingSectionScreen
+          section={mode.section}
+          cols={panelCols}
+          onAddAlias={() => setMode({ kind: 'alias-name' })}
+          onBind={bindClaudeFamilies}
+          onPickRow={(row) => setMode({ kind: 'route-provider', row })}
+        />
       )}
 
       {mode.kind === 'alias-name' && (
-        <box {...PANEL} title="New alias name" marginTop={1}>
-          <input
-            focused
-            placeholder="a bridged model name, e.g. fast"
-            onSubmit={onSubmitText((value) => {
-              const name = value.trim();
-              if (!name) { backToSection('aliases', 'Empty — no alias added.'); return; }
-              // Precheck the shadow rule here so the collision message lands while the name is
-              // still editable (core's withAlias refuses it again at persist time).
-              if (PROVIDERS.some((p) => p.id === name)) { setStatus(`"${name}" is a Provider id — pick another name.`); return; }
-              setMode({ kind: 'route-provider', row: { kind: 'alias', name } });
-            })}
-          />
-        </box>
+        <AliasNameScreen
+          onBack={(message) => backToSection('aliases', message)}
+          onStatus={setStatus}
+          onNamed={(name) => setMode({ kind: 'route-provider', row: { kind: 'alias', name } })}
+        />
       )}
 
       {mode.kind === 'alias-rename' && (
-        <box {...PANEL} title={`Rename alias ${titleLabel({ kind: 'alias', name: mode.name })}`} marginTop={1}>
-          <input
-            focused
-            placeholder={mode.name}
-            onSubmit={onSubmitText((value) => {
-              const next = value.trim();
-              if (!next || next === mode.name) { backToSection('aliases', 'Unchanged.'); return; }
-              // Split the two refusals so the message names the actual collision; input stays editable.
-              if (PROVIDERS.some((p) => p.id === next)) { setStatus(`"${next}" is a Provider id — pick another name.`); return; }
-              const renamed = withAliasRenamed(routingMap(), PROVIDERS, mode.name, next);
-              if (!renamed) { setStatus(`"${next}" is already an alias — pick another name.`); return; }
-              home.writeConfig({ routing: renamed });
-              backToSection('aliases', `Alias ${mode.name} → ${next}.`);
-            })}
-          />
-        </box>
+        <AliasRenameScreen
+          name={mode.name}
+          onBack={(message) => backToSection('aliases', message)}
+          onStatus={setStatus}
+        />
       )}
 
       {mode.kind === 'route-provider' && (
-        <box {...PANEL} title={`Route ${titleLabel(mode.row)} via...`} marginTop={1} flexDirection="column">
-          <WrapSelect
-            cols={panelCols}
-            maxRows={14}
-            options={[
-              // Alias rows lead with the edit verbs (#79) — no scrolling past every Provider to
-              // rename. Only for aliases already IN the map: the add-alias flow passes through here
-              // before its row is persisted, and rename/remove on a nonexistent alias dead-ends.
-              // Leading-space values can't collide with Provider ids (ids never start with a space).
-              ...(mode.row.kind === 'alias' && routingMap().aliases.some((a) => a.name === (mode.row as { name: string }).name)
-                ? [
-                    { name: 'Rename alias', description: 'keep the Target, change the bridged name', value: ' rename' },
-                    { name: 'Remove alias', description: 'delete this bridged name', value: ' clear' },
-                  ]
-                : []),
-              ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
-              // A Family route is cleared, never renamed — its picker keeps clear at the bottom.
-              ...(mode.row.kind === 'family'
-                ? [{ name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }]
-                : []),
-            ]}
-            onSelect={(_i, opt) => {
-              if (opt.value === ' clear') { clearRow(mode.row); return; }
-              if (opt.value === ' rename' && mode.row.kind === 'alias') { setMode({ kind: 'alias-rename', name: mode.row.name }); return; }
-              const p = PROVIDERS.find((x) => x.id === opt.value);
-              if (p) startRouteModel(mode.row, p);
-            }}
-          />
-        </box>
+        <RouteProviderScreen
+          row={mode.row}
+          cols={panelCols}
+          onClear={() => clearRow(mode.row)}
+          onRename={(name) => setMode({ kind: 'alias-rename', name })}
+          onPick={(p) => startRouteModel(mode.row, p)}
+        />
       )}
 
-      {mode.kind === 'route-model-loading' && (
-        <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Fetching models for {mode.provider.label}…</text>
-      )}
+      {mode.kind === 'route-model-loading' && <RouteModelLoadingScreen provider={mode.provider} />}
 
       {mode.kind === 'route-model-pick' && (
-        <box {...PANEL} title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label}`} marginTop={1} flexDirection="column">
-          {/* "(current)" only when the row already targets THIS provider — two providers can list the same id */}
-          <select
-            focused
-            {...SELECT_COLORS}
-            height={Math.min(mode.options.length, 14)}
-            showDescription={false}
-            showSelectionIndicator={false}
-            showScrollIndicator
-            options={mode.options.map((id) => {
-              const t = rowTarget(routingMap(), mode.row);
-              return {
-                name: t?.providerId === mode.provider.id && t.model === id ? `${id} (current)` : id,
-                description: '',
-                value: id,
-              };
-            })}
-            onSelect={(_i, opt) => {
-              if (opt) applyRoute(mode.row, { providerId: mode.provider.id, model: String(opt.value) });
-            }}
-          />
-        </box>
+        <RouteModelPickScreen
+          row={mode.row}
+          provider={mode.provider}
+          options={mode.options}
+          onApply={(target) => applyRoute(mode.row, target)}
+        />
       )}
 
       {mode.kind === 'route-model-free' && (
-        <box {...PANEL} title={`Model for ${titleLabel(mode.row)} - ${mode.provider.label} (no live list - type an id)`} marginTop={1}>
-          <input
-            focused
-            placeholder={mode.provider.defaultModel || 'model id'}
-            onSubmit={onSubmitText((value) => {
-              const id = value.trim();
-              if (id) applyRoute(mode.row, { providerId: mode.provider.id, model: id });
-              else backToSection(sectionOf(mode.row), 'Empty — route unchanged.');
-            })}
-          />
-        </box>
+        <RouteModelFreeScreen
+          row={mode.row}
+          provider={mode.provider}
+          onApply={(target) => applyRoute(mode.row, target)}
+          onEmpty={() => backToSection(sectionOf(mode.row), 'Empty — route unchanged.')}
+        />
       )}
 
       {mode.kind === 'effort-pick' && <EffortPickScreen onDone={backToInput} />}
