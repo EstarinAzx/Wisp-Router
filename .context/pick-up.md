@@ -11,38 +11,32 @@ tags: [context, pick-up]
 
 ## What last session finished
 
-**#124 shipped and closed — wisp-slot 1.1.0 session-awareness.** Two commits on
-`main` (unpushed): `c7ca050` plugin SKILL.md sync (step-6 agent-label rule) ·
-`0a2e2d5` SessionStart hook (announcement + routing snapshot + CLI cheat sheet +
-stale-lease warning, silent unbridged) + statusline badge (`[WISP fable→<model>]`
-live, `!LEASE`, `[WISP]` fallback) + README + 1.1.0. Verified: 8-case fixture
-matrix on sandbox `WISP_HOME` + wrapper e2e. Machine wired: personal skill copy
-retired to `_deprecated/`, plugin installed from local directory marketplace,
-elucidate statusline wrapper runs the badge from the checkout. Vault + gotcha +
-decision entry all synced. Breadcrumb comment on #124.
+**2.0.14 shipped.** Three commits on `main` (pushed, tag `v2.0.14`, release.yml
+green, `wisp-router@2.0.14` on npm): `52c878e` purple statusline badge (xterm 141
+≈ TUI accent `#a78bfa`; wisp-slot 1.1.2, plugin cache updated) · `153bfeb` Bridge
+screen recommends the wisp-slot plugin · `de70b3b` release prep + **new
+`packages/tui/CHANGELOG.md`** seeded 2.0.11–2.0.14. Verified: tsc, tui tests 13,
+span-baseline recaptured (32 Screens), sandboxed routing CLI + statusline fixture.
 
 ## Next task
 
 **None queued.** Candidates: backlog #68/#69, or a fresh `/preset init` idea.
-Main pushed and in sync with origin (no release needed; #124 touched no package
-code, npm stays 2.0.13). Late follow-ups landed same day: slot triage fast path
-(plain rebinds skip the checklist), cyan badge, ASCII `!LEASE` marker — plugin
-cache refreshed to 1.1.1 (`claude plugin update wisp-slot@wisp-router`, full id).
 
 ## Landmines
 
-- `plugins/slot/**` edits DON'T reach the live plugin until
-  `claude plugin update wisp-slot` — directory marketplace installs a versioned
-  cache. Exception: the statusline badge runs from the checkout (live edits).
-  See [[slot-skill-has-two-copies-personal-vs-plugin]] (rewritten — plugin-only now).
-- Bridged detection = `ANTHROPIC_BASE_URL` set AND `~/.wisp` exists; never env
-  alone ([[powershell-profile-env-masks-session-env]] — PowerShell profile trap).
-- First bridged session after this will show the new hook context + `[WISP …]`
-  badge — that's the live eyeball test if anything looks off.
-- Tag must equal `packages/tui/package.json` version or release.yml refuses
-  (standing rule, next release).
+- **Changelog split is now policy:** `v2.x` release prep updates
+  `packages/tui/CHANGELOG.md`; the vscode changelog is extension-only
+  ([[2026-07-17-wisp-router-gets-its-own-changelog]]).
+- Span baseline embeds the version string — any `packages/tui/package.json`
+  bump drifts all 32 Screens; recapture with `bun scripts/span-baseline.tsx
+  --update` as part of release prep.
+- `plugins/slot/**` edits need `claude plugin update wisp-slot@wisp-router`
+  (statusline badge exempt — wrapper runs from checkout).
+- Elucidate's badge is also purple — eyeball a bridged session; if the two
+  purples read the same, shift the wisp shade.
+- Tag must equal `packages/tui/package.json` version or release.yml refuses.
 
 ## Related
 
 - [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
-- [[2026-07-17-slot-plugin-only-session-awareness-hook-badge]]
+- [[2026-07-17-wisp-router-gets-its-own-changelog]]
