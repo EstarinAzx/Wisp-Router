@@ -12,15 +12,15 @@ tags: [context, pick-up]
 ## Where you are
 
 **You are on branch `claude/context-rehydration-oargfe`, NOT `main`.** A remote
-session made two fixes here (`f33785d`, `a5ab0f2`), pushed but **not merged and
-not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up). The
-installed `wisp-router`/`claude-wisp` binary does NOT have these fixes yet. Both
-are in `buildAnthropicMessagesBody` (`packages/core/src/anthropic.ts`) and only
-touch the Anthropic-OAuth (Claude.ai Messages) path — Codex/Grok/API-key
-providers use automatic prefix caching (no `cache_control`) and were never
-affected.
+session made three fixes here (`f33785d`, `a5ab0f2`, `e0569eb`), pushed but **not
+merged and not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up).
+The installed `wisp-router`/`claude-wisp` binary does NOT have these yet. All
+three touch only the Anthropic-OAuth (Claude.ai Messages) path — Codex/Grok/
+API-key providers use automatic prefix caching (no `cache_control`) and were
+never affected. Two are cache/quota fixes (`anthropic.ts`), one is a fidelity
+fix (`is_error`, threads `catalog.ts` → `bridgeAnthropic.ts` → `anthropic.ts`).
 
-## What last session did — two #111 cache follow-ups
+## What last session did — #111 cache follow-ups + is_error
 
 **`f33785d` fix(core): spread cache breakpoints so fat tool turns don't re-bill.**
 Closes a residual hole in the shipped #111 fix (`e5ec476`).
@@ -69,13 +69,24 @@ like native unwisped Claude — no 10x re-bill, and the prefix survives idle gap
    version, `release.yml` publishes) + reinstall. A release DOES need a
    `packages/tui/package.json` bump → THEN recapture span-baseline (`bun
    scripts/span-baseline.tsx --update`) + update `packages/tui/CHANGELOG.md`.
-3. **Optional, un-done fidelity gaps** (fidelity, NOT quota — left for greenlight):
-   - **`is_error` passthrough** — the bridge drops `tool_result.is_error`.
-     Threads through the shared normalized `toolResults` shape (`catalog.ts` →
-     `bridgeAnthropic.ts` → `anthropic.ts`, ~4 files, both doors). Cheap-ish.
-   - **thinking / redacted_thinking blocks, `document`/PDF blocks, 1h TTL** —
-     left alone deliberately. Thinking-block preservation is a real tradeoff
-     (Wisp also routes to non-Anthropic providers); PDF is a feature, not a nick.
+3. **Remaining un-done fidelity gaps** (fidelity, NOT quota — held for a
+   deliberate follow-up, NOT drive-by work):
+   - **`is_error` passthrough — DONE** in `e0569eb`. `tool_result.is_error` now
+     threads through the normalized `toolResults` (`isError?`) — parser captures
+     it, `buildAnthropicMessagesBody` re-emits it. Anthropic-door only.
+   - **thinking / redacted_thinking preservation — HELD, and risky to do
+     casually.** Anthropic requires thinking blocks passed back byte-for-byte
+     with signatures intact — any normalization touch breaks the signature →
+     400. Wisp also routes to non-Anthropic backends, where these blocks are
+     invalid and must be conditionally dropped. `NormalizedTurn` has no thinking
+     slot, and Wisp deliberately reconstructs thinking from `effort`. This is
+     architecturally significant (CLAUDE.md §3) — needs a design pass, not a
+     quick patch, and it is NOT a quota issue. Discuss before implementing.
+   - **`document`/PDF passthrough — HELD.** A feature, not a bug: `splitUserBlocks`
+     handles only base64 `image` blocks, so a `document` block is silently
+     dropped. Adding it needs a new normalized slot + a check that the target
+     backend accepts PDFs. Only worth it if users actually feed PDFs.
+   - **1h cache TTL — DONE** in `a5ab0f2` (see above).
 
 ## Landmines
 
