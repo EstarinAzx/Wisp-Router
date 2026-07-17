@@ -64,7 +64,7 @@ Use `"prior": "unset"` when the family has no route.
 
 **5. Warning gate.** Any `warning:` line from `set` (missing key / signed out) goes to the user BEFORE spawning. Proceed only on their yes; otherwise restore immediately and delete the lease.
 
-**6. Spawn.** Call the Agent tool with `model: "<slot family>"` — the family word. Never the Target string, never a Wisp Alias (Aliases do not exist in the Agent model surface).
+**6. Spawn.** Call the Agent tool with `model: "<slot family>"` — the family word. Never the Target string, never a Wisp Alias (Aliases do not exist in the Agent model surface). Label the agent with the real backend: set `description` to `<target model>: <short task>` (e.g. `gpt-5.6-sol: reply with one`) — the family word lies in the UI, the label is the only place the true model shows.
 
 **7. Hold.** The binding stays until every agent launched through this lease has finished. Launch multiple agents only as one deliberate batch; restore waits for all of them.
 
