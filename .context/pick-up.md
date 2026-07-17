@@ -87,6 +87,13 @@ like native unwisped Claude — no 10x re-bill, and the prefix survives idle gap
      dropped. Adding it needs a new normalized slot + a check that the target
      backend accepts PDFs. Only worth it if users actually feed PDFs.
    - **1h cache TTL — DONE** in `a5ab0f2` (see above).
+   - **Backlog candidate (speculative, NOT a bug):** mirror native Claude Code's
+     "switching model re-pays the cache" warning — surface a heads-up in the TUI
+     `/routing` flow (`routingScreens.tsx`) when a user re-points the MAIN-LOOP
+     target of an active session (a model switch cold-writes the model-scoped
+     cache). Only bites if someone flips the main target mid-session (rare —
+     subagents are separate contexts and don't trip it). UI-layer, low value;
+     build only if users actually hit it.
 
 ## Landmines
 
