@@ -7,35 +7,36 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-17 by Fable 5 (auto, relay leg 3 — chain wind-down)._
-_At commit: `26418dd` on `main` (last release tag `v2.0.11`)._
+_Last updated: 2026-07-17 by Fable 5 (scrollbar-interactivity session + release 2.0.12)._
+_At commit: `cc75a1d` on `main`, tagged `v2.0.12` (pushed with the wrap-up)._
 
 ## Current focus
 
-The TUI split (spec #114) is **complete** — #115–#119 all closed, #114 closed with the five
-children's commits. The `/relay N=2 /preset loop-arg` chain that drove it has stopped (goal met,
-both stop flags set in `.claude/loop-arg.md` + `.claude/relay/loop-arg.md`). Next up: tag a
-release.
+Release **v2.0.12** just went out: the TUI-split source (#115–#119), the select-transparency fix,
+and this session's select mouse-interactivity work. Tag push triggers
+`.github/workflows/release.yml` (4 native runners → GitHub release → npm `wisp-router`).
 
 ## State
 
-- **In flight:** nothing — the loop chain wound down cleanly.
-- **Done this session (leg 3):** #119 — `src/paletteScreen.tsx` (palette input + suggestion
-  rows), `src/testScreen.tsx` (TestScreen + `streamTestReply` colocated, re-exported from
-  app.tsx for headless use), `src/infoScreens.tsx` (BridgeScreen + HelpScreen), all in
-  `26418dd`. Shell holds no per-Screen JSX — Mode machine, dispatch, keyboard, starters, race
-  guards; 583 lines (the spec's 350–400 estimate undercounted what it assigns to the shell —
-  rationale on the #119 breadcrumb). Gates green: spans 32/32 byte-identical, `tsc`, scoped
-  verify skill (sandbox `WISP_HOME` routing CLI text/`--json`/bad-flag probes). Then #114
-  closed — split done.
+- **In flight:** the release workflow run for `v2.0.12` — needs a green check, nothing else.
+- **Done this session:** select scrollbars made mouse-interactive, app-side (opentui's
+  SelectRenderable is keyboard-only — see [[gotchas]]):
+  - `b38b53e` — `SELECT_MOUSE` in `src/widgets.tsx`, spread into all 8 native `<select>`s;
+    thumb-column drag → `setSelectedIndex`.
+  - `6dd4bbf` — responsiveness: renderer capture at mousedown (fast flicks no longer die),
+    2-cell grab zone.
+  - `0b0faeb` — wheel scroll (delta-aware) + click-a-row-selects-it; selection moves verified
+    side-effect free (no `onChange` anywhere).
+  - `cc75a1d` — release bump 2.0.12 + span baseline re-embed (`bun run spans --update`).
+  - First TUI test file: `packages/tui/tests/selectScrollDrag.test.ts` (6 tests, real mouse
+    pipeline; `tests/` deliberately outside the tsc include — see [[stack]]).
 - **Blocked:** None.
 
 ## Pick up here
 
-See [[pick-up]]. Next task: tag a release — the whole split (#115–#119) + the
-select-transparency fix `bb6465b` are source-only; the published binary is still 2.0.11. Tag
-must equal `packages/tui/package.json` version (release.yml gate), and the span harness embeds
-the version header — the version bump requires `bun run spans --update` in the same change.
+See [[pick-up]]. Next task: confirm the v2.0.12 release run is green end-to-end (all 4 platform
+builds + npm publish), then spot-check `npm view wisp-router version` — the npm spam filter has
+silently removed green publishes before ([[gotchas]]).
 
 ## Open questions
 
@@ -43,22 +44,18 @@ None.
 
 ## Recent context
 
-- Screen-module import seams (breadcrumbs on #117/#118/#119): payload types from `./modes`,
-  look from `./theme`, `wrapWords` from `./widgets` (`onSubmitText` now lives with
-  PaletteScreen's composition), `fetchModelOptions` from `./providerScreens` — never from the
-  shell. `PANEL`/`SELECT_COLORS` no longer imported by the shell.
-- New native `<select>`s must spread `SELECT_COLORS` — canonical home `src/theme.ts` (#116).
-- bg-session edit guard reads the **session cwd's** project settings: the root
-  `.claude/settings.json` `{"worktree":{"bgIsolation":"none"}}` didn't cover a leg spawned with
-  cwd `packages/tui` — an untracked twin now sits at `packages/tui/.claude/settings.json`.
-- The span harness (`bun run spans`) embeds the version header — a version bump requires
-  `--update` in the same change; never inside a move-only step (#115 breadcrumb).
+- New landmine pair for selects: every new native `<select>` must spread **both**
+  `SELECT_COLORS` and `SELECT_MOUSE`; any `@opentui/*` bump must re-run `bun test` in
+  `packages/tui` (SELECT_MOUSE reads pinned privates — [[gotchas]]).
+- opentui wheel events only reach the select when the pointer is over it — the renderer's
+  "fallback to focused" scroll path is unreachable in practice (root wins the hit test).
+- Screen-module import seams unchanged (#117–#119): payload types from `./modes`, look from
+  `./theme`, widgets from `./widgets`, `fetchModelOptions` from `./providerScreens`.
 
 ## Related
 
 - [[overview]]
 - [[pick-up]]
-- [[api]]
+- [[stack]]
 - [[decisions]]
-- [[happy-path]]
 - [[gotchas]]

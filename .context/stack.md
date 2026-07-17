@@ -1,7 +1,7 @@
 ﻿---
 type: stack
 project: wisp
-updated: 2026-07-16
+updated: 2026-07-17
 tags: [context, stack]
 ---
 
@@ -36,6 +36,7 @@ Monorepo since #58 (bun workspaces, root `bun.lock`; install with `bun install` 
 
 ## Testing
 - `vitest` `^4.1` (devDep of `@wisp/core`) â€” unit-test runner for the **vscode-free** pure logic (`packages/core/tests/*.test.ts`, 367 tests; moved out of `src/` 2026-07-14). Run `bun run test` at root. No `@vscode/test-electron`: the tested functions are pure, so no Extension Development Host is needed. Vitest's default glob finds `tests/` (no config file); core's `tsconfig.json` includes only `src`, so tests stay out of typecheck.
+- `bun test` (in `packages/tui`) — first TUI tests, 2026-07-17: `tests/selectScrollDrag.test.ts` drives a real `SelectRenderable` through opentui's real mouse pipeline (`@opentui/core/testing`: test renderer + mock mouse). `tests/` sits OUTSIDE the tui tsconfig include on purpose — `bun:test` types aren't installed, so the `tsc` gate never sees the file. Gate trio for tui changes: `bun run spans` + `bun run compile` + `bun test`.
 
 ## Services
 - None (no DB/cache). Single external HTTP dependency: the OpenCode Zen provider â€” see [[api]].
