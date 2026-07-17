@@ -13,7 +13,7 @@ tags: [context, decision]
    hook (all sources — startup/resume/clear/compact) injecting Wisp announcement +
    live routing snapshot + headless CLI cheat sheet + stale-lease warning; a node
    statusline badge with live family resolution (`[WISP fable→<model>]`) and a
-   `⚠LEASE` marker; both silent/absent when not bridged.
+   `!LEASE` marker; both silent/absent when not bridged.
 2. **Bridged detection = env + home:** `ANTHROPIC_BASE_URL` non-empty AND the Wisp
    home dir exists (`WISP_HOME` honored). Env alone matches foreign proxies; a full
    HTTP probe was rejected (dead Bridge self-announces on first request anyway).

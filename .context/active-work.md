@@ -25,7 +25,7 @@ open candidates: backlog #68/#69, or a fresh `/preset init` idea.
     `hooks/session-start.js` (bridged sessions get announcement + live routing
     snapshot fail-soft + headless CLI cheat sheet + stale-lease warning; silent
     unbridged; all SessionStart sources) and `plugins/slot/statusline/wisp-statusline.js`
-    (`[WISP <family>→<model>]` live per refresh, `⚠LEASE` marker, `[WISP]` fallback,
+    (`[WISP <family>→<model>]` live per refresh, `!LEASE` marker, `[WISP]` fallback,
     absent unbridged) + README wiring docs; wisp-slot 1.1.0. Verified by an 8-case
     fixture matrix against a sandbox `WISP_HOME` + real statusline-wrapper e2e.
   - Machine-side (outside repo): personal `~/.claude/skills/slot/` retired to

@@ -15,7 +15,7 @@ tags: [context, pick-up]
 `main` (unpushed): `c7ca050` plugin SKILL.md sync (step-6 agent-label rule) ·
 `0a2e2d5` SessionStart hook (announcement + routing snapshot + CLI cheat sheet +
 stale-lease warning, silent unbridged) + statusline badge (`[WISP fable→<model>]`
-live, `⚠LEASE`, `[WISP]` fallback) + README + 1.1.0. Verified: 8-case fixture
+live, `!LEASE`, `[WISP]` fallback) + README + 1.1.0. Verified: 8-case fixture
 matrix on sandbox `WISP_HOME` + wrapper e2e. Machine wired: personal skill copy
 retired to `_deprecated/`, plugin installed from local directory marketplace,
 elucidate statusline wrapper runs the badge from the checkout. Vault + gotcha +
