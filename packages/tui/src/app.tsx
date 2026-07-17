@@ -62,6 +62,18 @@ const DIM = '#71717a';
 // into garbage; refusing to shrink means content clips cleanly at the bottom edge instead.
 const PANEL = { border: true, borderStyle: 'rounded', borderColor: '#52525b', titleColor: ACCENT, flexShrink: 0 } as const;
 
+// Native selects default to an opaque #1a1a1a fill when focused (plus #334455/yellow selection) —
+// an opaque slab in a terminal with a background image. Spread into every <select> so they match
+// the transparent hand-rolled WrapSelect rows: only the selected row gets a bar.
+const SELECT_COLORS = {
+  backgroundColor: 'transparent',
+  focusedBackgroundColor: 'transparent',
+  selectedBackgroundColor: '#27272a',
+  selectedTextColor: ACCENT,
+  descriptionColor: DIM,
+  selectedDescriptionColor: DIM,
+} as const;
+
 // ----------------------------------------- Narrow terminals ----------------------------------------- //
 
 // opentui's own wrapMode="wrap" overlays every row that follows the wrapped one (the garble the
@@ -778,6 +790,7 @@ export const App = () => {
               on common Windows fonts, smearing into the label); the highlight bar already marks the row */}
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(PROVIDERS.length * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
@@ -803,6 +816,7 @@ export const App = () => {
         <box {...PANEL} title={mode.provider.label} marginTop={1} flexDirection="column">
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(menuRows(mode.provider).length * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
@@ -829,6 +843,7 @@ export const App = () => {
         <box {...PANEL} title="Set key for…" marginTop={1} flexDirection="column">
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(keyedProviders().length * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
@@ -856,6 +871,7 @@ export const App = () => {
           {/* descriptions are empty here — hide them so each model is one row */}
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(mode.options.length, 14)}
             showDescription={false}
             showSelectionIndicator={false}
@@ -892,6 +908,7 @@ export const App = () => {
         <box {...PANEL} title={mode.action === 'signin' ? 'Sign in to…' : 'Sign out of…'} marginTop={1} flexDirection="column">
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(oauthProviders().length * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
@@ -966,6 +983,7 @@ export const App = () => {
               only closes — firing (or toggling!) a command from a help list would surprise. */}
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(SLASH_COMMANDS.length * 2, 12)}
             showSelectionIndicator={false}
             showScrollIndicator
@@ -1106,6 +1124,7 @@ export const App = () => {
           {/* "(current)" only when the row already targets THIS provider — two providers can list the same id */}
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(mode.options.length, 14)}
             showDescription={false}
             showSelectionIndicator={false}
@@ -1143,6 +1162,7 @@ export const App = () => {
         <box {...PANEL} title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
           <select
             focused
+            {...SELECT_COLORS}
             height={Math.min(EFFORT_LADDER.length * 2, 16)}
             showSelectionIndicator={false}
             showScrollIndicator
