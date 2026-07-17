@@ -9,31 +9,65 @@ tags: [context, pick-up]
 
 **Start:** read `.context/overview.md` + `.context/active-work.md`, then continue below.
 
-## What last session finished
+## Where you are
 
-**2.0.14 shipped.** Three commits on `main` (pushed, tag `v2.0.14`, release.yml
-green, `wisp-router@2.0.14` on npm): `52c878e` purple statusline badge (xterm 141
-≈ TUI accent `#a78bfa`; wisp-slot 1.1.2, plugin cache updated) · `153bfeb` Bridge
-screen recommends the wisp-slot plugin · `de70b3b` release prep + **new
-`packages/tui/CHANGELOG.md`** seeded 2.0.11–2.0.14. Verified: tsc, tui tests 13,
-span-baseline recaptured (32 Screens), sandboxed routing CLI + statusline fixture.
+**You are on branch `claude/context-rehydration-oargfe`, NOT `main`.** A remote
+session made one fix here (commit `f33785d`) that is pushed but **not merged and
+not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up). The
+installed `wisp-router`/`claude-wisp` binary does NOT have this fix yet.
 
-## Next task
+## What last session did — #111 cache-breakpoint follow-up
 
-**None queued.** Candidates: backlog #68/#69, or a fresh `/preset init` idea.
+**`f33785d` fix(core): spread cache breakpoints so fat tool turns don't re-bill.**
+Closes a residual hole in the shipped #111 fix (`e5ec476`).
+
+- **The hole:** #111 reconstructs two ephemeral `cache_control` breakpoints in
+  `buildAnthropicMessagesBody` (`packages/core/src/anthropic.ts`) — last system
+  block (covers tools+system) + the final message's last block. But Anthropic's
+  automatic cache lookback only reaches ~20 content blocks back from a marker.
+  Wisp collapses one Claude Code turn into a single message of many blocks, so a
+  heavy parallel-tool turn (>~20 blocks) overshoots the window → next turn can't
+  find the prior cache entry → re-bills the conversation prefix. Bounded (the
+  bigger tools+system cache still hit), not another 10x, but a real quota miss —
+  the original "ponytail" comment anticipated it.
+- **The fix:** walk backward from the end placing a marker every ~15 blocks,
+  spending the breakpoints left after system (4/request max → up to 3 on
+  messages). A short conversation never reaches the step, so it emits exactly
+  the one end-of-history marker — **byte-identical to the previous body**. Only
+  fat turns trigger the intermediate markers.
+- **Verified:** `bun run compile` clean, `bun run test` = 474 (added a fat-turn
+  regression: no gap >20 blocks, total breakpoints ≤4). No `packages/tui`
+  changes, so **no span-baseline recapture and no version bump were needed.**
+
+## Next task — ship it, then optional follow-ups
+
+1. **Review + merge:** review `git diff main` (two files:
+   `packages/core/src/anthropic.ts` + `anthropic.test.ts`), merge this branch to
+   `main`. Core-only change — **no span-baseline recapture, no package.json
+   bump.**
+2. **Release to reach the binary:** the fix only reaches the running
+   `claude-wisp` after a `v2.x` release (tag = `packages/tui/package.json`
+   version, `release.yml` publishes) + reinstall. A release DOES need a
+   `packages/tui/package.json` bump → THEN recapture span-baseline (`bun
+   scripts/span-baseline.tsx --update`) + update `packages/tui/CHANGELOG.md`.
+3. **Optional, un-done fidelity gaps** (fidelity, NOT quota — left for greenlight):
+   - **`is_error` passthrough** — the bridge drops `tool_result.is_error`.
+     Threads through the shared normalized `toolResults` shape (`catalog.ts` →
+     `bridgeAnthropic.ts` → `anthropic.ts`, ~4 files, both doors). Cheap-ish.
+   - **thinking / redacted_thinking blocks, `document`/PDF blocks, 1h TTL** —
+     left alone deliberately. Thinking-block preservation is a real tradeoff
+     (Wisp also routes to non-Anthropic providers); PDF is a feature, not a nick.
 
 ## Landmines
 
-- **Changelog split is now policy:** `v2.x` release prep updates
-  `packages/tui/CHANGELOG.md`; the vscode changelog is extension-only
-  ([[2026-07-17-wisp-router-gets-its-own-changelog]]).
-- Span baseline embeds the version string — any `packages/tui/package.json`
-  bump drifts all 32 Screens; recapture with `bun scripts/span-baseline.tsx
-  --update` as part of release prep.
-- `plugins/slot/**` edits need `claude plugin update wisp-slot@wisp-router`
-  (statusline badge exempt — wrapper runs from checkout).
-- Elucidate's badge is also purple — eyeball a bridged session; if the two
-  purples read the same, shift the wisp shade.
+- **This is a feature branch, against the solo-repo `main` habit.** The remote
+  session was pinned to this branch. Merge to `main` yourself when happy.
+- **Changelog split is policy:** `v2.x` release prep updates
+  `packages/tui/CHANGELOG.md`; the vscode changelog is extension-only.
+- Span baseline embeds the version string — any `packages/tui/package.json` bump
+  drifts all 32 Screens; recapture with `bun scripts/span-baseline.tsx --update`
+  as part of release prep. (Not needed to merge this fix — only if you release.)
+- `plugins/slot/**` edits need `claude plugin update wisp-slot@wisp-router`.
 - Tag must equal `packages/tui/package.json` version or release.yml refuses.
 
 ## Related

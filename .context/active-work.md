@@ -7,48 +7,56 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-17 by Fable 5 (2.0.14 chore-batch session)._
-_At commit: `de70b3b` on `main` (pushed; released tag `v2.0.14` = `de70b3b`)._
+_Last updated: 2026-07-17 by Claude (remote session, #111 cache follow-up)._
+_At commit: `f33785d` on branch `claude/context-rehydration-oargfe` (pushed,
+NOT merged). `main` is unchanged at `f1fe5d6`._
 
 ## Current focus
 
-**2.0.14 shipped (npm + GitHub release green).** Queue empty; open candidates:
-backlog #68/#69, or a fresh `/preset init` idea.
+**A #111 follow-up fix is parked on `claude/context-rehydration-oargfe`,
+awaiting local review + merge.** It closes the residual cache-breakpoint hole
+that still let heavy parallel-tool turns re-bill the conversation prefix. Not
+merged, not released — the running `claude-wisp` binary does not have it yet.
 
 ## State
 
-- **In flight:** nothing.
-- **Done this session (straight to main, solo-repo rule):**
-  - `52c878e` — purple statusline badge (cyan 87 → xterm 141, nearest to the TUI
-    accent `#a78bfa`); wisp-slot 1.1.2, plugin cache updated on this machine.
-  - `153bfeb` — Bridge screen recommends the wisp-slot plugin (dim hand-wrapped
-    nudge under the Claude Code lines, marketplace install line included).
-  - `de70b3b` — release prep 2.0.14 + **new `packages/tui/CHANGELOG.md`** seeded
-    with 2.0.11–2.0.14 (TUI releases were never changelogged; the vscode product
-    changelog stays extension-versioned, folds only ≤2.0.10 — see decision).
-  - Tag `v2.0.14` pushed; release.yml run 29568893110 green — `wisp-router@2.0.14`
-    live on npm, binaries + GitHub release up.
-- **Blocked:** None.
+- **In flight:** `f33785d` on this branch — review `git diff main`
+  (`packages/core/src/anthropic.ts` + `anthropic.test.ts`), merge to `main`.
+- **Done this session:**
+  - Rehydrated context, then audited the shipped #111 fix (`e5ec476`) end to
+    end. Verdict: the fix is correct and IS the core fix; the flagged residual
+    "20-block lookback" hole is real; the analysis's proposed one-leapfrog fix
+    was imprecise (doesn't close a single >20-block turn — intermediate markers
+    inside the fat turn do).
+  - `f33785d` — `buildAnthropicMessagesBody` now spreads up to 3 message-level
+    breakpoints (one every ~15 blocks, walking back from the end) so no gap
+    exceeds the ~20-block cache lookback. No-op for normal conversations
+    (byte-identical body); only fat parallel-tool turns trigger extras.
+  - Verified: `bun run compile` clean, `bun run test` = 474 (was 473; +1
+    fat-turn regression). No `packages/tui` touch → no span recapture, no bump.
+- **Blocked:** None. Merge/release is the human's call (solo-repo habit is
+  straight-to-`main`; this session was pinned to a branch instead).
 
 ## Pick up here
 
-See [[pick-up]]. Nothing queued — pick a backlog item or init a new idea.
+See [[pick-up]]. Ship path: review → merge to `main` (core-only, no recapture) →
+optional `v2.x` release to push the fix into the `claude-wisp` binary (that step
+DOES need a `packages/tui/package.json` bump + span recapture + changelog).
 
 ## Open questions
 
-- Elucidate's badge is also purple (badge row: caveman orange, elucidate purple,
-  ponytail pink) — if the two purples clash side by side, shift the wisp shade.
+- Do the optional fidelity gaps get fixed? `is_error` passthrough (threads the
+  shared normalized `toolResults` shape, ~4 files) is the cheapest; thinking /
+  PDF / 1h-TTL left alone deliberately. None are quota bugs.
+- Elucidate's badge is also purple — unrelated older open question, still open.
 
 ## Recent context
 
-- Verified this session: tsc clean, tui bun test 13 green, span-baseline
-  recaptured for 2.0.14 + the new Bridge rows (32 Screens match), sandboxed
-  `wisp routing`/`--json`, statusline fixture emits `\x1b[38;5;141m`.
-- `plugins/slot/**` edits still need `claude plugin update wisp-slot@wisp-router`
-  to reach the live plugin (statusline badge exempt — wrapper runs it from the
-  checkout). Done for 1.1.2.
-- Test suite totals: core vitest 473, tui bun test 13 (unchanged — this batch was
-  UI/docs/plugin only).
+- The shipped #111 fix (`e5ec476`) already killed the big 5–10x burn (dropped
+  `cache_control`). This follow-up only addresses the smaller, bounded residual
+  leak on big tool-batch turns.
+- Test suite totals: core vitest **474**, tui bun test 13 (unchanged this
+  session — the change is core-only).
 
 ## Related
 
