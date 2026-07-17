@@ -4,6 +4,7 @@
  * Depends on:
  *   - react: WrapSelect's selection/window state.
  *   - @opentui/react: text/box intrinsics + useKeyboard for the select's Up/Down/Enter.
+ *   - @opentui/core (types): MouseEvent + SelectRenderable for the scrollbar-drag handlers.
  *   - ./theme: ACCENT/DIM — the widgets follow the shared look.
  *
  * Data shapes:
@@ -15,7 +16,44 @@
 
 import { useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
+import type { MouseEvent, SelectRenderable } from '@opentui/core';
 import { ACCENT, DIM } from './theme';
+
+// ----------------------------------------- Select scrollbar drag ----------------------------------------- //
+
+// opentui's SelectRenderable is keyboard-only: showScrollIndicator paints a thumb glyph in the
+// last column but wires no mouse handling at all. These handlers make that column live — press or
+// drag on it maps the row back to a selection index (setSelectedIndex scrolls to keep it visible,
+// so the list follows the thumb). Spread into every native <select> alongside SELECT_COLORS.
+let scrollDragTarget: SelectRenderable | null = null;
+
+const dragToIndex = (sel: SelectRenderable, e: MouseEvent) => {
+  // Inverse of the paint math: thumb row = 1 + floor(percent * (height - 2)).
+  const track = Math.max(1, sel.height - 2);
+  const percent = Math.min(1, Math.max(0, (e.y - sel.y - 1) / track));
+  sel.setSelectedIndex(Math.round(percent * (sel.options.length - 1)));
+};
+
+export const SELECT_MOUSE = {
+  onMouseDown: (e: MouseEvent) => {
+    const sel = e.target as SelectRenderable | null;
+    if (!sel || e.x - sel.x !== sel.width - 1) return;
+    // Mirror the paint condition — only react where a thumb is actually drawn.
+    if (!sel.showScrollIndicator || sel.options.length <= (sel as any).maxVisibleItems) return;
+    scrollDragTarget = sel;
+    dragToIndex(sel, e);
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  onMouseDrag: (e: MouseEvent) => {
+    if (!scrollDragTarget || e.target !== scrollDragTarget) return;
+    dragToIndex(scrollDragTarget, e);
+    e.stopPropagation();
+  },
+  onMouseUp: () => {
+    scrollDragTarget = null;
+  },
+} as const;
 
 // ----------------------------------------- Submit adapter ----------------------------------------- //
 

@@ -16,7 +16,7 @@
 
 import { SLASH_COMMANDS } from '@wisp/core';
 import { ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
-import { wrapWords } from './widgets';
+import { wrapWords, SELECT_MOUSE } from './widgets';
 
 // ----------------------------------------- /bridge ----------------------------------------- //
 
@@ -71,6 +71,7 @@ export const HelpScreen = ({ onDone }: { onDone: () => void }) => (
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(SLASH_COMMANDS.length * 2, 12)}
       showSelectionIndicator={false}
       showScrollIndicator

@@ -28,7 +28,7 @@ import {
 } from '@wisp/core';
 import { home, activeProvider } from './store';
 import { PANEL, DIM, SELECT_COLORS } from './theme';
-import { onSubmitText } from './widgets';
+import { onSubmitText, SELECT_MOUSE } from './widgets';
 
 // ----------------------------------------- Key + model storage ----------------------------------------- //
 
@@ -131,6 +131,7 @@ export const ProvidersScreen = ({ onPick }: { onPick: (p: Provider) => void }) =
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(PROVIDERS.length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator
@@ -165,6 +166,7 @@ export const ProviderMenuScreen = ({ provider, onDone, onSetKey, onSignIn, onSig
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(menuRows(provider).length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator
@@ -192,6 +194,7 @@ export const KeyPickScreen = ({ onPick }: { onPick: (p: Provider) => void }) => 
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(keyedProviders().length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator
@@ -227,6 +230,7 @@ export const ModelPickScreen = ({ provider, options, onDone }: {
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(options.length, 14)}
       showDescription={false}
       showSelectionIndicator={false}
@@ -273,6 +277,7 @@ export const OauthPickScreen = ({ action, onSignIn, onSignOut }: {
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(oauthProviders().length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator
@@ -297,6 +302,7 @@ export const EffortPickScreen = ({ onDone }: { onDone: (message?: string) => voi
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(EFFORT_LADDER.length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator

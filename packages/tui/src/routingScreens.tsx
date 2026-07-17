@@ -26,7 +26,7 @@ import {
 import { home } from './store';
 import type { RouteRow } from './modes';
 import { PANEL, DIM, SELECT_COLORS } from './theme';
-import { wrapWords, WrapSelect, onSubmitText } from './widgets';
+import { wrapWords, WrapSelect, onSubmitText, SELECT_MOUSE } from './widgets';
 
 // ----------------------------------------- Row helpers ----------------------------------------- //
 
@@ -219,6 +219,7 @@ export const RouteModelPickScreen = ({ row, provider, options, onApply }: {
     <select
       focused
       {...SELECT_COLORS}
+      {...SELECT_MOUSE}
       height={Math.min(options.length, 14)}
       showDescription={false}
       showSelectionIndicator={false}
