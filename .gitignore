@@ -3,3 +3,8 @@ out/
 dist/
 .obsidian/
 *.vsix
+
+# Claude Code machine-local state — root session/loop files + per-package settings twins
+# (packages/*/.claude/skills stay tracked; only settings.json is per-machine)
+/.claude/
+**/.claude/settings.json
