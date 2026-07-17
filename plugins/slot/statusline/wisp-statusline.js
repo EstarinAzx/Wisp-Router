@@ -44,5 +44,6 @@ try {
 const leasePath = path.join(os.homedir(), '.claude', 'slot', 'lease.json');
 if (fs.existsSync(leasePath)) badge = badge.replace(/\]$/, ' !LEASE]');
 
-// Wisp cyan — joins the colored badge row (caveman orange, elucidate purple, ponytail pink).
-process.stdout.write(`\x1b[38;5;87m${badge}\x1b[0m`);
+// Wisp purple — the signature accent (#a78bfa in the TUI theme; xterm 141 is the nearest
+// 256-color). Joins the colored badge row (caveman orange, elucidate purple, ponytail pink).
+process.stdout.write(`\x1b[38;5;141m${badge}\x1b[0m`);
