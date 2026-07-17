@@ -1,11 +1,23 @@
 ---
 name: slot
-description: Use when a bridged Claude Code session needs a subagent on a Wisp Target the Agent tool cannot name (e.g. "run a subagent on gpt-5.6-sol"), when temporarily rebinding a family route for an agent, or when a stale ~/.claude/slot/lease.json blocks a rebind.
+description: Use when a bridged Claude Code session needs a subagent on a Wisp Target the Agent tool cannot name (e.g. "run a subagent on gpt-5.6-sol"), when temporarily rebinding a family route for an agent, when the user asks for a plain family-route change (fast path — one command, no checklist), or when a stale ~/.claude/slot/lease.json blocks a rebind.
 ---
 
 # Slot — rebind, spawn, restore
 
 The Agent tool only accepts Claude family names (`haiku`, `sonnet`, `opus`, `fable`). The Wisp Bridge resolves those names through the Routing map on every request, so temporarily rebinding one family — the **Slot** — lets a subagent run on any Wisp Target. `wisp routing` provides the primitives; this skill is the safe procedure.
+
+## Triage first — not every routing ask is a Slot
+
+**The user asks only to change a route** ("route luna to haiku", "bind fable to grok", "point haiku at kimi") **and no subagent is to run on it** → that is a plain, persistent routing edit. Do this and stop:
+
+```
+wisp routing set <family> <providerId>/<model>
+```
+
+Surface any `warning:` line, re-read `wisp routing` to confirm, tell the user the prior value so they can revert. **No lease, no checklist, no restore** — the lease machinery exists to guarantee a *temporary* binding gets undone; a deliberate route change must persist.
+
+The full procedure below applies only when a **subagent must run on a Target through a temporarily rebound family** — that is what needs snapshot/lease/hold/restore.
 
 ## The Iron Rule
 
@@ -82,6 +94,7 @@ Use `"prior": "unset"` when the family has no route.
 | "The lease is stale and its process is dead — overwrite" | The lease is the only recovery record. Recover explicitly first. |
 | "The warning is advisory and the deadline is now" | The user decides, before spawn — not you. |
 | "Restore anyway, cleanup is my job" | A route someone else changed is newer state. Report, don't clobber. |
+| "User asked to rebind a family — run the full dance" | No subagent to run = plain routing edit. One `set`, no lease, no checklist. |
 
 ## Red flags — STOP
 

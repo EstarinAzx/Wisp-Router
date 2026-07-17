@@ -39,9 +39,10 @@ try {
   }
 } catch {}
 
-// Lease marker rides on any badge form — visibility must not depend on the model match.
+// Lease marker rides on any badge form — visibility must not depend on the model
+// match. ASCII on purpose: wide ⚠ glyphs overlap the next cell in some terminals.
 const leasePath = path.join(os.homedir(), '.claude', 'slot', 'lease.json');
-if (fs.existsSync(leasePath)) badge = badge.replace(/\]$/, ' ⚠LEASE]');
+if (fs.existsSync(leasePath)) badge = badge.replace(/\]$/, ' !LEASE]');
 
 // Wisp cyan — joins the colored badge row (caveman orange, elucidate purple, ponytail pink).
 process.stdout.write(`\x1b[38;5;87m${badge}\x1b[0m`);
