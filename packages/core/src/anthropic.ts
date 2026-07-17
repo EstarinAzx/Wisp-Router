@@ -209,7 +209,10 @@ export const buildAnthropicMessagesBody = (args: {
   // marker caches the tool definitions AND the system prompt together (the big stable prefix). Without a
   // marker a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage) — the
   // Bridge flattens away the markers Claude Code sent, so we reconstruct our own here.
-  const CACHE = { cache_control: { type: 'ephemeral' as const } };
+  // ttl:'1h' matches native Claude Code: the prefix survives idle gaps (a user stepping away mid-session)
+  // instead of expiring after the 5-minute default and re-writing on return. 1h writes cost 2x vs 1.25x,
+  // but an interactive session reads the prefix many times over, so the extra write pays for itself.
+  const CACHE = { cache_control: { type: 'ephemeral' as const, ttl: '1h' as const } };
   system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
 
   // A bare-string final turn can't carry a marker — expand it to a single text block (earlier plain turns

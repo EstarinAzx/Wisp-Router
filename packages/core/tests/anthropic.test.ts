@@ -176,9 +176,9 @@ describe('buildAnthropicMessagesBody', () => {
       max_tokens: 16_000,
       system: [
         { type: 'text', text: anthropicAttribution('edit this', '0.19.0') },
-        { type: 'text', text: 'rules', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'rules', cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral' } }] }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral', ttl: '1h' } }] }],
     });
   });
 
@@ -189,10 +189,10 @@ describe('buildAnthropicMessagesBody', () => {
       model: 'claude-sonnet-4-6', maxTokens: 8_000, version: '0.19.0',
       messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }],
     });
-    expect(body.system).toEqual([{ type: 'text', text: anthropicAttribution('hi', '0.19.0'), cache_control: { type: 'ephemeral' } }]);
+    expect(body.system).toEqual([{ type: 'text', text: anthropicAttribution('hi', '0.19.0'), cache_control: { type: 'ephemeral', ttl: '1h' } }]);
     expect(body.messages).toEqual([
       { role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' },
-      { role: 'user', content: [{ type: 'text', text: 'more', cache_control: { type: 'ephemeral' } }] },
+      { role: 'user', content: [{ type: 'text', text: 'more', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
     ]);
   });
 
@@ -208,7 +208,7 @@ describe('buildAnthropicMessagesBody', () => {
         model: 'm', maxTokens: 1, version: 'v', tools,
         messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
       }) as any;
-      expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+      expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
       expect(body.system[0].cache_control).toBeUndefined();
       expect(body.tools).toEqual(tools); // no cache_control on tools — the system breakpoint caches them
     });
@@ -219,7 +219,7 @@ describe('buildAnthropicMessagesBody', () => {
       ] }) as any;
       expect(body.messages[0].content).toBe('a');
       expect(body.messages[1].content).toBe('b');
-      expect(body.messages[2].content).toEqual([{ type: 'text', text: 'c', cache_control: { type: 'ephemeral' } }]);
+      expect(body.messages[2].content).toEqual([{ type: 'text', text: 'c', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
     });
 
     it('annotates the last block of an already-block-shaped final turn', () => {
@@ -228,7 +228,7 @@ describe('buildAnthropicMessagesBody', () => {
       ] }) as any;
       const blocks = body.messages[0].content;
       expect(blocks[0].cache_control).toBeUndefined();
-      expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } });
+      expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral', ttl: '1h' } });
     });
 
     // A single heavy parallel-tool turn collapses into one message of many blocks. With only the final
@@ -241,7 +241,7 @@ describe('buildAnthropicMessagesBody', () => {
       ] }) as any;
       const blocks = body.messages[0].content as any[];
       const marked = blocks.flatMap((b, i) => (b.cache_control ? [i] : []));
-      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral' }); // the growing edge is always marked
+      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' }); // the growing edge is always marked
       expect(marked.length).toBeLessThanOrEqual(3); // 4/request cap − 1 for the system block
       // Every gap between consecutive markers — and from the first marker back to the covered tail — is
       // within the lookback window.
@@ -561,7 +561,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       role: 'assistant',
       content: [
         { type: 'text', text: 'sure' },
-        { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: { path: 'a.ts' }, cache_control: { type: 'ephemeral' } },
+        { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: { path: 'a.ts' }, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
     });
   });
@@ -572,7 +572,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: '', toolCalls: [{ id: 'toolu_1', name: 'x', argsJson: '{}' }] },
     ] }) as any;
-    expect(body.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'x', input: {}, cache_control: { type: 'ephemeral' } }] });
+    expect(body.messages[1]).toEqual({ role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'x', input: {}, cache_control: { type: 'ephemeral', ttl: '1h' } }] });
   });
 
   // A tool result rides on a user turn as a tool_result block, which must come FIRST (before any text).
@@ -584,7 +584,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       role: 'user',
       content: [
         { type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' },
-        { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
     });
   });
@@ -620,7 +620,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
     expect(body.messages).toEqual([
       { role: 'user', content: 'read a.ts' },
       { role: 'assistant', content: [{ type: 'text', text: 'sure' }, { type: 'tool_use', id: 'toolu_1', name: 'readFile', input: {} }] },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' }, { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' }, { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral', ttl: '1h' } }] },
     ]);
   });
 
@@ -640,7 +640,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       content: [
         { type: 'text', text: 'x' },
         { type: 'tool_use', id: 'toolu_a', name: 'a', input: { p: 1 } },
-        { type: 'tool_use', id: 'toolu_b', name: 'b', input: { q: 2 }, cache_control: { type: 'ephemeral' } },
+        { type: 'tool_use', id: 'toolu_b', name: 'b', input: { q: 2 }, cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
     });
   });
@@ -657,7 +657,7 @@ describe('buildAnthropicMessagesBody — images', () => {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
-        { type: 'text', text: 'do u see this image?', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'do u see this image?', cache_control: { type: 'ephemeral', ttl: '1h' } },
       ],
     });
   });
@@ -669,7 +669,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     ] }) as any;
     expect(body.messages[0]).toEqual({
       role: 'user',
-      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' }, cache_control: { type: 'ephemeral' } }],
+      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' }, cache_control: { type: 'ephemeral', ttl: '1h' } }],
     });
   });
 
@@ -681,7 +681,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     expect(body.messages[0].content).toEqual([
       { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
-      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral', ttl: '1h' } },
     ]);
   });
 });
