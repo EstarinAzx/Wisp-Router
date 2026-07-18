@@ -55,6 +55,24 @@ describe('buildAnthropicMessageResponse', () => {
     expect(res.content).toEqual([{ type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } }]);
     expect(res.stop_reason).toBe('tool_use');
   });
+
+  // Thinking passthrough: thinking deltas assemble into one signed thinking block, a redacted block rides
+  // whole, and neither disturbs the text merge or stop_reason.
+  it('assembles thinking deltas + signature into a thinking block ahead of the text', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'thinking', text: 'let me' }, { type: 'thinking', text: ' see' },
+      { type: 'thinking_signature', signature: 'sig-1' },
+      { type: 'redacted_thinking', data: 'opaque' },
+      { type: 'text', text: 'Hi' },
+    ];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([
+      { type: 'thinking', thinking: 'let me see', signature: 'sig-1' },
+      { type: 'redacted_thinking', data: 'opaque' },
+      { type: 'text', text: 'Hi' },
+    ]);
+    expect(res.stop_reason).toBe('end_turn');
+  });
 });
 
 describe('parseAnthropicMessagesRequest', () => {
@@ -68,6 +86,38 @@ describe('parseAnthropicMessagesRequest', () => {
   it('maps an assistant text message to an assistant turn', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'assistant', content: 'sure' }] });
     expect(parsed.turns).toEqual([{ role: 'assistant', text: 'sure', toolCalls: [], toolResults: [] }]);
+  });
+
+  // Thinking passthrough: an assistant turn carrying a thinking block keeps its ORIGINAL content array as
+  // rawContent — the byte-for-byte replay source for the Anthropic backend (signatures + interleaved order
+  // survive verbatim). The normalized fields still extract for every other consumer.
+  it('keeps the original content array as rawContent on a thinking-bearing assistant turn', () => {
+    const blocks = [
+      { type: 'thinking', thinking: 'let me see', signature: 'sig-abc' },
+      { type: 'text', text: 'answer' },
+      { type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } },
+    ];
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'assistant', content: blocks as never }] });
+    expect(parsed.turns[0].rawContent).toEqual(blocks);
+    expect(parsed.turns[0].text).toBe('answer');
+    expect(parsed.turns[0].toolCalls).toEqual([{ id: 'toolu_1', name: 'read', argsJson: '{"path":"a.ts"}' }]);
+  });
+
+  // redacted_thinking is the same sidecar case — an opaque block that must replay verbatim.
+  it('keeps rawContent when the assistant turn carries a redacted_thinking block', () => {
+    const blocks = [{ type: 'redacted_thinking', data: 'opaque-bytes' }, { type: 'text', text: 'hi' }];
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'assistant', content: blocks as never }] });
+    expect(parsed.turns[0].rawContent).toEqual(blocks);
+    expect(parsed.turns[0].text).toBe('hi');
+  });
+
+  // No thinking → no sidecar: every non-thinking turn keeps today's exact shape (zero behavior change).
+  it('leaves rawContent absent on an assistant turn without thinking blocks', () => {
+    const parsed = parseAnthropicMessagesRequest({
+      model: 'm',
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'x' }, { type: 'tool_use', id: 't1', name: 'read', input: {} }] }],
+    });
+    expect(parsed.turns[0].rawContent).toBeUndefined();
   });
 
   // stream defaults to false when absent (downstream reads it like the OpenAI door does).
@@ -343,6 +393,51 @@ describe('buildAnthropicSse', () => {
     expect(f.map((x) => x.event)).toEqual([
       'message_start', 'ping', 'content_block_start', 'content_block_stop', 'message_delta', 'message_stop',
     ]);
+  });
+
+  // Thinking passthrough: a thinking block opens, streams thinking_delta fragments, closes on its
+  // signature_delta — then the text block claims the next index. stop_reason stays end_turn.
+  it('emits a signed thinking block ahead of the text block', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'thinking', text: 'let me' },
+      { type: 'thinking', text: ' see' },
+      { type: 'thinking_signature', signature: 'sig-1' },
+      { type: 'text', text: 'Hi' },
+    ];
+    const f = frames(buildAnthropicSse(events, meta));
+    expect(f.map((x) => x.event)).toEqual([
+      'message_start', 'ping',
+      'content_block_start', 'content_block_delta', 'content_block_delta', 'content_block_delta', 'content_block_stop',
+      'content_block_start', 'content_block_delta', 'content_block_stop',
+      'message_delta', 'message_stop',
+    ]);
+    expect(f[2].data).toMatchObject({ index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } });
+    expect(f[3].data.delta).toEqual({ type: 'thinking_delta', thinking: 'let me' });
+    expect(f[5].data.delta).toEqual({ type: 'signature_delta', signature: 'sig-1' });
+    expect(f[7].data).toMatchObject({ index: 1, content_block: { type: 'text', text: '' } });
+    expect(f.at(-2)!.data.delta.stop_reason).toBe('end_turn');
+  });
+
+  // Interleaved thinking keeps PER-BLOCK signatures: a signature closes its block, the next thinking delta
+  // claims a new index. redacted_thinking rides whole — start + stop, no deltas.
+  it('starts a new block per signed thinking segment and frames redacted_thinking whole', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'thinking', text: 'a' },
+      { type: 'thinking_signature', signature: 's1' },
+      { type: 'thinking', text: 'b' },
+      { type: 'thinking_signature', signature: 's2' },
+      { type: 'redacted_thinking', data: 'opaque' },
+    ];
+    const f = frames(buildAnthropicSse(events, meta));
+    expect(f.map((x) => x.event)).toEqual([
+      'message_start', 'ping',
+      'content_block_start', 'content_block_delta', 'content_block_delta', 'content_block_stop',
+      'content_block_start', 'content_block_delta', 'content_block_delta', 'content_block_stop',
+      'content_block_start', 'content_block_stop',
+      'message_delta', 'message_stop',
+    ]);
+    expect(f[6].data).toMatchObject({ index: 1, content_block: { type: 'thinking' } });
+    expect(f[10].data).toMatchObject({ index: 2, content_block: { type: 'redacted_thinking', data: 'opaque' } });
   });
 
   // An empty stream still frames a well-formed message: start + ping + end_turn delta + stop, no blocks.

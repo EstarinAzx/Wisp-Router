@@ -199,6 +199,8 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       try {
         for await (const ev of anthropicStream({ creds, baseUrl, model: modelId, messages: toAnthropicMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
+          // Thinking passthrough events have no vscode chat part — dropped here (Anthropic-door-only fidelity).
+          if (ev.type !== 'toolCall') continue;
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
           let input: object = {};
           try { input = ev.call.argsJson ? JSON.parse(ev.call.argsJson) : {}; } catch { /* keep {} */ }

@@ -119,7 +119,13 @@ export const parseOpenAiChatRequest = (body: OAChatRequest): BridgeChatRequest =
 // maps each Provider's stream onto this union, then this module turns it into OpenAI wire chunks.
 export type BridgeStreamEvent =
   | { type: 'text'; text: string }
-  | { type: 'tool_call'; call: AssembledToolCall };
+  | { type: 'tool_call'; call: AssembledToolCall }
+  // Thinking passthrough: only the Anthropic upstream produces these, and only the Anthropic door renders
+  // them (its SSE encoder + non-streaming reply). The OpenAI door has no thinking vocabulary — its paths
+  // never receive them (the Anthropic provider on that door drops thinking before mapping to chunks).
+  | { type: 'thinking'; text: string }
+  | { type: 'thinking_signature'; signature: string }
+  | { type: 'redacted_thinking'; data: string };
 
 // The terminal finish_reason: 'tool_calls' when the turn emitted any tool call (the client must run them),
 // else 'stop'. Mid-stream chunks carry finish_reason null until the terminal chunk.

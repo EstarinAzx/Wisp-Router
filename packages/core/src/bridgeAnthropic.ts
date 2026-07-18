@@ -26,7 +26,9 @@ type AntToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unkn
 type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[]; is_error?: boolean };
 type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 type AntDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
-type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock | AntDocumentBlock;
+type AntThinkingBlock = { type: 'thinking'; thinking: string; signature?: string };
+type AntRedactedThinkingBlock = { type: 'redacted_thinking'; data: string };
+type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock | AntDocumentBlock | AntThinkingBlock | AntRedactedThinkingBlock;
 type AntMessage = { role: 'user' | 'assistant' | 'system'; content: string | AntContentBlock[] };
 type AntTool = { name: string; description?: string; input_schema?: object };
 type AntToolChoice = { type: 'auto' } | { type: 'any' } | { type: 'none' } | { type: 'tool'; name: string };
@@ -136,11 +138,16 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
       // Assistant blocks: text concatenates, tool_use → toolCalls with input stringified back to argsJson.
       let text = '';
       const toolCalls: { id: string; name: string; argsJson: string }[] = [];
+      let hasThinking = false;
       for (const b of blocks) {
         if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
         else if (b?.type === 'tool_use') toolCalls.push({ id: b.id, name: b.name, argsJson: JSON.stringify(b.input ?? {}) });
+        else if (b?.type === 'thinking' || b?.type === 'redacted_thinking') hasThinking = true;
       }
-      turns.push({ role: 'assistant', text, toolCalls, toolResults: [] });
+      // A thinking-bearing turn keeps its ORIGINAL block array as the byte-for-byte replay sidecar —
+      // Anthropic wants thinking blocks back verbatim (signatures + interleaved order), which the
+      // normalized fields can't reconstruct. Non-thinking turns stay sidecar-free (today's exact shape).
+      turns.push({ role: 'assistant', text, toolCalls, toolResults: [], ...(hasThinking ? { rawContent: blocks } : {}) });
     } else {
       const { text, toolResults, images, documents } = splitUserBlocks(blocks);
       turns.push({ role: 'user', text, toolCalls: [], toolResults, ...(images.length ? { images } : {}), ...(documents.length ? { documents } : {}) });
@@ -185,7 +192,7 @@ const frame = (event: string, data: unknown): string => `event: ${event}\ndata: 
 // Each method returns the wire frames to write; the HTTP slice concatenates them onto the socket.
 export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
   let nextIndex = 0;              // the index the next content block will claim
-  let openKind: 'text' | 'tool' | null = null;   // the currently-open block's kind, or none
+  let openKind: 'text' | 'tool' | 'thinking' | null = null;   // the currently-open block's kind, or none
   let openIndex = 0;             // the currently-open block's index
   let sawTool = false;           // any tool call emitted → stop_reason is tool_use, not end_turn
 
@@ -210,6 +217,31 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
     // tool call closes any open block, opens its own tool_use block, streams the whole args as one
     // input_json_delta (Wisp folds tool calls whole — no fragments), then closes immediately.
     push: (ev: BridgeStreamEvent): string => {
+      // Thinking passthrough: a thinking block opens (once) and streams thinking_delta fragments; its
+      // signature_delta is the last delta and CLOSES the block, so the next thinking delta claims a fresh
+      // index (per-block signatures — interleaved thinking). The block-start shape matches the real
+      // Anthropic wire: { type:'thinking', thinking:'', signature:'' }.
+      if (ev.type === 'thinking') {
+        let s = '';
+        if (openKind !== 'thinking') {
+          s += closeOpen();
+          openIndex = nextIndex++;
+          openKind = 'thinking';
+          s += frame('content_block_start', { type: 'content_block_start', index: openIndex, content_block: { type: 'thinking', thinking: '', signature: '' } });
+        }
+        return s + frame('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'thinking_delta', thinking: ev.text } });
+      }
+      if (ev.type === 'thinking_signature') {
+        if (openKind !== 'thinking') return ''; // a signature with no open thinking block has nowhere to land
+        return frame('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'signature_delta', signature: ev.signature } }) + closeOpen();
+      }
+      // redacted_thinking arrives whole — one start frame carrying the opaque data, closed immediately.
+      if (ev.type === 'redacted_thinking') {
+        let s = closeOpen();
+        const idx = nextIndex++;
+        s += frame('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'redacted_thinking', data: ev.data } });
+        return s + frame('content_block_stop', { type: 'content_block_stop', index: idx });
+      }
       if (ev.type === 'text') {
         let s = '';
         if (openKind !== 'text') {
@@ -252,7 +284,11 @@ export const buildAnthropicSse = (events: BridgeStreamEvent[], meta: AnthropicSs
 
 // One block of a non-streaming reply: assembled text, or a completed tool_use whose args are parsed back to
 // an object (the streaming path streams args as a raw partial_json string; the buffered object wants input).
-type AntReplyBlock = AntTextBlock | { type: 'tool_use'; id: string; name: string; input: unknown };
+type AntReplyBlock =
+  | AntTextBlock
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'thinking'; thinking: string; signature: string }
+  | { type: 'redacted_thinking'; data: string };
 
 // The non-streaming /v1/messages reply — the JSON Messages object Claude Code parses when it did NOT ask to
 // stream. Its `/model` validation probe is exactly this: a stream:false request whose body it reads
@@ -280,6 +316,17 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
       const last = content[content.length - 1];
       if (last && last.type === 'text') last.text += ev.text;
       else content.push({ type: 'text', text: ev.text });
+    } else if (ev.type === 'thinking') {
+      // Thinking deltas merge into the open (unsigned) thinking block; a signed block is closed, so the
+      // next delta starts a new one — the buffered mirror of the encoder's per-block-signature rule.
+      const last = content[content.length - 1];
+      if (last && last.type === 'thinking' && !last.signature) last.thinking += ev.text;
+      else content.push({ type: 'thinking', thinking: ev.text, signature: '' });
+    } else if (ev.type === 'thinking_signature') {
+      const last = content[content.length - 1];
+      if (last && last.type === 'thinking') last.signature = ev.signature;
+    } else if (ev.type === 'redacted_thinking') {
+      content.push({ type: 'redacted_thinking', data: ev.data });
     } else {
       sawTool = true;
       let input: unknown = {};

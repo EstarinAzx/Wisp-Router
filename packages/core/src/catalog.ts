@@ -350,6 +350,12 @@ export type NormalizedTurn = {
   // documents carries base64 PDF blocks through the Anthropic door (the only backend that accepts them);
   // the other doors leave the field unread, so a PDF routed to Codex/xAI is still dropped.
   documents?: { mimeType: string; dataBase64: string }[];
+  // rawContent is the Anthropic door's byte-for-byte sidecar: the ORIGINAL content block array of an
+  // assistant turn that carried thinking/redacted_thinking blocks. Anthropic requires those blocks back
+  // verbatim (signatures + interleaved order), which the normalized fields above cannot reconstruct — so
+  // the Anthropic body builder replays this array as-is. Every other backend leaves the field unread, so
+  // thinking is dropped there by construction.
+  rawContent?: unknown[];
 };
 
 // One OpenAI message-content part for a multimodal (vision) user message.

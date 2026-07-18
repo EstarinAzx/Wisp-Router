@@ -23,7 +23,14 @@ type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: str
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
-export type AnthropicStreamEvent = { type: 'text'; value: string } | { type: 'toolCall'; call: AssembledToolCall };
+export type AnthropicStreamEvent =
+  | { type: 'text'; value: string }
+  | { type: 'toolCall'; call: AssembledToolCall }
+  // Thinking passthrough: thinking/signature deltas and whole redacted blocks, forwarded live in stream
+  // order so the Anthropic door can replay them to the client verbatim. Non-Anthropic consumers ignore them.
+  | { type: 'thinking'; value: string }
+  | { type: 'thinkingSignature'; value: string }
+  | { type: 'redactedThinking'; data: string };
 
 // Inquire is non-streaming (spinner → diff): a bounded 16K output keeps the single request under the fetch
 // timeout ceiling while leaving ample room for the edit blocks. The STREAMING path deliberately does NOT
@@ -119,6 +126,7 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   const res = await anthropicMessagesRequest({ ...args, stream: true, maxTokens: anthropicModelCaps(args.model).maxOutput });
   if (!res.body) return;
   let sawDelta = false;                     // any answer text arrived (tool-only turns count via toolCalls below)
+  let sawThinking = false;                  // any thinking/redacted block arrived — delivered content too
   let sawTerminal = false;                  // a message_delta / message_stop actually closed the stream
   let stopReason: string | undefined;       // message_delta's stop_reason — the only place truncation shows
   const toolEvents = [];
@@ -128,6 +136,18 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     if (ev.event === 'error') throw new Error(ev.data?.error?.message ?? 'Anthropic response failed');
     const text = anthropicTextDelta(ev);
     if (text) { sawDelta = true; yield { type: 'text', value: text }; continue; }
+    // Thinking passthrough: thinking deltas, the closing signature, and whole redacted blocks forward LIVE
+    // in stream order (they must reach the client to be replayed byte-for-byte next turn). Thinking counts
+    // as delivered content — a thinking-only turn is a real turn now, not the #87 empty-envelope throw.
+    if (ev.event === 'content_block_delta' && ev.data?.delta?.type === 'thinking_delta' && typeof ev.data.delta.thinking === 'string') {
+      sawThinking = true; yield { type: 'thinking', value: ev.data.delta.thinking }; continue;
+    }
+    if (ev.event === 'content_block_delta' && ev.data?.delta?.type === 'signature_delta' && typeof ev.data.delta.signature === 'string') {
+      yield { type: 'thinkingSignature', value: ev.data.delta.signature }; continue;
+    }
+    if (ev.event === 'content_block_start' && ev.data?.content_block?.type === 'redacted_thinking' && typeof ev.data.content_block.data === 'string') {
+      sawThinking = true; yield { type: 'redactedThinking', data: ev.data.content_block.data }; continue;
+    }
     // tool_use blocks arrive in fragments — collect the relevant events, fold them after the stream ends.
     if (ev.event === 'content_block_start' || ev.event === 'content_block_delta') { toolEvents.push(ev); continue; }
     // The terminal frames carry no answer text but DO carry the stop_reason (truncation) and prove a clean close.
@@ -140,7 +160,7 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   }
   const toolCalls = reduceAnthropicToolCalls(toolEvents);
   for (const call of toolCalls) yield { type: 'toolCall', call };
-  const delivered = sawDelta || toolCalls.length > 0;
+  const delivered = sawDelta || sawThinking || toolCalls.length > 0;
   // A truncation reason is always worth surfacing — it explains an empty or cut-short turn; the marker also
   // makes the envelope non-empty, so it stands in for a content-less turn without needing to throw.
   const truncation = anthropicTruncationReason(stopReason);

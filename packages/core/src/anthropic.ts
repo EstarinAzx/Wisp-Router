@@ -115,6 +115,9 @@ export type AnthropicMessage = {
   toolResults?: { callId: string; content: string; isError?: boolean }[];
   images?: { mimeType: string; dataBase64: string }[];
   documents?: { mimeType: string; dataBase64: string }[];
+  // The Anthropic door's byte-for-byte sidecar (see NormalizedTurn.rawContent): the original content block
+  // array of a thinking-bearing assistant turn, replayed verbatim by the body builder when thinking is on.
+  rawContent?: unknown[];
 };
 
 // An Anthropic Messages tool definition. Unlike Codex's strict Responses tools, Anthropic accepts a plain
@@ -186,8 +189,16 @@ export const buildAnthropicMessagesBody = (args: {
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
   type BuiltTurn = { role: 'user' | 'assistant'; content: string | unknown[] };
+  // Computed once, up front: the replay decision below and the body spread at the bottom must agree —
+  // replaying thinking blocks into a thinking-off request is a 400, same as dropping them from a
+  // thinking-on tool continuation.
+  const thinkingEffort = anthropicThinkingEffort(args.model, args.effort);
   const messages: BuiltTurn[] = convo.map((m) => {
     if (m.role === 'assistant') {
+      // Thinking passthrough: a turn with the door's byte-for-byte sidecar replays it VERBATIM when this
+      // body enables thinking — signatures + interleaved order intact. Thinking off → sidecar skipped,
+      // normalized rebuild below (thinking dropped, matching the pre-passthrough behavior).
+      if (m.rawContent?.length && thinkingEffort.thinking) return { role: 'assistant' as const, content: m.rawContent };
       // A plain text turn stays a bare string (the #29 shape); only a tool-call turn expands to blocks.
       if (!m.toolCalls?.length) return { role: 'assistant' as const, content: m.content };
       const blocks: unknown[] = [];
@@ -238,8 +249,14 @@ export const buildAnthropicMessagesBody = (args: {
   // the nearest markable block passed since the last marker — sliding backward would widen the gap past
   // the lookback window when several plain chat turns straddle a step boundary.
   const anchors: ({ msg: number; blk: number } | null)[] = [];
+  // A thinking/redacted_thinking block (replayed rawContent) is unmarkable — Anthropic rejects
+  // cache_control on it — so it anchors null, exactly like a bare-string turn: the marker slides forward.
+  const unmarkable = (b: unknown): boolean => {
+    const t = (b as { type?: string } | null)?.type;
+    return t === 'thinking' || t === 'redacted_thinking';
+  };
   messages.forEach((m, mi) => {
-    if (Array.isArray(m.content)) m.content.forEach((_, bi) => anchors.push({ msg: mi, blk: bi }));
+    if (Array.isArray(m.content)) m.content.forEach((b, bi) => anchors.push(unmarkable(b) ? null : { msg: mi, blk: bi }));
     else anchors.push(null);
   });
   const mark = (a: { msg: number; blk: number }): void => {
@@ -265,7 +282,7 @@ export const buildAnthropicMessagesBody = (args: {
     messages,
     ...(args.stream ? { stream: true as const } : {}),
     ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: { type: args.toolChoice ?? 'auto' } } : {}),
-    ...anthropicThinkingEffort(args.model, args.effort),
+    ...thinkingEffort,
   };
 };
 

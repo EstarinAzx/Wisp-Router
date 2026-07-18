@@ -373,6 +373,58 @@ describe('buildAnthropicMessagesBody — thinking/effort', () => {
   });
 });
 
+describe('buildAnthropicMessagesBody — thinking passthrough (rawContent)', () => {
+  const raw = [
+    { type: 'thinking', thinking: 'hmm', signature: 'sig-1' },
+    { type: 'text', text: 'answer' },
+    { type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } },
+  ];
+  const convo = (model: string, effort?: 'high') => buildAnthropicMessagesBody({
+    model, maxTokens: 1, version: 'v', ...(effort ? { effort } : {}),
+    messages: [
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'answer', toolCalls: [{ id: 'toolu_1', name: 'read', argsJson: '{"path":"a.ts"}' }], rawContent: raw },
+      { role: 'user', content: 'result', toolResults: [{ callId: 'toolu_1', content: 'ok' }] },
+    ],
+  }) as any;
+
+  // A thinking-bearing assistant turn replays its ORIGINAL block array when the outbound body enables
+  // thinking — signatures and interleaved order ride back byte-for-byte, exactly as Anthropic requires.
+  it('replays rawContent verbatim when thinking is enabled', () => {
+    expect(convo('claude-opus-4-8', 'high').messages[1].content).toEqual(raw);
+  });
+
+  // Thinking disabled outbound (non-effort model, or no effort threaded) → the sidecar is ignored and the
+  // turn rebuilds from the normalized fields — thinking blocks in a thinking-off request are a 400.
+  it('strips thinking when the outbound body does not enable thinking', () => {
+    expect(convo('claude-haiku-4-5', 'high').messages[1].content).toEqual([
+      { type: 'text', text: 'answer' },
+      { type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } },
+    ]);
+    expect(convo('claude-opus-4-8').messages[1].content).toEqual([
+      { type: 'text', text: 'answer' },
+      { type: 'tool_use', id: 'toolu_1', name: 'read', input: { path: 'a.ts' } },
+    ]);
+  });
+
+  // Anthropic rejects cache_control on thinking blocks, so the breakpoint walk must treat them as
+  // unmarkable (slide to a neighbor). The thinking block below sits exactly one STEP behind the final
+  // block, where the second marker would land without the guard.
+  it('never attaches cache_control to a thinking block', () => {
+    const manyTools = Array.from({ length: 14 }, (_, i) => ({ type: 'tool_use', id: `toolu_${i}`, name: 'read', input: {} }));
+    const body = buildAnthropicMessagesBody({
+      model: 'claude-opus-4-8', maxTokens: 1, version: 'v', effort: 'high',
+      messages: [
+        { role: 'assistant', content: '', toolCalls: [], rawContent: [{ type: 'thinking', thinking: 'hmm', signature: 's' }, ...manyTools] },
+        { role: 'user', content: 'result' },
+      ],
+    }) as any;
+    const blocks = body.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content : []));
+    expect(blocks.filter((b: any) => b.cache_control).length).toBeGreaterThanOrEqual(2);
+    expect(blocks.filter((b: any) => b.type === 'thinking' && b.cache_control)).toEqual([]);
+  });
+});
+
 describe('reduceAnthropicTextEvents', () => {
   // The streaming shape: answer text arrives as a run of content_block_delta events whose delta is a
   // text_delta — concatenate them in order. anthropicStream yields the same fragments live.
@@ -846,17 +898,40 @@ describe('anthropicStream (streaming IO)', () => {
     await expect(collect(anthropicStream(args))).rejects.toThrow(/empty response/);
   });
 
-  // A thinking-only turn: the model streamed thinking blocks (never forwarded) and no visible text/tool — the
-  // encoder would emit an empty envelope. Surfaced as the same diagnosable throw.
-  it('throws on a thinking-only turn that delivered no visible content', async () => {
+  // Thinking passthrough: thinking deltas and the closing signature now yield LIVE, in stream order, so the
+  // door can forward them — a thinking-only turn is delivered content, not the empty-envelope throw.
+  it('yields thinking deltas and signature live on a thinking-only turn', async () => {
     stub([
       'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":""}}',
       'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}',
       'event: content_block_stop\ndata: {"index":0}',
       'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
       'event: message_stop\ndata: {"type":"message_stop"}',
     ]);
-    await expect(collect(anthropicStream(args))).rejects.toThrow(/empty response/);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'thinking', value: 'hmm' },
+      { type: 'thinkingSignature', value: 'sig-1' },
+    ]);
+  });
+
+  // Thinking rides BEFORE the answer in stream order, and a redacted_thinking block (arriving whole on its
+  // content_block_start) passes through as one opaque event.
+  it('yields thinking, redacted_thinking, and text in stream order', async () => {
+    stub([
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"let me see"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"signature_delta","signature":"sig-a"}}',
+      'event: content_block_start\ndata: {"index":1,"content_block":{"type":"redacted_thinking","data":"opaque"}}',
+      'event: content_block_delta\ndata: {"index":2,"delta":{"type":"text_delta","text":"Hi"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'thinking', value: 'let me see' },
+      { type: 'thinkingSignature', value: 'sig-a' },
+      { type: 'redactedThinking', data: 'opaque' },
+      { type: 'text', value: 'Hi' },
+    ]);
   });
 
   // max_tokens truncation WITH partial text: keep the text, append a visible truncation marker carrying the

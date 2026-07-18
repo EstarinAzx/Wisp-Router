@@ -31,7 +31,7 @@ import {
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel,
 } from './catalog';
 import { codexStream } from './codexClient';
-import { anthropicStream } from './anthropicClient';
+import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
@@ -275,8 +275,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       if (parsed.stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         for await (const ev of upstream) {
+          // Thinking passthrough events are Anthropic-door vocabulary — this OpenAI door drops them.
           if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
         }
         calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
         res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
@@ -287,7 +288,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         let text = '';
         for await (const ev of upstream) {
           if (ev.type === 'text') text += ev.value;
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
         }
         sendJson(res, 200, buildCompletion(meta, text, calls));
       }
@@ -440,13 +441,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     !!(req.headers['anthropic-version'] || req.headers['x-api-key']);
 
   // Map a Codex/Anthropic provider stream (text fragments live, whole tool calls at end) onto the door-neutral
-  // BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to stream).
+  // BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to stream). The
+  // thinking passthrough events only the Anthropic upstream produces map to their bridge twins — the
+  // Anthropic door's encoder renders them; no other consumer of this map ever receives them.
   const mapOAuthStream = async function* (
-    upstream: AsyncIterable<{ type: 'text'; value: string } | { type: 'toolCall'; call: AssembledToolCall }>,
+    upstream: AsyncIterable<AnthropicStreamEvent>,
   ): AsyncGenerator<BridgeStreamEvent> {
     for await (const ev of upstream) {
       if (ev.type === 'text') { if (ev.value) yield { type: 'text', text: ev.value }; }
-      else yield { type: 'tool_call', call: ev.call };
+      else if (ev.type === 'toolCall') yield { type: 'tool_call', call: ev.call };
+      else if (ev.type === 'thinking') { if (ev.value) yield { type: 'thinking', text: ev.value }; }
+      else if (ev.type === 'thinkingSignature') yield { type: 'thinking_signature', signature: ev.value };
+      else if (ev.type === 'redactedThinking') yield { type: 'redacted_thinking', data: ev.data };
     }
   };
 
@@ -495,7 +501,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
       // images and documents must ride along (the Codex + keyed paths already forward images) — omitting
       // images here was the door's vision hole: inline attaches never reached the Anthropic backend.
-      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      // rawContent is the thinking-passthrough sidecar — Anthropic-only, the other arms leave it unread.
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults, rawContent: t.rawContent }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
