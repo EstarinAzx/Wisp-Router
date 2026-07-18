@@ -9,6 +9,15 @@ tags: [context, pick-up]
 
 **Start:** read `.context/overview.md` + `.context/active-work.md`, then continue below.
 
+## Latest (2026-07-18, remote): Anthropic cache TTL fix on a review branch
+
+Branch **`claude/anthropic-cache-ttl-fix`** is pushed and awaiting the user's review → merge → **2.0.20**.
+It fixes a real caching bug (TTL flipped 5m→1h between turn 1 and turn 2 of every bridged session, busting
+the prefix cache) by fixing the TTL per call path instead of per turn count, and adds a `prompt-cache MISS`
+log to the Bridge. Placement logic from #111 is untouched. 513 tests green, both faces typecheck. Details:
+[[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]] +
+[[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]. Do NOT re-derive the TTL from `convo.length`.
+
 ## Where you are
 
 **Side-panel UI refactor shipped.** `wisp-1.7.0.vsix` built and appended to the existing

@@ -28,7 +28,8 @@ import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel,
+  anthropicCacheOutcome,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
@@ -582,15 +583,22 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // rides via setUsage, never a content frame; the final usage event updates the closing message_delta.
       // A provider that emits no usage (non-Anthropic through this door) starts on its first content instead.
       let started = false;
+      let lastUsage: BridgeUsage | undefined;               // message_delta carries the final cumulative counts
       const ensureStarted = (): void => { if (!started) { res.write(enc.start()); started = true; } };
       for await (const ev of result.events) {
-        if (ev.type === 'usage') { enc.setUsage(ev.usage); ensureStarted(); continue; }
+        if (ev.type === 'usage') { lastUsage = ev.usage; enc.setUsage(ev.usage); ensureStarted(); continue; }
         ensureStarted();
         res.write(enc.push(ev));
       }
       ensureStarted();
       res.write(enc.finish());
       res.end();
+      // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
+      // and only a probable MISS is worth a line — a healthy hit/fresh turn stays silent so the log isn't noise.
+      if (lastUsage && isAnthropicProvider(provider)) {
+        const outcome = anthropicCacheOutcome(lastUsage, parsed.turns.length);
+        if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${parsed.turns.length} — prefix re-billed uncached, check cache breakpoints (#111)`);
+      }
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);

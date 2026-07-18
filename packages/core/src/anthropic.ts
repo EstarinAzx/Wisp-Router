@@ -187,7 +187,7 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 // breakpoint (#111). An empty text block is never emitted. tools ride only when non-empty.
 export const buildAnthropicMessagesBody = (args: {
   model: string; messages: AnthropicMessage[]; maxTokens: number; version: string; stream?: boolean;
-  tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel;
+  tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; cacheTtl?: '5m' | '1h';
 }) => {
   const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
   const convo = args.messages.filter((m) => m.role !== 'system');
@@ -231,12 +231,18 @@ export const buildAnthropicMessagesBody = (args: {
   // marker caches the tool definitions AND the system prompt together (the big stable prefix). Without a
   // marker a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage) — the
   // Bridge flattens away the markers Claude Code sent, so we reconstruct our own here.
-  // ttl policy (openclaude steal #1): bare {type:'ephemeral'} (5m, 1.25× write) for a one-shot body
-  // (Inquire / probe / first turn); ttl:'1h' (2× write) only when this request already carries 2+
-  // user/assistant turns — multi-turn sessions re-read the prefix enough that the longer TTL pays.
-  // Turn count = this request's body after system strip, not session lifetime.
+  // ttl policy: FIXED per request PATH, never derived from this request's turn count. A turn-count proxy
+  // flips 5m→1h between turn 1 and turn 2 of the SAME session, and a TTL change rewrites the cache_control
+  // and busts the server-side prompt cache — re-billing the whole system+tools prefix at the 2× write on
+  // turn 2 of every session (openclaude latches 1h-eligibility session-stable for exactly this reason).
+  // So the caller fixes it once: session paths (Bridge / native chat, via anthropicStream) pass '1h'; a
+  // genuinely one-shot path (Inquire / TUI test, via anthropicInquire) passes '5m' — the cheaper 1.25×
+  // write with no later turn to amortize a longer TTL. Default '1h' (the dominant bridged-session path).
+  // Haiku is excluded from 1h: its caching behaves differently and Claude Code carves it out too, so a
+  // haiku turn always takes the bare 5m marker regardless of the requested TTL.
+  const useOneHour = (args.cacheTtl ?? '1h') === '1h' && !args.model.includes('haiku');
   const CACHE = {
-    cache_control: convo.length >= 2
+    cache_control: useOneHour
       ? { type: 'ephemeral' as const, ttl: '1h' as const }
       : { type: 'ephemeral' as const },
   };
@@ -323,6 +329,32 @@ export const anthropicUsage = (ev: SseEvent): BridgeUsage | undefined => {
     cache_read_input_tokens: typeof u.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0,
     output_tokens: typeof u.output_tokens === 'number' ? u.output_tokens : 0,
   };
+};
+
+// Cache-health read on a completed Anthropic request, from the token usage the wire already reports. Wisp's
+// whole value on the OAuth path is NOT re-billing the conversation prefix as uncached input every turn
+// (#111) — this is the signal that prompt caching is working, or that it silently regressed. Pure, so it's
+// testable without a live backend; the Bridge calls it to surface a probable miss in its log.
+//   - hit:   the request read a cached prefix (cache_read > 0) — the healthy steady state.
+//   - fresh: nothing read but something written (a first turn, or a legitimately changed prefix) — normal.
+//   - miss:  a multi-turn request read NOTHING from cache while billing a large uncached input — the stable
+//            prefix was not reused. This is the #111 regression shape; the only kind worth alerting on.
+//   - none:  no cache activity at all (tiny prompt, or a provider that doesn't cache) — nothing to say.
+// Turn count is this request's conversation turns (system stripped): turn 1 legitimately has no prior write
+// to read, so a miss is only inferred once the body is past the first exchange (≥3 turns).
+export type AnthropicCacheOutcome = { kind: 'hit' | 'fresh' | 'miss' | 'none'; readTokens: number; creationTokens: number; uncachedInput: number };
+export const anthropicCacheOutcome = (usage: BridgeUsage, turnCount: number): AnthropicCacheOutcome => {
+  const readTokens = usage.cache_read_input_tokens;
+  const creationTokens = usage.cache_creation_input_tokens;
+  const uncachedInput = usage.input_tokens;
+  const base = { readTokens, creationTokens, uncachedInput };
+  if (readTokens > 0) return { kind: 'hit', ...base };
+  // A big uncached input on a request that should have had a cached prefix — but only past the first
+  // exchange, and only when the uncached input is large enough that a real prefix must have existed.
+  const MISS_UNCACHED_FLOOR = 4_000;
+  if (turnCount >= 3 && uncachedInput >= MISS_UNCACHED_FLOOR) return { kind: 'miss', ...base };
+  if (creationTokens > 0) return { kind: 'fresh', ...base };
+  return { kind: 'none', ...base };
 };
 
 // Reduce a whole Messages SSE run to its answer text — concatenate the text_delta fragments in order. An
