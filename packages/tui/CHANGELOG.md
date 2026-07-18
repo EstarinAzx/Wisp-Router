@@ -6,6 +6,19 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.18] — 2026-07-18
+
+### Added
+
+- **Real token usage on the Anthropic door** — the Bridge used to synthesize
+  `usage: { input_tokens: 0, output_tokens: 0 }`, so the wisped client's token/cost
+  meter read zeros and cache reads were invisible. The backend's real usage now rides
+  end-to-end: the door forwards the live `message_start` snapshot (real input +
+  `cache_creation` / `cache_read`) and the final `message_delta` counts instead of
+  fabricating them. A warm bridged call now surfaces its true `cache_read` on the
+  client meter — which also makes the always-1h cache write premium measurable for the
+  first time.
+
 ## [2.0.17] — 2026-07-18
 
 ### Added
