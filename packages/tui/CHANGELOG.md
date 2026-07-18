@@ -6,6 +6,16 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.16] — 2026-07-18
+
+### Added
+
+- **PDF passthrough on the Anthropic door** — base64 `document` blocks (a dragged-in
+  PDF, or Claude Code's Read on a PDF returning pages inside `tool_result` content)
+  now ride through the Bridge to Anthropic backends instead of silently vanishing
+  from the conversation. Anthropic-door only: a PDF routed to a Codex/xAI/Go target
+  is still dropped (those backends don't accept them).
+
 ## [2.0.15] — 2026-07-18
 
 ### Fixed
