@@ -6,6 +6,26 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.17] — 2026-07-18
+
+### Added
+
+- **Thinking passthrough on the Anthropic door** — `thinking` / `redacted_thinking`
+  blocks now round-trip client ↔ Anthropic instead of dying inside the Bridge in both
+  directions. Outbound: a thinking-bearing assistant turn keeps its original block
+  array as a byte-for-byte sidecar and replays it verbatim (signatures + interleaved
+  order intact; the client's own `cache_control` markers are shed so Wisp's breakpoint
+  budget holds). Inbound: the door's SSE encoder and non-streaming reply forward
+  thinking block starts, deltas, signatures, and redacted blocks live — including the
+  OAuth wire's empty-text signed thinking blocks. Tool calls now yield at their stream
+  position (not folded at stream end) so interleaved thinking order survives the round
+  trip. A thinking-only turn is delivered content, not an "empty response" 502.
+  Non-Anthropic targets and the OpenAI door drop thinking silently, as with images.
+- **Claude 5 effort support** — `claude-fable-5` / `claude-sonnet-5` now receive
+  adaptive thinking + `output_config.effort` (live-probed: accepted through `xhigh`
+  and `max`). Previously the effort regexes predated Claude 5, so /effort was silently
+  dropped on the default model — which also kept the thinking replay gate closed there.
+
 ## [2.0.16] — 2026-07-18
 
 ### Added
