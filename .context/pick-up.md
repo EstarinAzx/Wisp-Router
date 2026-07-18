@@ -11,47 +11,54 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**On branch `claude/real-usage-meter` (branched from `971cefd`/`v2.0.17`). Real
-usage meter built + verified, committed on the branch, NOT merged, NOT released.**
-The Anthropic door used to synthesize `usage: {input_tokens:0, output_tokens:0}`
-— the wisped client's token/cost meter read zeros and `cache_read` was invisible.
-Now the backend's real usage rides end-to-end: `message_start` carries the real
-input/cache snapshot, `message_delta` the final counts. Grill-free (bounded
-feature, approach agreed in-session), TDD, live-verified through a from-source
-bridge on an isolated home/spare port (`cache_read=1757` on a warm call).
+**2.0.18 SHIPPED.** The real usage meter is merged, released, and published.
+`main` == `v2.0.18` (release commit `388f73f`, context follow-up `e3abbd2`).
+GitHub release `wisp-router 2.0.18` carries all four platform binaries; npm
+`wisp-router@2.0.18` is live. The Anthropic door now forwards the backend's real
+token usage (input / `cache_creation` / `cache_read` / output) end-to-end instead
+of synthesizing zeros — the client meter reads truth, and the always-1h cache
+**write premium is measurable for the first time**.
 
 ## What last session did
 
-1. Diagnosed the meter: bridge discards Anthropic's `usage` (never read
-   `message_start`/`.usage`), synthesizes zeros. Proved the real wire shape with
-   a direct probe (cache_creation → cache_read across two calls).
-2. Built TDD: `anthropicUsage` helper → `usage` event on both stream unions →
-   encoder `setUsage` + real `message_start`/`message_delta` → door lazy-start.
-   Core vitest **506** (was 498, +8), 3 packages typecheck clean.
-3. Live E2E through from-source bridge (isolated `WISP_HOME`, port 41185): the
-   client-facing usage frames now carry real input/cache/output.
+1. Found the meter branch was already merged + pushed to `main` (prior pick-up
+   note was stale). Only the release ceremony remained.
+2. Ran the checklist: bump `packages/tui` 2.0.17→2.0.18 → span-baseline `--update`
+   (32/32 clean) → CHANGELOG 2.0.18 → commit → tag `v2.0.18` → push. release.yml
+   went green (4 builds + publish).
+3. Recorded the openclaude cache_control review as a decision:
+   `2026-07-18-openclaude-cache-control-steal-list.md` — second-opinion agent
+   agrees with the existing #111 design; nothing urgent, two optional polishes.
 
-## Next task — release, or discard
+## Next task — watch the meter, THEN decide cache polish
 
-- **Release `claude/real-usage-meter`** to make the meter live in the daily
-  driver (the running 41184 install is still the zeros build). Follow the
-  release checklist below. Merge fast-forward to main, then release.
-- OR discard the branch if not wanted — the change is additive and low-risk,
-  but not mandatory.
+The cache "clunks" the review flagged are all optional and **gated on data the
+meter now provides**. Don't code anything yet:
+
+1. **Update the daily driver to 2.0.18** (`npm i -g wisp-router@2.0.18`, or your
+   run path) — the previously-running install shipped the zeros build, so the
+   meter isn't visible until you're on 2.0.18.
+2. Run normal for a bit and watch whether the **always-1h write premium** (2× vs
+   5m's 1.25×) actually shows on the plan meter.
+3. **Only if it bites** → implement steal-list polish #1 (bare 5m ephemeral by
+   default, `ttl:'1h'` only for multi-turn sessions). Else YAGNI holds.
+
+**Load-bearing invariant:** do NOT remove the cache breakpoints — silently
+restores ~10× plan burn (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
 
 ## Landmines
 
-- **Release checklist (order matters or release.yml refuses):** bump
-  `packages/tui/package.json` → span-baseline (`bun scripts/span-baseline.tsx
-  --update` from packages/tui) → tui CHANGELOG → tag == package.json version.
-- PS 5.1 `Set-Content -Encoding utf8` writes a BOM — package.json needs a
-  BOM-less rewrite (`[IO.File]::WriteAllText` + `UTF8Encoding($false)`).
+- **Release checklist order** (release.yml refuses on mismatch): bump
+  `packages/tui/package.json` → span-baseline `--update` (from packages/tui) → tui
+  CHANGELOG → tag == package.json version, `v`-prefixed.
+- Use the **Edit tool** for package.json version (preserves encoding). PS 5.1
+  `Set-Content -Encoding utf8` writes a BOM that breaks the file.
 - Live-verify recipe (isolated `WISP_HOME` + `serve` on a spare port, never kill
   41184): [[live-verify-the-bridge-from-source-isolated-wisp-home-on-a-spare-port]].
-- `bridgeSecret` is **top-level** in `auth.json`, not under `.anthropic`.
 - `wisp --version` doesn't exist — version is on the TUI splash.
 
 ## Related
 
 - [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
 - [[2026-07-18-real-usage-meter-forward-not-synthesize]]
+- [[2026-07-18-openclaude-cache-control-steal-list]]
