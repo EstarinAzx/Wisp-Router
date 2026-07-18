@@ -6,6 +6,23 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.15] — 2026-07-18
+
+### Fixed
+
+- **Cache breakpoints spread across fat tool turns** — Anthropic's cache lookback only
+  reaches ~20 content blocks back from a marker, so a heavy parallel-tool turn overshot
+  the window and silently re-billed the conversation prefix. The Bridge now walks the
+  message history placing a marker every ~15 blocks (within the 4-per-request budget);
+  short conversations emit the same single end-of-history marker as before. A marker due
+  at a bare-string chat turn slides forward to the nearest markable block, so runs of
+  plain turns can't widen a gap past the lookback window. (#111 follow-up)
+- **1h cache TTL on Anthropic breakpoints** — reconstructed markers used the 5-minute
+  default, so a bridged session's cached prefix expired over an idle gap and re-wrote on
+  return. Now `ttl: '1h'`, matching native Claude Code over OAuth.
+- **`tool_result.is_error` passthrough** — a failed tool call's explicit error flag now
+  rides through the Anthropic door instead of being dropped in normalization.
+
 ## [2.0.14] — 2026-07-17
 
 ### Added
