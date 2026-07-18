@@ -180,7 +180,7 @@ export const buildAnthropicMessagesBody = (args: {
   const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
   const convo = args.messages.filter((m) => m.role !== 'system');
   const firstUserMessage = convo[0]?.content ?? '';
-  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
+  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl: '1h' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
@@ -231,20 +231,29 @@ export const buildAnthropicMessagesBody = (args: {
   const STEP = 15;
   const MSG_BREAKPOINTS = 3; // 4 per-request max − 1 spent on the system block
   // Every content block in message order; a bare-string turn is one block for distance but carries no
-  // object to annotate (null), so a marker due at its position slides back to the next markable block.
+  // object to annotate (null). A marker due at a bare-string position slides FORWARD (toward the end) to
+  // the nearest markable block passed since the last marker — sliding backward would widen the gap past
+  // the lookback window when several plain chat turns straddle a step boundary.
   const anchors: ({ msg: number; blk: number } | null)[] = [];
   messages.forEach((m, mi) => {
     if (Array.isArray(m.content)) m.content.forEach((_, bi) => anchors.push({ msg: mi, blk: bi }));
     else anchors.push(null);
   });
-  for (let i = anchors.length - 1, since = STEP, placed = 0; i >= 0 && placed < MSG_BREAKPOINTS; i--, since++) {
-    if (since < STEP) continue;
-    const a = anchors[i];
-    if (!a) continue; // bare-string turn at a step boundary — keep scanning back for a markable block
+  const mark = (a: { msg: number; blk: number }): void => {
     const blocks = messages[a.msg].content as Record<string, unknown>[];
     blocks[a.blk] = { ...blocks[a.blk], ...CACHE };
+  };
+  for (let i = anchors.length - 1, since = STEP, placed = 0, passed = -1; i >= 0 && placed < MSG_BREAKPOINTS; i--, since++) {
+    if (since < STEP) {
+      if (anchors[i]) passed = i; // remember the markable block nearest the next boundary, end-side
+      continue;
+    }
+    const target = anchors[i] ? i : passed;
+    if (target < 0) continue; // nothing markable since the last marker — keep scanning back
+    mark(anchors[target] as { msg: number; blk: number });
     placed++;
-    since = 0;
+    since = target - i; // distance from the placed marker back to the current position
+    passed = -1;
   }
   return {
     model: args.model,

@@ -249,6 +249,27 @@ describe('buildAnthropicMessagesBody', () => {
       const systemMarks = body.system.filter((b: any) => b.cache_control).length;
       expect(systemMarks + marked.length).toBeLessThanOrEqual(4); // never exceed the per-request breakpoint cap
     });
+
+    // Plain chat turns are bare strings and can't carry a marker. When a run of them straddles a step
+    // boundary, the marker must slide FORWARD (toward the end) to the nearest markable block — sliding
+    // backward widens the gap past the ~20-block lookback and silently re-bills the prefix.
+    it('keeps every gap within the lookback window when plain turns straddle a step boundary', () => {
+      const fat = (n: number, p: string) => Array.from({ length: n }, (_, i) => ({ callId: `${p}${i}`, content: 'x' }));
+      const messages: any[] = [{ role: 'user', content: '', toolResults: fat(12, 'a') }];
+      // Six plain turns land the walk-back's step boundary inside an unmarkable stretch.
+      for (let i = 0; i < 6; i++) messages.push({ role: i % 2 ? 'user' : 'assistant', content: `chat${i}` });
+      messages.push({ role: 'user', content: '', toolResults: fat(15, 'b') });
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages }) as any;
+      // Flatten to block positions, counting each bare-string turn as one (unmarkable) block.
+      const marked: number[] = [];
+      let pos = 0;
+      for (const m of body.messages) {
+        if (Array.isArray(m.content)) for (const b of m.content) { if (b.cache_control) marked.push(pos); pos++; }
+        else pos++;
+      }
+      expect(marked[marked.length - 1]).toBe(pos - 1); // the growing edge is always marked
+      for (let i = 1; i < marked.length; i++) expect(marked[i] - marked[i - 1]).toBeLessThanOrEqual(20);
+    });
   });
 
   // The streaming path needs stream:true on the body; the non-streaming (Inquire) path must omit it.

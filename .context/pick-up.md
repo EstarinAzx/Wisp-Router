@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-17
+updated: 2026-07-18
 tags: [context, pick-up]
 ---
 
@@ -11,7 +11,20 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**You are on branch `claude/context-rehydration-oargfe`, NOT `main`.** A remote
+**You are on branch `claude/review-context-rehydration-cj5mer`** — the review
+branch stacked directly on `claude/context-rehydration-oargfe` (fast-forward, no
+divergence). A 2026-07-18 review session verified the three fixes below (compile
+clean, 477 tests green, marker placement probed empirically) and added one
+hardening commit on top: the breakpoint walk-back now slides a marker due at a
+bare-string chat turn FORWARD to the nearest markable block instead of backward
+— sliding backward let ≥6 consecutive plain turns straddling a step boundary
+widen a gap past the ~20-block lookback (a bounded, silent prefix re-bill).
+Regression test proves the old code produced a 21-block gap. Merging THIS branch
+to `main` picks up everything; the review found no other quota-relevant issues.
+**Pre-release caveat:** the 1h TTL is unit-tested but not live-verified — do one
+real bridged round-trip before tagging in case the OAuth endpoint rejects `ttl`.
+
+A remote
 session made three fixes here (`f33785d`, `a5ab0f2`, `e0569eb`), pushed but **not
 merged and not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up).
 The installed `wisp-router`/`claude-wisp` binary does NOT have these yet. All
