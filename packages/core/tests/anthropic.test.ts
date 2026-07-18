@@ -371,6 +371,20 @@ describe('buildAnthropicMessagesBody — thinking/effort', () => {
     expect('thinking' in body).toBe(false);
     expect('output_config' in body).toBe(false);
   });
+
+  // Claude 5 (fable-5 / sonnet-5) is effort-capable — live-probed 2026-07-18: the OAuth endpoint accepts
+  // adaptive + output_config.effort at every level including xhigh and max on both. Without this the
+  // user's /effort was silently dropped on the DEFAULT model and the thinking replay gate never opened.
+  it('spreads adaptive thinking + effort for Claude 5 models, unclamped through max', () => {
+    const fable = buildAnthropicMessagesBody({ model: 'claude-fable-5', maxTokens: 1, version: 'v', effort: 'xhigh', messages: [{ role: 'user', content: 'hi' }] }) as any;
+    expect(fable.thinking).toEqual({ type: 'adaptive' });
+    expect(fable.output_config).toEqual({ effort: 'xhigh' });
+    const fableMax = buildAnthropicMessagesBody({ model: 'claude-fable-5', maxTokens: 1, version: 'v', effort: 'max', messages: [{ role: 'user', content: 'hi' }] }) as any;
+    expect(fableMax.output_config).toEqual({ effort: 'max' });
+    const sonnet5 = buildAnthropicMessagesBody({ model: 'claude-sonnet-5', maxTokens: 1, version: 'v', effort: 'max', messages: [{ role: 'user', content: 'hi' }] }) as any;
+    expect(sonnet5.thinking).toEqual({ type: 'adaptive' });
+    expect(sonnet5.output_config).toEqual({ effort: 'max' });
+  });
 });
 
 describe('buildAnthropicMessagesBody — thinking passthrough (rawContent)', () => {
@@ -898,9 +912,10 @@ describe('anthropicStream (streaming IO)', () => {
     await expect(collect(anthropicStream(args))).rejects.toThrow(/empty response/);
   });
 
-  // Thinking passthrough: thinking deltas and the closing signature now yield LIVE, in stream order, so the
-  // door can forward them — a thinking-only turn is delivered content, not the empty-envelope throw.
-  it('yields thinking deltas and signature live on a thinking-only turn', async () => {
+  // Thinking passthrough: the block start, thinking deltas, and the closing signature all yield LIVE, in
+  // stream order, so the door can forward them — a thinking-only turn is delivered content, not the
+  // empty-envelope throw.
+  it('yields thinking start, deltas, and signature live on a thinking-only turn', async () => {
     stub([
       'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":""}}',
       'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"hmm"}}',
@@ -910,8 +925,28 @@ describe('anthropicStream (streaming IO)', () => {
       'event: message_stop\ndata: {"type":"message_stop"}',
     ]);
     expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'thinkingStart' },
       { type: 'thinking', value: 'hmm' },
       { type: 'thinkingSignature', value: 'sig-1' },
+    ]);
+  });
+
+  // THE live wire shape (verified against the OAuth endpoint): the subscription backend emits thinking
+  // blocks with EMPTY thinking text — content_block_start straight to signature_delta, no thinking_delta
+  // at all. The start event alone must open the block or the signed block is lost entirely.
+  it('yields an empty thinking block (start straight to signature) with the text', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"signature_delta","signature":"sig-live"}}',
+      'event: content_block_stop\ndata: {"index":0}',
+      'event: content_block_delta\ndata: {"index":1,"delta":{"type":"text_delta","text":"Hi"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'thinkingStart' },
+      { type: 'thinkingSignature', value: 'sig-live' },
+      { type: 'text', value: 'Hi' },
     ]);
   });
 

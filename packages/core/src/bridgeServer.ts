@@ -450,6 +450,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     for await (const ev of upstream) {
       if (ev.type === 'text') { if (ev.value) yield { type: 'text', text: ev.value }; }
       else if (ev.type === 'toolCall') yield { type: 'tool_call', call: ev.call };
+      else if (ev.type === 'thinkingStart') yield { type: 'thinking_start' };
       else if (ev.type === 'thinking') { if (ev.value) yield { type: 'thinking', text: ev.value }; }
       else if (ev.type === 'thinkingSignature') yield { type: 'thinking_signature', signature: ev.value };
       else if (ev.type === 'redactedThinking') yield { type: 'redacted_thinking', data: ev.data };

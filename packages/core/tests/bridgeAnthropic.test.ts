@@ -56,10 +56,25 @@ describe('buildAnthropicMessageResponse', () => {
     expect(res.stop_reason).toBe('tool_use');
   });
 
+  // The live-wire empty thinking block (start straight to signature, no deltas) survives buffering too.
+  it('keeps an empty signed thinking block in the buffered reply', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'thinking_start' },
+      { type: 'thinking_signature', signature: 'sig-live' },
+      { type: 'text', text: 'Hi' },
+    ];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([
+      { type: 'thinking', thinking: '', signature: 'sig-live' },
+      { type: 'text', text: 'Hi' },
+    ]);
+  });
+
   // Thinking passthrough: thinking deltas assemble into one signed thinking block, a redacted block rides
   // whole, and neither disturbs the text merge or stop_reason.
   it('assembles thinking deltas + signature into a thinking block ahead of the text', () => {
     const events: BridgeStreamEvent[] = [
+      { type: 'thinking_start' },
       { type: 'thinking', text: 'let me' }, { type: 'thinking', text: ' see' },
       { type: 'thinking_signature', signature: 'sig-1' },
       { type: 'redacted_thinking', data: 'opaque' },
@@ -416,6 +431,27 @@ describe('buildAnthropicSse', () => {
     expect(f[5].data.delta).toEqual({ type: 'signature_delta', signature: 'sig-1' });
     expect(f[7].data).toMatchObject({ index: 1, content_block: { type: 'text', text: '' } });
     expect(f.at(-2)!.data.delta.stop_reason).toBe('end_turn');
+  });
+
+  // THE live wire shape: the OAuth backend sends thinking blocks with EMPTY thinking text — a
+  // thinking_start straight to its signature. The start alone must open the block so the signed (but
+  // textless) block still reaches the client for replay.
+  it('frames an empty thinking block from start straight to signature', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'thinking_start' },
+      { type: 'thinking_signature', signature: 'sig-live' },
+      { type: 'text', text: 'Hi' },
+    ];
+    const f = frames(buildAnthropicSse(events, meta));
+    expect(f.map((x) => x.event)).toEqual([
+      'message_start', 'ping',
+      'content_block_start', 'content_block_delta', 'content_block_stop',
+      'content_block_start', 'content_block_delta', 'content_block_stop',
+      'message_delta', 'message_stop',
+    ]);
+    expect(f[2].data).toMatchObject({ index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } });
+    expect(f[3].data.delta).toEqual({ type: 'signature_delta', signature: 'sig-live' });
+    expect(f[5].data).toMatchObject({ index: 1, content_block: { type: 'text', text: '' } });
   });
 
   // Interleaved thinking keeps PER-BLOCK signatures: a signature closes its block, the next thinking delta

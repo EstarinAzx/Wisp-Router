@@ -217,10 +217,17 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
     // tool call closes any open block, opens its own tool_use block, streams the whole args as one
     // input_json_delta (Wisp folds tool calls whole — no fragments), then closes immediately.
     push: (ev: BridgeStreamEvent): string => {
-      // Thinking passthrough: a thinking block opens (once) and streams thinking_delta fragments; its
-      // signature_delta is the last delta and CLOSES the block, so the next thinking delta claims a fresh
-      // index (per-block signatures — interleaved thinking). The block-start shape matches the real
-      // Anthropic wire: { type:'thinking', thinking:'', signature:'' }.
+      // Thinking passthrough: thinking_start opens a block (the OAuth wire sends EMPTY thinking blocks —
+      // start straight to signature — so the start must open on its own); thinking deltas stream into it
+      // (opening one themselves if no start arrived); the signature_delta is the last delta and CLOSES the
+      // block, so the next start/delta claims a fresh index (per-block signatures — interleaved thinking).
+      // The block-start shape matches the real Anthropic wire: { type:'thinking', thinking:'', signature:'' }.
+      if (ev.type === 'thinking_start') {
+        let s = closeOpen();
+        openIndex = nextIndex++;
+        openKind = 'thinking';
+        return s + frame('content_block_start', { type: 'content_block_start', index: openIndex, content_block: { type: 'thinking', thinking: '', signature: '' } });
+      }
       if (ev.type === 'thinking') {
         let s = '';
         if (openKind !== 'thinking') {
@@ -316,6 +323,10 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
       const last = content[content.length - 1];
       if (last && last.type === 'text') last.text += ev.text;
       else content.push({ type: 'text', text: ev.text });
+    } else if (ev.type === 'thinking_start') {
+      // A start always begins a fresh block — the OAuth wire's empty thinking blocks arrive as a bare
+      // start + signature, so the block must exist before (or without) any thinking delta.
+      content.push({ type: 'thinking', thinking: '', signature: '' });
     } else if (ev.type === 'thinking') {
       // Thinking deltas merge into the open (unsigned) thinking block; a signed block is closed, so the
       // next delta starts a new one — the buffered mirror of the encoder's per-block-signature rule.

@@ -26,8 +26,11 @@ type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: str
 export type AnthropicStreamEvent =
   | { type: 'text'; value: string }
   | { type: 'toolCall'; call: AssembledToolCall }
-  // Thinking passthrough: thinking/signature deltas and whole redacted blocks, forwarded live in stream
-  // order so the Anthropic door can replay them to the client verbatim. Non-Anthropic consumers ignore them.
+  // Thinking passthrough: block start, thinking/signature deltas, and whole redacted blocks, forwarded
+  // live in stream order so the Anthropic door can replay them to the client verbatim. thinkingStart is
+  // load-bearing: the OAuth backend emits thinking blocks with EMPTY text (start straight to signature),
+  // so without it the signed block would vanish. Non-Anthropic consumers ignore all four.
+  | { type: 'thinkingStart' }
   | { type: 'thinking'; value: string }
   | { type: 'thinkingSignature'; value: string }
   | { type: 'redactedThinking'; data: string };
@@ -136,9 +139,14 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     if (ev.event === 'error') throw new Error(ev.data?.error?.message ?? 'Anthropic response failed');
     const text = anthropicTextDelta(ev);
     if (text) { sawDelta = true; yield { type: 'text', value: text }; continue; }
-    // Thinking passthrough: thinking deltas, the closing signature, and whole redacted blocks forward LIVE
-    // in stream order (they must reach the client to be replayed byte-for-byte next turn). Thinking counts
-    // as delivered content — a thinking-only turn is a real turn now, not the #87 empty-envelope throw.
+    // Thinking passthrough: the block start, thinking deltas, the closing signature, and whole redacted
+    // blocks forward LIVE in stream order (they must reach the client to be replayed byte-for-byte next
+    // turn). The start matters on its own: the OAuth backend emits EMPTY thinking blocks (start straight
+    // to signature_delta, zero thinking_deltas). Thinking counts as delivered content — a thinking-only
+    // turn is a real turn now, not the #87 empty-envelope throw.
+    if (ev.event === 'content_block_start' && ev.data?.content_block?.type === 'thinking') {
+      sawThinking = true; yield { type: 'thinkingStart' }; continue;
+    }
     if (ev.event === 'content_block_delta' && ev.data?.delta?.type === 'thinking_delta' && typeof ev.data.delta.thinking === 'string') {
       sawThinking = true; yield { type: 'thinking', value: ev.data.delta.thinking }; continue;
     }

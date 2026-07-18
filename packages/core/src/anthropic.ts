@@ -141,20 +141,28 @@ const parseToolInput = (argsJson: string): Record<string, unknown> => {
 
 // ----------------------------- Thinking / effort (slice #31) ----------------------------- //
 
-// Which Claude models accept the thinking+effort body fields. Mirrors openclaude's modelSupportsEffort —
-// Opus 4.5-4.8 and Sonnet 4.6 take them; Haiku and older 400, so omit there.
+// Which Claude models accept the thinking+effort body fields. Opus 4.5-4.8 and Sonnet 4.6 mirror
+// openclaude's modelSupportsEffort; the Claude 5 family (fable-5 / sonnet-5) was live-probed 2026-07-18 —
+// the OAuth endpoint accepts adaptive + output_config.effort on both. Haiku and older 400, so omit there.
+const isClaude5 = (m: string): boolean => m.includes('fable-5') || m.includes('sonnet-5');
 const modelSupportsAnthropicEffort = (model: string): boolean => {
   const m = model.toLowerCase();
-  return /opus-4-[5-8]/.test(m) || m.includes('sonnet-4-6');
+  return /opus-4-[5-8]/.test(m) || m.includes('sonnet-4-6') || isClaude5(m);
 };
 
-// xhigh is the one effort level not universally accepted — only Opus 4.7/4.8 take it. Other effort-capable
-// models (Sonnet 4.6, Opus 4.5/4.6) 400 on it.
-const modelSupportsAnthropicXHigh = (model: string): boolean => /opus-4-[78]/.test(model.toLowerCase());
+// xhigh is not universally accepted — Opus 4.7/4.8 and Claude 5 take it (5 live-probed); other
+// effort-capable models (Sonnet 4.6, Opus 4.5/4.6) 400 on it.
+const modelSupportsAnthropicXHigh = (model: string): boolean => {
+  const m = model.toLowerCase();
+  return /opus-4-[78]/.test(m) || isClaude5(m);
+};
 
-// max is Opus-4.6+-only. Note this set differs from xhigh's: Opus 4.6 takes max but NOT xhigh — the
-// capabilities are independent, so the clamps below are separate.
-export const modelSupportsAnthropicMax = (model: string): boolean => /opus-4-[678]/.test(model.toLowerCase());
+// max is Opus-4.6+ and Claude 5 (5 live-probed). Note this set differs from xhigh's: Opus 4.6 takes max
+// but NOT xhigh — the capabilities are independent, so the clamps below are separate.
+export const modelSupportsAnthropicMax = (model: string): boolean => {
+  const m = model.toLowerCase();
+  return /opus-4-[678]/.test(m) || isClaude5(m);
+};
 
 // The thinking/effort fragment to spread into a Messages body, or {} when omitted. Effort rides
 // output_config.effort (NOT top-level, NOT thinking.budget_tokens — both 400 on Opus 4.7+) behind the

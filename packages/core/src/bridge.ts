@@ -123,6 +123,7 @@ export type BridgeStreamEvent =
   // Thinking passthrough: only the Anthropic upstream produces these, and only the Anthropic door renders
   // them (its SSE encoder + non-streaming reply). The OpenAI door has no thinking vocabulary — its paths
   // never receive them (the Anthropic provider on that door drops thinking before mapping to chunks).
+  | { type: 'thinking_start' }
   | { type: 'thinking'; text: string }
   | { type: 'thinking_signature'; signature: string }
   | { type: 'redacted_thinking'; data: string };
