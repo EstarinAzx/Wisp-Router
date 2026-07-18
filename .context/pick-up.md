@@ -11,116 +11,64 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**You are on branch `claude/review-context-rehydration-cj5mer`** — the review
-branch stacked directly on `claude/context-rehydration-oargfe` (fast-forward, no
-divergence). A 2026-07-18 review session verified the three fixes below (compile
-clean, 477 tests green, marker placement probed empirically) and added one
-hardening commit on top: the breakpoint walk-back now slides a marker due at a
-bare-string chat turn FORWARD to the nearest markable block instead of backward
-— sliding backward let ≥6 consecutive plain turns straddling a step boundary
-widen a gap past the ~20-block lookback (a bounded, silent prefix re-bill).
-Regression test proves the old code produced a 21-block gap. Merging THIS branch
-to `main` picks up everything; the review found no other quota-relevant issues.
-**Pre-release caveat:** the 1h TTL is unit-tested but not live-verified — do one
-real bridged round-trip before tagging in case the OAuth endpoint rejects `ttl`.
+**On `main` at `df913e6`, tagged `v2.0.15`, released and installed. Nothing in
+flight.** The #111 cache follow-up cycle (2026-07-17/18) is fully shipped: cache
+breakpoints spread across fat tool turns, forward-slide hardening past
+bare-string runs, 1h cache TTL, and `tool_result.is_error` passthrough — all
+merged, released via release.yml (green, all four runners), npm has 2.0.15, the
+global `claude-wisp` binary was reinstalled and confirms v2.0.15 on the splash.
+The 1h TTL was live-verified against the real Claude.ai OAuth endpoint (Bridge
+from source, one bridged `-p` round-trip, accepted — no 400). Feature branches
+deleted local + remote. Anthropic-OAuth quota parity with native Claude Code is
+believed complete.
 
-A remote
-session made three fixes here (`f33785d`, `a5ab0f2`, `e0569eb`), pushed but **not
-merged and not released** — `main` is still at `f1fe5d6` (the 2.0.14 wrap-up).
-The installed `wisp-router`/`claude-wisp` binary does NOT have these yet. All
-three touch only the Anthropic-OAuth (Claude.ai Messages) path — Codex/Grok/
-API-key providers use automatic prefix caching (no `cache_control`) and were
-never affected. Two are cache/quota fixes (`anthropic.ts`), one is a fidelity
-fix (`is_error`, threads `catalog.ts` → `bridgeAnthropic.ts` → `anthropic.ts`).
+## What last session did — ship v2.0.15
 
-## What last session did — #111 cache follow-ups + is_error
+1. Reviewed the stacked review branch diff (no findings), fresh-verified
+   (compile clean, 477 tests), fast-forward merged to `main`, pushed.
+2. Cleared the pre-release caveat: live bridged round-trip through the
+   Anthropic-OAuth path with the new body builder — endpoint accepted
+   `ttl:'1h'` markers.
+3. Release prep: `packages/tui/package.json` 2.0.14→2.0.15, span-baseline
+   recaptured (32 Screens), `packages/tui/CHANGELOG.md` entry, commit
+   `df913e6`, tag `v2.0.15` pushed → release.yml green → npm publish →
+   `npm i -g wisp-router@2.0.15`.
+4. Deleted both `claude/*rehydration*` branches.
 
-**`f33785d` fix(core): spread cache breakpoints so fat tool turns don't re-bill.**
-Closes a residual hole in the shipped #111 fix (`e5ec476`).
+## Next task — none mandatory; backlog if idle
 
-- **The hole:** #111 reconstructs two ephemeral `cache_control` breakpoints in
-  `buildAnthropicMessagesBody` (`packages/core/src/anthropic.ts`) — last system
-  block (covers tools+system) + the final message's last block. But Anthropic's
-  automatic cache lookback only reaches ~20 content blocks back from a marker.
-  Wisp collapses one Claude Code turn into a single message of many blocks, so a
-  heavy parallel-tool turn (>~20 blocks) overshoots the window → next turn can't
-  find the prior cache entry → re-bills the conversation prefix. Bounded (the
-  bigger tools+system cache still hit), not another 10x, but a real quota miss —
-  the original "ponytail" comment anticipated it.
-- **The fix:** walk backward from the end placing a marker every ~15 blocks,
-  spending the breakpoints left after system (4/request max → up to 3 on
-  messages). A short conversation never reaches the step, so it emits exactly
-  the one end-of-history marker — **byte-identical to the previous body**. Only
-  fat turns trigger the intermediate markers.
-- **Verified:** `bun run compile` clean, `bun run test` = 474 (added a fat-turn
-  regression: no gap >20 blocks, total breakpoints ≤4). No `packages/tui`
-  changes, so **no span-baseline recapture and no version bump were needed.**
+No queued work. Candidates, all deliberately held (fidelity/UX, not bugs):
 
-**`a5ab0f2` fix(core): use 1h cache TTL on Anthropic breakpoints.** The
-reconstructed markers used the 5-minute default ephemeral TTL, so a bridged
-session's cached prefix expired after 5 min idle and re-wrote on the next
-message — native Claude Code keeps its prefix warm ~1h. Switched the CACHE const
-to `ttl:'1h'` (GA on first-party; the same TTL native uses over OAuth). Closes
-the last quota-relevant parity gap for stop-and-go usage. Tradeoff: 1h writes
-cost 2x vs 1.25x, worth it since an interactive session re-reads the prefix many
-times. `bun run test` = 474 (all `cache_control` assertions now expect
-`{ type: 'ephemeral', ttl: '1h' }`; the inbound-drop tests in
-`bridgeAnthropic.test.ts` stay 5m — they're what Claude Code SENDS and Wisp
-ignores, not what Wisp emits).
-
-**Net effect:** for an active bridged session the Anthropic-OAuth path now caches
-like native unwisped Claude — no 10x re-bill, and the prefix survives idle gaps.
-
-## Next task — ship it, then optional follow-ups
-
-1. **Review + merge:** review `git diff main` (two files:
-   `packages/core/src/anthropic.ts` + `anthropic.test.ts`), merge this branch to
-   `main`. Core-only change — **no span-baseline recapture, no package.json
-   bump.**
-2. **Release to reach the binary:** the fix only reaches the running
-   `claude-wisp` after a `v2.x` release (tag = `packages/tui/package.json`
-   version, `release.yml` publishes) + reinstall. A release DOES need a
-   `packages/tui/package.json` bump → THEN recapture span-baseline (`bun
-   scripts/span-baseline.tsx --update`) + update `packages/tui/CHANGELOG.md`.
-3. **Remaining un-done fidelity gaps** (fidelity, NOT quota — held for a
-   deliberate follow-up, NOT drive-by work):
-   - **`is_error` passthrough — DONE** in `e0569eb`. `tool_result.is_error` now
-     threads through the normalized `toolResults` (`isError?`) — parser captures
-     it, `buildAnthropicMessagesBody` re-emits it. Anthropic-door only.
-   - **thinking / redacted_thinking preservation — HELD, and risky to do
-     casually.** Anthropic requires thinking blocks passed back byte-for-byte
-     with signatures intact — any normalization touch breaks the signature →
-     400. Wisp also routes to non-Anthropic backends, where these blocks are
-     invalid and must be conditionally dropped. `NormalizedTurn` has no thinking
-     slot, and Wisp deliberately reconstructs thinking from `effort`. This is
-     architecturally significant (CLAUDE.md §3) — needs a design pass, not a
-     quick patch, and it is NOT a quota issue. Discuss before implementing.
-   - **`document`/PDF passthrough — HELD.** A feature, not a bug: `splitUserBlocks`
-     handles only base64 `image` blocks, so a `document` block is silently
-     dropped. Adding it needs a new normalized slot + a check that the target
-     backend accepts PDFs. Only worth it if users actually feed PDFs.
-   - **1h cache TTL — DONE** in `a5ab0f2` (see above).
-   - **Backlog candidate (speculative, NOT a bug):** mirror native Claude Code's
-     "switching model re-pays the cache" warning — surface a heads-up in the TUI
-     `/routing` flow (`routingScreens.tsx`) when a user re-points the MAIN-LOOP
-     target of an active session (a model switch cold-writes the model-scoped
-     cache). Only bites if someone flips the main target mid-session (rare —
-     subagents are separate contexts and don't trip it). UI-layer, low value;
-     build only if users actually hit it.
+- **thinking / redacted_thinking preservation — HELD, risky to do casually.**
+  Anthropic requires thinking blocks passed back byte-for-byte with signatures
+  intact; Wisp also routes to non-Anthropic backends where they must be
+  dropped; `NormalizedTurn` has no thinking slot. Architecturally significant
+  (CLAUDE.md §3) — needs a design pass (`/hp` or grill), NOT a quick patch.
+  Discuss before implementing.
+- **`document`/PDF passthrough — HELD.** Feature, not bug: `splitUserBlocks`
+  drops `document` blocks silently. Needs a new normalized slot + backend
+  capability check. Only worth it if users actually feed PDFs.
+- **TUI model-switch cache warning — backlog, speculative.** Surface a
+  heads-up in `/routing` (`routingScreens.tsx`) when re-pointing the MAIN-LOOP
+  target of an active session (model switch cold-writes the model-scoped
+  cache). Low value; build only if someone actually hits it.
 
 ## Landmines
 
-- **This is a feature branch, against the solo-repo `main` habit.** The remote
-  session was pinned to this branch. Merge to `main` yourself when happy.
-- **Changelog split is policy:** `v2.x` release prep updates
-  `packages/tui/CHANGELOG.md`; the vscode changelog is extension-only.
-- Span baseline embeds the version string — any `packages/tui/package.json` bump
-  drifts all 32 Screens; recapture with `bun scripts/span-baseline.tsx --update`
-  as part of release prep. (Not needed to merge this fix — only if you release.)
+- Release checklist (for any future `v2.x`): bump `packages/tui/package.json` →
+  recapture span-baseline (`bun scripts/span-baseline.tsx --update` from
+  `packages/tui`) → update `packages/tui/CHANGELOG.md` → tag must equal the
+  package.json version or release.yml refuses. Changelog split is policy:
+  vscode changelog is extension-only.
+- `wisp --version` doesn't exist — it launches the TUI; version is on the
+  splash.
+- Live-testing the Bridge from source: check port 41184 is free first (an
+  installed-binary Bridge would be a stale-code listener and #63 loud-fail on
+  double-start); `bun packages/tui/src/index.tsx serve`, then
+  `bun packages/tui/src/claude-wisp.ts -p "..."` from a neutral cwd.
 - `plugins/slot/**` edits need `claude plugin update wisp-slot@wisp-router`.
-- Tag must equal `packages/tui/package.json` version or release.yml refuses.
 
 ## Related
 
 - [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
-- [[2026-07-17-wisp-router-gets-its-own-changelog]]
+- [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]]

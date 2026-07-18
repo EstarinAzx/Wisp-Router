@@ -1,77 +1,68 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-17
+updated: 2026-07-18
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-17 by Claude (remote session, #111 cache follow-up)._
-_At commit: `e0569eb` on branch `claude/context-rehydration-oargfe` (pushed,
-NOT merged). `main` is unchanged at `f1fe5d6`._
+_Last updated: 2026-07-18 by Claude (local session — review branch shipped as v2.0.15)._
+_At commit: `df913e6` on `main` (pushed, tagged `v2.0.15`, released, binary installed)._
 
 ## Current focus
 
-**Three Anthropic-path fixes are parked on `claude/context-rehydration-oargfe`,
-awaiting local review + merge.** Two close the residual cache gaps (fat
-parallel-tool turns re-billing the prefix; the prefix expiring after 5-min idle
-gaps); one carries `tool_result.is_error` through so a failed tool call keeps its
-explicit failure signal. Not merged, not released — the running `claude-wisp`
-binary does not have them yet. All Anthropic-path only (Codex/Grok/API-key
-providers were never affected — no `cache_control` there).
+**Nothing in flight — clean slate.** The #111 cache follow-up cycle is fully
+shipped: all three remote-session fixes plus the review session's forward-slide
+hardening are merged to `main`, released as `wisp-router@2.0.15`, and the
+installed `claude-wisp` binary has them. The Anthropic-OAuth path now caches
+like native unwisped Claude Code (spread breakpoints, 1h TTL, is_error
+fidelity). Feature branches deleted local + remote.
 
 ## State
 
-- **In flight:** `f33785d` + `a5ab0f2` + `e0569eb` on this branch — review
-  `git diff main` (`anthropic.ts` + `catalog.ts` + `bridgeAnthropic.ts` + their
-  tests), merge to `main`.
+- **In flight:** None.
 - **Done this session:**
-  - Rehydrated context, then audited the shipped #111 fix (`e5ec476`) end to
-    end. Verdict: the fix is correct and IS the core fix; the flagged residual
-    "20-block lookback" hole is real; the analysis's proposed one-leapfrog fix
-    was imprecise (doesn't close a single >20-block turn — intermediate markers
-    inside the fat turn do).
-  - `f33785d` — `buildAnthropicMessagesBody` now spreads up to 3 message-level
-    breakpoints (one every ~15 blocks, walking back from the end) so no gap
-    exceeds the ~20-block cache lookback. No-op for normal conversations
-    (byte-identical body); only fat parallel-tool turns trigger extras.
-  - `a5ab0f2` — the reconstructed markers now use `ttl:'1h'` instead of the
-    5-min default, so the cached prefix survives idle gaps like native Claude
-    Code does (GA on first-party; native uses the same over OAuth). Tradeoff:
-    2x write vs 1.25x, worth it for interactive re-reads.
-  - `e0569eb` — `tool_result.is_error` now threads through the normalized
-    `toolResults` (`isError?`): parser captures it, `buildAnthropicMessagesBody`
-    re-emits it. Backward-compatible, Anthropic-door only.
-  - Verified: `bun run compile` clean, `bun run test` = 476 (was 473; +3:
-    fat-turn regression, is_error inbound + outbound). No `packages/tui` touch →
-    no span recapture, no bump.
-- **Held deliberately (fidelity, NOT quota — see [[pick-up]] for why):** thinking-
-  block preservation (risky — signature 400s + non-Anthropic routing; needs a
-  design pass) and `document`/PDF passthrough (a feature; only if users feed PDFs).
-- **Blocked:** None. Merge/release is the human's call (solo-repo habit is
-  straight-to-`main`; this session was pinned to a branch instead).
+  - Reviewed `git diff main` on `claude/review-context-rehydration-cj5mer`
+    (walk-back loop logic, breakpoint budget, is_error threading) — no findings.
+    Fresh verify: compile clean, 477/477 tests.
+  - Fast-forward merged to `main` (`f1fe5d6` → `3a7c4e0`), pushed.
+  - **Live-verified the 1h TTL pre-release caveat:** started Bridge from source
+    (sole listener on 41184), one-shot `claude-wisp -p` round-trip; Bridge log
+    confirmed `route family 'claude-fable-5' -> anthropic`; OAuth endpoint
+    accepted the `ttl:'1h'` body, no 400.
+  - Released v2.0.15: tui bump 2.0.14→2.0.15, span-baseline recaptured
+    (32 Screens), CHANGELOG entry, tag pushed, release.yml green on all four
+    runners, npm publish confirmed (`npm view wisp-router version` = 2.0.15).
+  - Reinstalled global binary — splash confirms v2.0.15.
+  - Deleted `claude/context-rehydration-oargfe` +
+    `claude/review-context-rehydration-cj5mer` (local + origin).
+- **Held deliberately (fidelity/UX backlog, NOT bugs — see [[pick-up]]):**
+  thinking-block preservation (needs a design pass — signature 400s +
+  non-Anthropic routing), `document`/PDF passthrough (feature, only if users
+  feed PDFs), TUI model-switch cache warning in `routingScreens.tsx`
+  (speculative, build only if hit).
+- **Blocked:** None.
 
 ## Pick up here
 
-See [[pick-up]]. Ship path: review → merge to `main` (core-only, no recapture) →
-optional `v2.x` release to push the fix into the `claude-wisp` binary (that step
-DOES need a `packages/tui/package.json` bump + span recapture + changelog).
+See [[pick-up]]. No mandatory next task — next session picks new work or one of
+the held backlog items.
 
 ## Open questions
 
-- Do the optional fidelity gaps get fixed? `is_error` passthrough (threads the
-  shared normalized `toolResults` shape, ~4 files) is the cheapest; thinking /
-  PDF / 1h-TTL left alone deliberately. None are quota bugs.
+- Do the held fidelity gaps ever get built? Thinking preservation is the
+  architecturally significant one — discuss before implementing (CLAUDE.md §3).
 - Elucidate's badge is also purple — unrelated older open question, still open.
 
 ## Recent context
 
-- The shipped #111 fix (`e5ec476`) already killed the big 5–10x burn (dropped
-  `cache_control`). This follow-up only addresses the smaller, bounded residual
-  leak on big tool-batch turns.
-- Test suite totals: core vitest **474**, tui bun test 13 (unchanged this
-  session — the change is core-only).
+- The shipped #111 fix (`e5ec476`, 2.0.10) killed the big 5–10x burn; this
+  2.0.15 cycle closed the bounded residuals (fat-turn lookback overshoot,
+  5-min idle expiry) and the is_error fidelity gap. Quota parity with native
+  Claude Code is now believed complete on the Anthropic-OAuth path.
+- Test suite totals: core vitest **477**, tui bun test 13.
+- `wisp --version` is not a flag — version reads off the TUI splash.
 
 ## Related
 
