@@ -15,7 +15,7 @@
  *   - Webview → ext messages: ready | setApiKey{value} | clearApiKey | selectModel{value}
  *     | selectProvider{value} | setBaseUrl{value} | refreshModels | fetchProviderModels{value: providerId}
  *     | codexSignIn | codexSignOut
- *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
+ *     | selectEffort{value} | bridgeToggle | copyBridgeSecret | copyBridgeAddress
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
  *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}
  *     | setAliasOnlyModels{value:boolean}.
@@ -46,7 +46,6 @@ export type PanelState = {
   bridgeRunning: boolean; // Bridge listener state → the panel's running/stopped indicator + Start/Stop label
   bridgeAddress: string; // http://127.0.0.1:<port> — shown so the user knows what to point the CLI at
   bridgeSecret?: string; // the access secret, sent only while running (meant to be copied into the CLI)
-  claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), sent only while running
   routingFamilies?: { [K in FamilyKey]?: Target }; // the Routing map's four Family rows (#51)
   routingAliases?: { name: string; target: Target }[]; // the Routing map's Alias rows (#52)
   aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52) — drives the toggle
@@ -81,7 +80,6 @@ export type PanelHost = {
   toggleBridge: () => Promise<void>; // start/stop the Bridge — the same lifecycle the command drives
   copyBridgeSecret: () => Promise<void>; // copy the access secret to the clipboard (host-side, webview can't)
   copyBridgeAddress: () => Promise<void>;
-  copyClaudeSnippet: (variant: 'powershell' | 'bash' | 'settingsJson') => Promise<void>; // copy one Claude Code setup snippet (#47)
 };
 
 // ----------------------------- Error sanitizing ----------------------------- //
@@ -205,10 +203,6 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'copyBridgeAddress':
           await this.host.copyBridgeAddress();
-          return;
-        case 'copyClaudeSnippet':
-          // The webview only names the variant; the host rebuilds and copies its own values.
-          if (msg.value === 'powershell' || msg.value === 'bash' || msg.value === 'settingsJson') await this.host.copyClaudeSnippet(msg.value);
           return;
         case 'setFamilyRoute': {
           // A Family row commit (#51): both halves present → the row's Target; an empty Provider or

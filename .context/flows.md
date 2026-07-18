@@ -62,6 +62,20 @@ tags: [flows]
 3. `packages/core/src/routingCli.ts:21` accepts only show or `--json`; text iterates shared `FAMILY_KEYS`, while JSON calls `JSON.stringify` on the current map itself.
 4. `packages/tui/src/routingCli.ts:19` prints returned lines and hands the exit code back to the process.
 
+## TUI Bridge info panel
+- **Question:** where is the Bridge panel (OpenAI door / Anthropic door / Access secret / claude-wisp / Advisor heads-up) rendered?  **Lens:** understand
+- **Summary:** `/bridge` in the TUI starts (or reuses) the listener, freezes address+secret into mode state, and `App` mounts pure `BridgeScreen` which hardcodes every visible label and only interpolates address/secret/port.
+- **Entry:** packages/tui/src/app.tsx:316 (`case 'bridge'`)
+- **Key files:** packages/tui/src/app.tsx, packages/tui/src/infoScreens.tsx, packages/tui/src/bridge.ts, packages/tui/src/modes.ts
+- **Updated:** 2026-07-18
+
+### Hops
+1. packages/tui/src/app.tsx:316-351 — slash `/bridge` ensure-on: `off` stops; if running, re-show screen; else `bridge.start()` then set mode.
+2. packages/tui/src/bridge.ts:39-40,31-36 — `bridgeAddress()` / `ensureBridgeSecret()` supply `http://127.0.0.1:<port>` + secret from `~/.wisp` auth.
+3. packages/tui/src/modes.ts:41 — mode payload `{ kind:'bridge', address, secret }`.
+4. packages/tui/src/app.tsx:526 — `{mode.kind === 'bridge' && <BridgeScreen address secret cols={panelCols} />}`.
+5. packages/tui/src/infoScreens.tsx:29-72 — pure JSX: title, ● up · port, door rows, claude-wisp, wisp-slot rec, amber Advisor warning, Esc footer.
+
 ## Related
 
 - [[overview]]

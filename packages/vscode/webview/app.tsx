@@ -14,7 +14,7 @@
  *   - Outbound: ready | setApiKey{value} | clearApiKey | selectModel{value} | selectProvider{value}
  *     | setBaseUrl{value} | refreshModels | fetchProviderModels{value: providerId}
  *     | codexSignIn | codexSignOut | selectEffort{value}
- *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress | copyClaudeSnippet{value}
+ *     | bridgeToggle | copyBridgeSecret | copyBridgeAddress
  *     | setFamilyRoute{value:{family,providerId,model}} | setAlias{value:{name,providerId,model}}
  *     | removeAlias{value:{name}} | setAliasPickerShowsModel{value:boolean}.
  */
@@ -40,7 +40,6 @@ type State = {
   bridgeRunning: boolean;
   bridgeAddress: string;
   bridgeSecret?: string; // present only while running — the secret to paste into the Copilot CLI
-  claudeSnippets?: { powershell: string; bash: string; settingsJson: string }; // Claude Code setup snippets (#47), present only while running
   routingFamilies?: Partial<Record<FamilyKey, { providerId: string; model: string }>>; // the Routing map's four Family rows (#51)
   routingAliases?: { name: string; target: { providerId: string; model: string } }[]; // the Routing map's Alias rows (#52)
   aliasPickerShowsModel?: boolean; // alias picker rows carry the pinned model id (#52)
@@ -219,193 +218,222 @@ export const App = () => {
   const options = baseOptions.includes(state.model) ? baseOptions : [state.model, ...baseOptions];
 
   return (
-    <main class="flex flex-col gap-4 p-3">
+    <main class="flex flex-col gap-3 p-3">
 
-      {/* ------------------------------ Activity ------------------------------ */}
-      {/* The live Thinking/Idle signal — pulse while a request is on the wire, steady dot otherwise. */}
-      <section class="flex items-center gap-2">
-        <span
-          class={`inline-block h-2 w-2 rounded-full ${
-            thinking
-              ? 'animate-pulse bg-[var(--vscode-progressBar-background)]'
-              : 'bg-[var(--vscode-charts-green,var(--vscode-descriptionForeground))]'
-          }`}
-        />
-        <span class="text-[var(--vscode-descriptionForeground)]">{thinking ? 'Thinking…' : 'Idle'}</span>
-      </section>
+      {/* ------------------------------ Header: brand + status ------------------------------ */}
+      {/* The wordmark anchors the panel; the live Thinking/Idle signal sits on the right — pulse while
+          a request is on the wire, steady dot otherwise. */}
+      <header class="flex items-center justify-between gap-2 px-1 pt-1 pb-0.5">
+        <span class="brand">WISP_</span>
+        <span class={`flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider ${thinking ? '' : 'text-[var(--vscode-descriptionForeground)]'}`}>
+          <span
+            class={`inline-block h-1.5 w-1.5 rounded-full ${
+              thinking
+                ? 'animate-pulse bg-[var(--vscode-progressBar-background)]'
+                : 'bg-[var(--vscode-charts-green,var(--vscode-descriptionForeground))]'
+            }`}
+          />
+          {thinking ? 'Thinking…' : 'Idle'}
+        </span>
+      </header>
 
-      {/* ------------------------------ Provider ------------------------------ */}
-      {/* The Active Provider drives the base URL the key is sent to. Switching re-keys the model
-          list and the key hint below — no auto-prompt for a key-less Provider, just the hint. */}
-      <section class="flex flex-col gap-1.5">
-        <h2 class="section-title">Provider</h2>
-        <select
-          class="input"
-          value={state.providerId}
-          onChange={(e) => {
-            const value = e.currentTarget.value;
-            setState({ ...state, providerId: value }); // optimistic; the state push confirms
-            vscode.postMessage({ type: 'selectProvider', value });
-          }}
-        >
-          {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
-        {/* Cline ToS (§2.2): user-key only + this note. The responsibility sits with the user. */}
-        {state.providerId === 'cline' && (
-          <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-            You are responsible for your own Cline ToS compliance.
-          </p>
+      {/* ------------------------------ Connection card ------------------------------ */}
+      {/* Provider + credentials. The Active Provider drives the base URL the key is sent to; switching
+          re-keys the model list and the key hint. OAuth Providers swap the key field for sign-in/out. */}
+      <section class="card">
+        <h2 class="card-title">Connection</h2>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="field-label">Provider</label>
+          <select
+            class="input"
+            value={state.providerId}
+            onChange={(e) => {
+              const value = e.currentTarget.value;
+              setState({ ...state, providerId: value }); // optimistic; the state push confirms
+              vscode.postMessage({ type: 'selectProvider', value });
+            }}
+          >
+            {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          {/* Cline ToS (§2.2): user-key only + this note. The responsibility sits with the user. */}
+          {state.providerId === 'cline' && (
+            <p class="hint">You are responsible for your own Cline ToS compliance.</p>
+          )}
+        </div>
+
+        {/* Only Custom exposes an editable base URL (machine-scoped wisp.baseUrl); built-ins hide it.
+            Commit on blur or Enter, not per keystroke. */}
+        {state.isCustom && (
+          <div class="flex flex-col gap-1.5">
+            <label class="field-label">Base URL</label>
+            <input
+              class="input"
+              type="text"
+              placeholder="https://your-endpoint/v1"
+              value={state.baseUrl}
+              onInput={(e) => setState({ ...state, baseUrl: e.currentTarget.value })}
+              onBlur={(e) => commitBaseUrl(e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitBaseUrl(e.currentTarget.value); }}
+            />
+          </div>
+        )}
+
+        {/* Credentials: OAuth sign-in OR API key. OAuth Providers (Codex, Anthropic) have no API key —
+            "usable when signed in" → account sign-in/out control. Others keep the key field. */}
+        {oauth ? (
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="field-label">{accountLabel}</label>
+              {state.signedIn ? (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
+                  Signed in
+                </span>
+              ) : (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-descriptionForeground)]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-descriptionForeground)] opacity-60" />
+                  Not signed in
+                </span>
+              )}
+            </div>
+            <div class="flex gap-1.5">
+              <button class="btn flex-1" disabled={state.signedIn} onClick={() => vscode.postMessage({ type: signInMsg })}>
+                Sign in
+              </button>
+              <button
+                class="btn btn-secondary flex-1"
+                disabled={!state.signedIn}
+                onClick={() => vscode.postMessage({ type: signOutMsg })}
+              >
+                Sign out
+              </button>
+            </div>
+            <p class="hint">{accountHint}</p>
+          </div>
+        ) : (
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="field-label">API key</label>
+              {state.keySource === 'stored' ? (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
+                  Key set
+                </span>
+              ) : state.keySource === 'env' ? (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
+                  {state.keyEnv} env
+                </span>
+              ) : (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-descriptionForeground)]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-descriptionForeground)] opacity-60" />
+                  No key
+                </span>
+              )}
+            </div>
+            <input
+              class="input"
+              type="password"
+              placeholder="Paste API key"
+              value={keyDraft}
+              onInput={(e) => setKeyDraft(e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }}
+            />
+            <div class="flex gap-1.5">
+              <button class="btn flex-1" disabled={!keyDraft.trim()} onClick={saveKey}>
+                {state.keyIsSet ? 'Update' : 'Save'}
+              </button>
+              <button
+                class="btn btn-secondary"
+                disabled={state.keySource !== 'stored'} // Clear can't remove an env-provided key
+                onClick={() => vscode.postMessage({ type: 'clearApiKey' })}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
         )}
       </section>
 
-      {/* ------------------------------ Base URL (Custom only) ------------------------------ */}
-      {/* Only Custom exposes an editable base URL (machine-scoped wisp.baseUrl); built-ins hide it
-          and the footer below shows the derived URL. Commit on blur or Enter, not per keystroke. */}
-      {state.isCustom && (
-        <section class="flex flex-col gap-1.5">
-          <h2 class="section-title">Base URL</h2>
+      {/* ------------------------------ Model card ------------------------------ */}
+      <section class="card">
+        <h2 class="card-title">Model</h2>
+
+        <div class="flex flex-col gap-1.5">
+          <label class="field-label">Model</label>
+          <div class="flex gap-1.5">
+            <select
+              class="input min-w-0 flex-1"
+              value={state.model}
+              onChange={(e) => chooseModel(e.currentTarget.value)}
+            >
+              {options.map((id) => <option key={id} value={id}>{id}</option>)}
+            </select>
+            {/* The OAuth kinds have no /models route (not the OpenAI-chat client), so hide the live
+                refresh — the user picks from the curated list or types a model id in the field below. */}
+            {!oauth && (
+              <button
+                class="btn btn-secondary shrink-0"
+                title="Refresh model list from the endpoint"
+                onClick={() => { setModelsError(''); vscode.postMessage({ type: 'refreshModels' }); }}
+              >
+                ↻
+              </button>
+            )}
+          </div>
           <input
             class="input"
             type="text"
-            placeholder="https://your-endpoint/v1"
-            value={state.baseUrl}
-            onInput={(e) => setState({ ...state, baseUrl: e.currentTarget.value })}
-            onBlur={(e) => commitBaseUrl(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') commitBaseUrl(e.currentTarget.value); }}
+            placeholder="Or type a model id and press Enter"
+            value={modelDraft}
+            onInput={(e) => setModelDraft(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') applyModelDraft(); }}
           />
-        </section>
-      )}
-
-      {/* --------------------- Credentials: OAuth sign-in OR API key --------------------- */}
-      {/* The OAuth Providers (Codex, Anthropic) have no API key — each is "usable when signed in", so it
-          swaps the key field for an account sign-in/out control. Every other Provider keeps the API-key
-          field. One block serves both kinds; the label + messages are routed by kind. */}
-      {oauth ? (
-        <section class="flex flex-col gap-1.5">
-          <h2 class="section-title">{accountLabel}</h2>
-          <p class="text-[var(--vscode-descriptionForeground)]">
-            {state.signedIn ? '● Signed in' : '○ Not signed in'}
-          </p>
-          <div class="flex gap-1.5">
-            <button class="btn" disabled={state.signedIn} onClick={() => vscode.postMessage({ type: signInMsg })}>
-              Sign in
-            </button>
-            <button
-              class="btn btn-secondary"
-              disabled={!state.signedIn}
-              onClick={() => vscode.postMessage({ type: signOutMsg })}
-            >
-              Sign out
-            </button>
-          </div>
-          <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-            {accountHint}
-          </p>
-        </section>
-      ) : (
-        <section class="flex flex-col gap-1.5">
-          <h2 class="section-title">API Key</h2>
-          <p class="text-[var(--vscode-descriptionForeground)]">
-            {state.keySource === 'stored' ? '● Key set'
-              : state.keySource === 'env' ? `● Using ${state.keyEnv} from environment`
-              : '○ No key set'}
-          </p>
-          <input
-            class="input"
-            type="password"
-            placeholder="Paste API key"
-            value={keyDraft}
-            onInput={(e) => setKeyDraft(e.currentTarget.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') saveKey(); }}
-          />
-          <div class="flex gap-1.5">
-            <button class="btn" disabled={!keyDraft.trim()} onClick={saveKey}>
-              {state.keyIsSet ? 'Update' : 'Save'}
-            </button>
-            <button
-              class="btn btn-secondary"
-              disabled={state.keySource !== 'stored'} // Clear can't remove an env-provided key
-              onClick={() => vscode.postMessage({ type: 'clearApiKey' })}
-            >
-              Clear
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* ------------------------------ Model ------------------------------ */}
-      <section class="flex flex-col gap-1.5">
-        <h2 class="section-title">Model</h2>
-        <div class="flex gap-1.5">
-          <select
-            class="input min-w-0 flex-1"
-            value={state.model}
-            onChange={(e) => chooseModel(e.currentTarget.value)}
-          >
-            {options.map((id) => <option key={id} value={id}>{id}</option>)}
-          </select>
-          {/* The OAuth kinds have no /models route (not the OpenAI-chat client), so hide the live refresh —
-              the user picks from the curated list or types a model id in the field below. */}
-          {!oauth && (
-            <button
-              class="btn btn-secondary shrink-0"
-              title="Refresh model list from the endpoint"
-              onClick={() => { setModelsError(''); vscode.postMessage({ type: 'refreshModels' }); }}
-            >
-              ↻
-            </button>
-          )}
+          {modelsError && <p class="hint text-[var(--vscode-errorForeground)]">{modelsError}</p>}
         </div>
-        <input
-          class="input"
-          type="text"
-          placeholder="Or type a model id and press Enter"
-          value={modelDraft}
-          onInput={(e) => setModelDraft(e.currentTarget.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') applyModelDraft(); }}
-        />
-        {modelsError && <p class="text-[var(--vscode-errorForeground)]">{modelsError}</p>}
+
+        {/* Reasoning depth for the effort-aware OAuth Providers — Codex and Anthropic (#31) — one value
+            governing every call (Inquire + chat). Shown whenever the host populates effort; inert for
+            models that ignore it (Codex spark/gpt-4.x, Claude Haiku). */}
+        {state.effort !== undefined && (
+          <div class="flex flex-col gap-1.5">
+            <label class="field-label">Effort</label>
+            <select
+              class="input"
+              value={state.effort ?? 'medium'}
+              onChange={(e) => {
+                const value = e.currentTarget.value as 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+                setState({ ...state, effort: value }); // optimistic; the state push confirms
+                vscode.postMessage({ type: 'selectEffort', value });
+              }}
+            >
+              {/* Options come from the host so 'max' shows only for max-capable Claude (#32) — no capability
+                  regex duplicated in this bundle. Fall back to the base set if the host omitted them. */}
+              {(state.effortOptions ?? ['low', 'medium', 'high', 'xhigh']).map((o) => (
+                <option value={o}>{o}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </section>
 
-      {/* ------------------------------ Effort ------------------------------ */}
-      {/* Reasoning depth for the effort-aware OAuth Providers — Codex and Anthropic (#31) — one value
-          governing every call (Inquire + chat). Shown whenever the host populates effort; inert for
-          models that ignore it (Codex spark/gpt-4.x, Claude Haiku). */}
-      {state.effort !== undefined && (
-        <section class="flex flex-col gap-1.5">
-          <h2 class="section-title">Effort</h2>
-          <select
-            class="input"
-            value={state.effort ?? 'medium'}
-            onChange={(e) => {
-              const value = e.currentTarget.value as 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-              setState({ ...state, effort: value }); // optimistic; the state push confirms
-              vscode.postMessage({ type: 'selectEffort', value });
-            }}
-          >
-            {/* Options come from the host so 'max' shows only for max-capable Claude (#32) — no capability
-                regex duplicated in this bundle. Fall back to the base set if the host omitted them. */}
-            {(state.effortOptions ?? ['low', 'medium', 'high', 'xhigh']).map((o) => (
-              <option value={o}>{o}</option>
-            ))}
-          </select>
-        </section>
-      )}
-
-      {/* ------------------------------ Bridge ------------------------------ */}
+      {/* ------------------------------ Bridge card ------------------------------ */}
       {/* The outward local OpenAI endpoint. OFF by default; the switch drives the SAME start/stop as the
           command. While running, show the address + access secret (copy host-side) to paste into the CLI. */}
-      <section class="flex flex-col gap-1.5">
-        <h2 class="section-title">Bridge</h2>
-        <div class="flex items-center gap-2">
-          <span
-            class={`inline-block h-2 w-2 rounded-full ${
-              state.bridgeRunning
-                ? 'bg-[var(--vscode-charts-green,var(--vscode-descriptionForeground))]'
-                : 'bg-[var(--vscode-descriptionForeground)]'
-            }`}
-          />
-          <span class="text-[var(--vscode-descriptionForeground)]">{state.bridgeRunning ? 'Running' : 'Stopped'}</span>
+      <section class="card">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="card-title">Bridge</h2>
+          <span class={`flex items-center gap-1.5 text-[11px] ${state.bridgeRunning ? 'text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]' : 'text-[var(--vscode-descriptionForeground)]'}`}>
+            <span
+              class={`inline-block h-1.5 w-1.5 rounded-full ${
+                state.bridgeRunning
+                  ? 'bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]'
+                  : 'bg-[var(--vscode-descriptionForeground)] opacity-60'
+              }`}
+            />
+            {state.bridgeRunning ? 'Running' : 'Stopped'}
+          </span>
         </div>
         <button class="btn" onClick={() => vscode.postMessage({ type: 'bridgeToggle' })}>
           {state.bridgeRunning ? 'Stop Bridge' : 'Start Bridge'}
@@ -420,17 +448,18 @@ export const App = () => {
               <input class="input min-w-0 flex-1" type="password" readonly value={state.bridgeSecret ?? ''} />
               <button class="btn btn-secondary shrink-0" title="Copy access secret" onClick={() => vscode.postMessage({ type: 'copyBridgeSecret' })}>Copy</button>
             </div>
-            <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-              Open a new terminal after starting so the Copilot CLI inherits the Bridge.
-            </p>
+            <p class="hint">Open a new terminal after starting so the Copilot CLI inherits the Bridge.</p>
           </div>
         )}
 
-        {/* --------------------- Routing map (#51) --------------------- */}
-        {/* The four fixed Family routes: a bridged claude-* id of a family answers with that row's
-            Target — the picked Provider plus the pinned model typed here — instead of the Active
-            Provider. Provider "Unmapped" (or an empty model) keeps the row explicitly unmapped. */}
-        <h3 class="section-title mt-2">Routing map</h3>
+      </section>
+
+      {/* --------------------- Routing map card (#51/#52) --------------------- */}
+      {/* The four fixed Family routes: a bridged claude-* id of a family answers with that row's
+          Target — the picked Provider plus the pinned model typed here — instead of the Active
+          Provider. Provider "Unmapped" (or an empty model) keeps the row explicitly unmapped. */}
+      <section class="card">
+        <h2 class="card-title">Routing map</h2>
         {routeDrafts && FAMILY_KEYS.map((family) => {
           const d = routeDrafts[family];
           const mapped = !!state.routingFamilies?.[family];
@@ -477,7 +506,7 @@ export const App = () => {
             </div>
           );
         })}
-        <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+        <p class="hint">
           Bridged claude-opus / sonnet / haiku / fable names answer with their Target (Provider + pinned model). Unmapped rows use the Active Provider.
         </p>
 
@@ -535,11 +564,11 @@ export const App = () => {
           <button class="btn btn-secondary shrink-0" disabled={!aliasReady} onClick={addAlias}>Add</button>
         </div>
         {aliasCollides && (
-          <p class="text-xs text-[var(--vscode-errorForeground)]">
+          <p class="hint text-[var(--vscode-errorForeground)]">
             '{aliasName}' is a Provider id — pick a different alias name.
           </p>
         )}
-        <p class="text-xs text-[var(--vscode-descriptionForeground)]">
+        <p class="hint">
           Aliases are exact bridged model names (e.g. /model sol) answering with their Target. They also appear in the Bridge's models list.
         </p>
         {/* Optimistic echo like chooseModel — the config listener's state push confirms; without it an
@@ -569,40 +598,36 @@ export const App = () => {
           List only aliases in Claude Code's /model list (hide provider rows)
         </label>
 
-        {/* --------------------- Claude Code setup (#47) --------------------- */}
-        {/* Ready-to-copy env snippets pointing Claude Code at the live door. Per-session shell lines are the
-            default; the project .claude/settings.json block is the persistent variant. The global
-            ~/.claude/settings.json form is deliberately never offered — it would reroute every session. */}
-        <h3 class="section-title mt-2">Claude Code</h3>
-        {state.claudeSnippets ? (
-          <div class="flex flex-col gap-1.5">
-            {([
-              ['PowerShell (this session)', 'powershell', state.claudeSnippets.powershell],
-              ['bash (this session)', 'bash', state.claudeSnippets.bash],
-              ['Project .claude/settings.json (persistent)', 'settingsJson', state.claudeSnippets.settingsJson],
-            ] as const).map(([label, variant, text]) => (
-              <div key={variant} class="flex flex-col gap-1">
-                <div class="flex items-center gap-1.5">
-                  <span class="min-w-0 flex-1 text-xs text-[var(--vscode-descriptionForeground)]">{label}</span>
-                  <button class="btn btn-secondary shrink-0" title={`Copy ${label} snippet`} onClick={() => vscode.postMessage({ type: 'copyClaudeSnippet', value: variant })}>Copy</button>
-                </div>
-                <pre class="input overflow-x-auto whitespace-pre text-xs">{text}</pre>
-              </div>
-            ))}
-            <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-              Claude Code reads env at startup — open a new terminal (or restart claude) after applying.
-            </p>
-          </div>
-        ) : (
-          <p class="text-xs text-[var(--vscode-descriptionForeground)]">
-            Start the Bridge to get copy-paste setup snippets for Claude Code.
-          </p>
-        )}
       </section>
 
-      <footer class="text-xs text-[var(--vscode-descriptionForeground)] break-all">
-        {state.baseUrl}
-      </footer>
+      {/* --------------------- Claude Code card (#47) --------------------- */}
+      {/* Ready-to-copy env snippets pointing Claude Code at the live door, plus the launch path + the
+          plugin nudge + the Advisor caveat the TUI /bridge screen shows. Per-session shell lines are the
+          default; the project .claude/settings.json block is the persistent variant. The global
+          ~/.claude/settings.json form is deliberately never offered — it would reroute every session. */}
+      <section class="card">
+        <h2 class="card-title">Claude Code</h2>
+
+        {/* Launch path — the claude-wisp launcher wires Claude Code to this Bridge (twin of the TUI). */}
+        <div class="flex flex-col gap-0.5">
+          <p class="field-label">
+            <code class="snippet">claude-wisp [args…]</code>
+          </p>
+          <p class="hint">Launches claude wired to this Bridge.</p>
+        </div>
+
+        {/* The plugin makes bridged sessions self-aware — nudge here, where Claude Code gets wired. */}
+        <p class="hint">
+          Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: <code class="snippet">/plugin marketplace add EstarinAzx/Wisp-Router</code>
+        </p>
+
+        {/* Advisor is endpoint-gated upstream — the Bridge can't intercept it, so warn where the wiring happens. */}
+        <p class="hint text-[var(--vscode-editorWarning-foreground,#fbbf24)]">
+          Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.
+        </p>
+      </section>
+
+      <footer class="hint break-all px-0.5">{state.baseUrl}</footer>
     </main>
   );
 };

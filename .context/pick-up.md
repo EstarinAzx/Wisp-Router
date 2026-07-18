@@ -11,47 +11,46 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**2.0.19 live end-to-end.** Daily driver on `wisp-router@2.0.19` (= npm latest) and the
-running bridge (PID 29584) started 16s after the install, so it's already on that binary —
-verified this session, no restart needed. Openclaude steal #1 is in: one-shot bodies write
-bare `{type:'ephemeral'}` (5m); multi-turn (`convo.length >= 2` after system strip) keep
-`ttl:'1h'`. Breakpoints (#111) untouched.
+**Side-panel UI refactor shipped.** `wisp-1.7.0.vsix` built and appended to the existing
+`v2.0.19` GitHub release; release notes rewritten to cover the extension + GUI refresh. The
+vscode extension version is **1.7.0** (independent of the TUI's `wisp-router@2.0.19`). Daily
+driver + live bridge remain on 2.0.19 — this session touched only the vscode face.
 
 ## What last session did
 
-1. Confirmed 2.0.19 on daily driver AND the live bridge process (start-time vs install mtime).
-2. Diagnosed the codex `502 … input exceeds the context window` — it's a passthrough of the
-   codex model's own window (400K gpt-5.x / 200K o-series), bridge forwards untrimmed. Not a
-   bridge bug. Wrote it up as a gotcha.
-3. Parked bridge-side pre-trim as a floating plan (active-work Open questions).
+1. Refactored `packages/vscode/webview/` into a **card** layout (Connection · Model · Bridge ·
+   Routing map · Claude Code), `WISP_` gradient wordmark, inline status pills. New CSS
+   primitives in `style.css` (`.card` `.brand` `.card-title` `.field-label` `.hint` `.snippet`).
+2. **Trimmed the Claude Code card** to mirror the TUI `/bridge` screen — kept launch line +
+   plugin nudge + Advisor caveat; **removed the copy-paste env snippet blocks** and all their
+   plumbing (they leaked the live secret as plaintext). See decision
+   [[2026-07-18-vscode-panel-mirrors-tui-bridge-no-env-snippets]].
+3. Packaged + uploaded the vsix, edited the `v2.0.19` release notes.
 
 ## Next task
 
 **Nothing code-pending.** Drive normal.
 
-- Codex 502s are operational, not bugs — `/compact` (or `/clear`) before switching to a codex
-  model shrinks the convo under its window; keep images off big codex turns; or run codex work
-  in a fresh `/slot` subagent. See gotcha
-  [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]].
-- Reopen bridge code only if the usage meter regresses, or you decide to build the pre-trim
-  feature, or the bridge grows shared-prefix side calls (then optional #3 `skipCacheWrite`).
+- If a copy-paste Claude Code setup is wanted back, gate it behind a click-to-reveal — the core
+  `buildClaudeCodeSnippets` builder is still intact, only the always-on `<pre>` was cut.
+- Reopen bridge code only if the usage meter regresses or you build the pre-trim feature.
 
-**Load-bearing invariant:** do NOT remove the cache breakpoints — silently restores ~10× plan
-burn (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
+**Load-bearing invariant:** do NOT remove the cache breakpoints (#111) — silently restores ~10×
+plan burn (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
 
 ## Landmines
 
 - **Release checklist order** (release.yml refuses on mismatch): bump
-  `packages/tui/package.json` → span-baseline `--update` (from packages/tui) → tui
-  CHANGELOG → tag == package.json version, `v`-prefixed.
-- Use the **Edit tool** for package.json version (preserves encoding). PS 5.1
-  `Set-Content -Encoding utf8` writes a BOM that breaks the file.
-- Live-verify recipe (isolated `WISP_HOME` + `serve` on a spare port, never kill
-  41184): [[live-verify-the-bridge-from-source-isolated-wisp-home-on-a-spare-port]].
-- `wisp --version` doesn't exist — version is on the TUI splash.
+  `packages/tui/package.json` → span-baseline `--update` → tui CHANGELOG → tag == package.json
+  version, `v`-prefixed. (This session only appended a vsix asset — no new tag, so the checklist
+  didn't apply.)
+- **vscode ext version ≠ TUI version.** `packages/vscode/package.json` is 1.7.0; the vsix name
+  carries that, not 2.0.19. Bump it in `packages/vscode/package.json` for the next extension build.
+- Use the **Edit tool** for any package.json version bump (PS 5.1 `Set-Content -Encoding utf8`
+  writes a BOM that breaks the file).
+- `bun run package` in `packages/vscode` = `vsce package --no-dependencies` → `wisp-<ver>.vsix`.
 
 ## Related
 
-- [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
-- [[2026-07-18-openclaude-cache-control-steal-list]]
-- [[2026-07-18-real-usage-meter-forward-not-synthesize]]
+- [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]] · [[flows]]
+- [[2026-07-18-vscode-panel-mirrors-tui-bridge-no-env-snippets]]

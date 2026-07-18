@@ -34,7 +34,6 @@ import { getModelsDevCatalog } from '@wisp/core';
 import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
-import { buildClaudeCodeSnippets, ClaudeCodeSnippets } from '@wisp/core';
 import { CodexAuth, AnthropicAuth, XaiAuth } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
 import { anthropicInquire } from '@wisp/core';
@@ -393,9 +392,6 @@ const getState = async (): Promise<PanelState> => {
     routingAliases: activeRoutingMap().aliases,
     aliasPickerShowsModel: aliasPickerShowsModel(),
     aliasOnlyModels: aliasOnlyModels(),
-    // Claude Code setup snippets (#47) — built from the same address/secret the panel already shows, so
-    // they cross the boundary only while running, like bridgeSecret.
-    claudeSnippets: bridge.isRunning() ? buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret) : undefined,
   };
 };
 
@@ -736,14 +732,6 @@ const copyBridgeAddress = async (): Promise<void> => {
   vscode.window.showInformationMessage('Wisp: Bridge address copied.');
 };
 
-// Copy one Claude Code setup snippet (#47). Rebuilt host-side from the values the host owns — the webview
-// only names the variant, it never sends snippet text back. No-op while stopped (no secret to embed).
-const copyClaudeSnippet = async (variant: keyof ClaudeCodeSnippets): Promise<void> => {
-  if (!bridge.isRunning() || !bridgeSecret) return;
-  await vscode.env.clipboard.writeText(buildClaudeCodeSnippets(bridgeAddress(), bridgeSecret)[variant]);
-  vscode.window.showInformationMessage('Wisp: Claude Code snippet copied — open a new terminal (or restart claude) to pick it up.');
-};
-
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
@@ -985,7 +973,6 @@ export const activate = (context: vscode.ExtensionContext): void => {
     toggleBridge: bridgeToggle, // the panel switch drives the SAME start/stop as the command
     copyBridgeSecret,
     copyBridgeAddress,
-    copyClaudeSnippet,
   });
 
   // The Bridge listener — the outward mirror of the LM Chat Provider. Reuses the same key/client resolvers

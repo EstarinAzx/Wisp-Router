@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-18-vscode-panel-mirrors-tui-bridge-no-env-snippets]] — vscode Claude Code card mirrors the TUI `/bridge` screen (launch line + plugin nudge + Advisor caveat); removed #47's copy-paste env snippets because they rendered the live secret as plaintext; core builder kept for a future guarded reveal
 - [[2026-07-18-openclaude-cache-control-steal-list]] — OpenClaude cache_control steal list: #1 (bare 5m one-shot / ttl:1h multi-turn) SHIPPED 2.0.19; #2 already true via STEP; #3 parked; do NOT port cache_edits / break detection / marker pass-through (#111 stays load-bearing)
 - [[2026-07-18-real-usage-meter-forward-not-synthesize]] — Anthropic door forwards the backend's real token usage (input/cache/output) instead of synthesized zeros; `message_start` deferred to the first usage event; non-Anthropic through the door still zeros
 - [[2026-07-18-slot-parallel-per-family-leases]] — wisp-slot 1.2.0: concurrent Slots via per-family `lease-<family>.json`, up to 4 distinct Targets at once; reverses #110 §98 out-of-scope line (safety invariant is per-family)
