@@ -106,11 +106,12 @@ export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<stri
 // ----------------------------- Streaming ----------------------------- //
 
 // Stream a Claude reply, yielding answer-text fragments as they arrive so the native chat picker renders
-// tokens live, then any assembled tool calls at stream end (#30 agent mode). The Messages SSE delivers text
-// on content_block_delta(text_delta); a tool_use block streams across content_block_start +
-// input_json_delta events that can't be surfaced until whole, so they are collected and folded by the
-// reducer once the stream ends (the assemble-at-end pattern codexStream uses). An `error` event is a backend
-// failure (throw its message); other lifecycle events carry no answer text.
+// tokens live, plus each assembled tool call at its stream position (#30 agent mode). The Messages SSE
+// delivers text on content_block_delta(text_delta); a tool_use block streams across content_block_start +
+// input_json_delta events that can't be surfaced until whole, so each assembles per block and yields on
+// its content_block_stop — stream position preserved, which the thinking passthrough requires (interleaved
+// thinking order must survive the round trip). An `error` event is a backend failure (throw its message);
+// other lifecycle events carry no answer text.
 //
 // #87 — the stream can also end with NO visible content, and this path was previously silent: it read only
 // text/tool/error events and ignored message_delta entirely, so a content-less turn yielded nothing and the
@@ -132,7 +133,11 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   let sawThinking = false;                  // any thinking/redacted block arrived — delivered content too
   let sawTerminal = false;                  // a message_delta / message_stop actually closed the stream
   let stopReason: string | undefined;       // message_delta's stop_reason — the only place truncation shows
-  const toolEvents = [];
+  // Tool blocks assemble PER BLOCK and yield on their content_block_stop — stream position preserved, so
+  // interleaved thinking ([thinking₁, tool₁, thinking₂, tool₂]) reaches the client in the order the
+  // backend emitted it. The old assemble-at-end fold survives only as the dropped-socket fallback below.
+  const openTools = new Map<number, AssembledToolCall>();
+  let toolCount = 0;
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
     if (!ev) continue;
@@ -156,8 +161,23 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     if (ev.event === 'content_block_start' && ev.data?.content_block?.type === 'redacted_thinking' && typeof ev.data.content_block.data === 'string') {
       sawThinking = true; yield { type: 'redactedThinking', data: ev.data.content_block.data }; continue;
     }
-    // tool_use blocks arrive in fragments — collect the relevant events, fold them after the stream ends.
-    if (ev.event === 'content_block_start' || ev.event === 'content_block_delta') { toolEvents.push(ev); continue; }
+    // tool_use blocks arrive in fragments — assemble per block, yield whole on the block's stop.
+    if (ev.event === 'content_block_start' && ev.data?.content_block?.type === 'tool_use') {
+      const cb = ev.data.content_block;
+      openTools.set(ev.data.index, { id: typeof cb.id === 'string' ? cb.id : '', name: typeof cb.name === 'string' ? cb.name : '', argsJson: '' });
+      continue;
+    }
+    if (ev.event === 'content_block_delta' && ev.data?.delta?.type === 'input_json_delta') {
+      const call = openTools.get(ev.data.index);
+      if (call && typeof ev.data.delta.partial_json === 'string') call.argsJson += ev.data.delta.partial_json;
+      continue;
+    }
+    if (ev.event === 'content_block_stop' && openTools.has(ev.data?.index)) {
+      const call = openTools.get(ev.data.index)!;
+      openTools.delete(ev.data.index);
+      if (call.name) { toolCount++; yield { type: 'toolCall', call }; }
+      continue;
+    }
     // The terminal frames carry no answer text but DO carry the stop_reason (truncation) and prove a clean close.
     if (ev.event === 'message_delta') {
       sawTerminal = true;
@@ -166,9 +186,11 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
       sawTerminal = true;
     }
   }
-  const toolCalls = reduceAnthropicToolCalls(toolEvents);
-  for (const call of toolCalls) yield { type: 'toolCall', call };
-  const delivered = sawDelta || sawThinking || toolCalls.length > 0;
+  // Dropped-socket fallback: a tool block whose stop frame never arrived still folds at stream end.
+  for (const call of openTools.values()) {
+    if (call.name) { toolCount++; yield { type: 'toolCall', call }; }
+  }
+  const delivered = sawDelta || sawThinking || toolCount > 0;
   // A truncation reason is always worth surfacing — it explains an empty or cut-short turn; the marker also
   // makes the envelope non-empty, so it stands in for a content-less turn without needing to throw.
   const truncation = anthropicTruncationReason(stopReason);

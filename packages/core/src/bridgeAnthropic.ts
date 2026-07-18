@@ -147,7 +147,16 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
       // A thinking-bearing turn keeps its ORIGINAL block array as the byte-for-byte replay sidecar —
       // Anthropic wants thinking blocks back verbatim (signatures + interleaved order), which the
       // normalized fields can't reconstruct. Non-thinking turns stay sidecar-free (today's exact shape).
-      turns.push({ role: 'assistant', text, toolCalls, toolResults: [], ...(hasThinking ? { rawContent: blocks } : {}) });
+      // Sidecar blocks shed any client cache_control marker (unsigned metadata): the body builder places
+      // Wisp's OWN breakpoints, and client markers riding in verbatim would bust the 4-per-request cap.
+      const stripCache = (b: AntContentBlock): AntContentBlock => {
+        if (b && typeof b === 'object' && 'cache_control' in b) {
+          const { cache_control: _c, ...rest } = b as AntContentBlock & { cache_control?: unknown };
+          return rest as AntContentBlock;
+        }
+        return b;
+      };
+      turns.push({ role: 'assistant', text, toolCalls, toolResults: [], ...(hasThinking ? { rawContent: blocks.map(stripCache) } : {}) });
     } else {
       const { text, toolResults, images, documents } = splitUserBlocks(blocks);
       turns.push({ role: 'user', text, toolCalls: [], toolResults, ...(images.length ? { images } : {}), ...(documents.length ? { documents } : {}) });

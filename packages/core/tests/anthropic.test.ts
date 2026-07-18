@@ -931,6 +931,50 @@ describe('anthropicStream (streaming IO)', () => {
     ]);
   });
 
+  // Interleaved thinking: tool calls yield at their STREAM POSITION (assembled per block on its
+  // content_block_stop), not folded at stream end — otherwise [thinking₁, tool₁, thinking₂, tool₂]
+  // reaches the client as [thinking₁, thinking₂, tool₁, tool₂] and the replayed turn is shuffled.
+  it('yields tool calls in stream position between thinking segments', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":""}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"signature_delta","signature":"s1"}}',
+      'event: content_block_stop\ndata: {"index":0}',
+      'event: content_block_start\ndata: {"index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read"}}',
+      'event: content_block_delta\ndata: {"index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}',
+      'event: content_block_stop\ndata: {"index":1}',
+      'event: content_block_start\ndata: {"index":2,"content_block":{"type":"thinking","thinking":""}}',
+      'event: content_block_delta\ndata: {"index":2,"delta":{"type":"signature_delta","signature":"s2"}}',
+      'event: content_block_stop\ndata: {"index":2}',
+      'event: content_block_start\ndata: {"index":3,"content_block":{"type":"tool_use","id":"toolu_2","name":"write"}}',
+      'event: content_block_delta\ndata: {"index":3,"delta":{"type":"input_json_delta","partial_json":"{\\"a\\":1}"}}',
+      'event: content_block_stop\ndata: {"index":3}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"tool_use"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'thinkingStart' },
+      { type: 'thinkingSignature', value: 's1' },
+      { type: 'toolCall', call: { id: 'toolu_1', name: 'read', argsJson: '{}' } },
+      { type: 'thinkingStart' },
+      { type: 'thinkingSignature', value: 's2' },
+      { type: 'toolCall', call: { id: 'toolu_2', name: 'write', argsJson: '{"a":1}' } },
+    ]);
+  });
+
+  // A tool block whose content_block_stop never arrives (dropped socket) still folds at stream end —
+  // the old assemble-at-end resilience is the fallback, not the main path.
+  it('folds an unterminated tool block at stream end', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"p\\":1}"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"tool_use"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    expect(await collect(anthropicStream(args))).toEqual([
+      { type: 'toolCall', call: { id: 'toolu_1', name: 'read', argsJson: '{"p":1}' } },
+    ]);
+  });
+
   // THE live wire shape (verified against the OAuth endpoint): the subscription backend emits thinking
   // blocks with EMPTY thinking text — content_block_start straight to signature_delta, no thinking_delta
   // at all. The start event alone must open the block or the signed block is lost entirely.

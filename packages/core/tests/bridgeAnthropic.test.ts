@@ -126,6 +126,23 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parsed.turns[0].text).toBe('hi');
   });
 
+  // The sidecar must NOT carry the client's cache_control markers: the body builder places Wisp's own
+  // breakpoints (up to 4/request — Anthropic's cap), so client markers riding in verbatim would bust the
+  // budget and 400. cache_control is unsigned metadata — stripping it never touches signed bytes.
+  it('strips client cache_control from rawContent blocks', () => {
+    const blocks = [
+      { type: 'thinking', thinking: 'hm', signature: 'sig' },
+      { type: 'text', text: 'answer', cache_control: { type: 'ephemeral' } },
+      { type: 'tool_use', id: 't1', name: 'read', input: {}, cache_control: { type: 'ephemeral' } },
+    ];
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'assistant', content: blocks as never }] });
+    expect(parsed.turns[0].rawContent).toEqual([
+      { type: 'thinking', thinking: 'hm', signature: 'sig' },
+      { type: 'text', text: 'answer' },
+      { type: 'tool_use', id: 't1', name: 'read', input: {} },
+    ]);
+  });
+
   // No thinking → no sidecar: every non-thinking turn keeps today's exact shape (zero behavior change).
   it('leaves rawContent absent on an assistant turn without thinking blocks', () => {
     const parsed = parseAnthropicMessagesRequest({
