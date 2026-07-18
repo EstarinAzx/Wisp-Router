@@ -6,6 +6,16 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.19] — 2026-07-18
+
+### Changed
+
+- **Cheaper cache writes on one-shot Anthropic bodies** — Inquire / probe / first-turn
+  requests now place bare `{ type: 'ephemeral' }` markers (5-minute TTL, 1.25× write
+  cost). Multi-turn bodies (`≥ 2` user/assistant turns after system strip) still use
+  `ttl: '1h'` so an idle gap mid-session doesn't force a full prefix rewrite. The
+  #111 breakpoints themselves are unchanged — only the TTL on them is conditional.
+
 ## [2.0.18] — 2026-07-18
 
 ### Added
