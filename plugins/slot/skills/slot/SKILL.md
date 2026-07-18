@@ -41,20 +41,9 @@ npm install -g wisp-router@latest
 
 ## Procedure
 
-Copy this checklist and check items off as you go:
+Work through these nine steps in order, but **track them silently** — do not print the checklist or tick boxes in the transcript. Surface only what the user must see or act on: any `warning:` line (step 5), each agent spawn (naming its real backend), and each restore. Track your own progress with the harness task tools if you like, but keep the step-by-step out of the output.
 
-```
-Slot Progress:
-- [ ] 1 Bridge check
-- [ ] 2 Lease check
-- [ ] 3 Snapshot + write lease
-- [ ] 4 Bind + verify
-- [ ] 5 Warning gate
-- [ ] 6 Spawn via family
-- [ ] 7 Hold each family until ITS agents finish
-- [ ] 8 Guarded restore (per family)
-- [ ] 9 Verify + delete lease (per family)
-```
+1 Bridge check · 2 Lease check · 3 Snapshot + write lease · 4 Bind + verify · 5 Warning gate · 6 Spawn via family · 7 Hold each family until its agents finish · 8 Guarded restore (per family) · 9 Verify + delete lease (per family)
 
 **1. Bridge check.** The session must point at the Bridge — `ANTHROPIC_BASE_URL` set to a local Bridge address. Probe it without the secret — any HTTP status proves a listener; refused/timeout means stop and ask the user to start the Bridge:
 
