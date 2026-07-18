@@ -7,17 +7,18 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-18 by Claude (local session — review branch shipped as v2.0.15)._
-_At commit: `df913e6` on `main` (pushed, tagged `v2.0.15`, released, binary installed)._
+_Last updated: 2026-07-18 by Claude (local session — v2.0.15 + v2.0.16 shipped)._
+_At commit: `ff35e66` on `main` (pushed, tagged `v2.0.16`, released, binary installed)._
 
 ## Current focus
 
-**Nothing in flight — clean slate.** The #111 cache follow-up cycle is fully
-shipped: all three remote-session fixes plus the review session's forward-slide
-hardening are merged to `main`, released as `wisp-router@2.0.15`, and the
-installed `claude-wisp` binary has them. The Anthropic-OAuth path now caches
-like native unwisped Claude Code (spread breakpoints, 1h TTL, is_error
-fidelity). Feature branches deleted local + remote.
+**Nothing in flight — clean slate.** Two cycles shipped today: v2.0.15 (the
+#111 cache follow-ups — spread breakpoints, forward-slide, 1h TTL, is_error)
+and v2.0.16 (PDF passthrough: base64 `document` blocks through the Anthropic
+door, TDD, live-verified with a real PDF round-trip). The Anthropic-OAuth path
+now matches native Claude Code on quota AND fidelity except thinking-block
+preservation — the one remaining held gap, design-pass-first when the user
+asks (they want wisped Claude uncapped, so expect it).
 
 ## State
 
