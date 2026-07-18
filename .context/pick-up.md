@@ -11,33 +11,33 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**2.0.19 SHIPPED.** Openclaude steal #1 is live on npm + GitHub release
-`wisp-router 2.0.19` (release commit `d69d549`, feature `dc2b106`). One-shot
-bodies write bare `{type:'ephemeral'}` (5m); multi-turn (`convo.length >= 2`
-after system strip) keep `ttl:'1h'`. Breakpoints (#111) untouched. Real usage
-meter (2.0.18) already on the daily driver.
+**2.0.19 live end-to-end.** Daily driver on `wisp-router@2.0.19` (= npm latest) and the
+running bridge (PID 29584) started 16s after the install, so it's already on that binary —
+verified this session, no restart needed. Openclaude steal #1 is in: one-shot bodies write
+bare `{type:'ephemeral'}` (5m); multi-turn (`convo.length >= 2` after system strip) keep
+`ttl:'1h'`. Breakpoints (#111) untouched.
 
 ## What last session did
 
-1. Confirmed daily driver on `wisp-router@2.0.18` (real usage meter).
-2. Locked steal-list clarifications (`turns >= 2` = this request body; #1 =
-   biggest *optional* steal, not biggest problem).
-3. Implemented steal #1; 98/98 tests green. Skipped #2 (already true) + #3.
-4. Released 2.0.19 — release.yml green (4 builds + publish), npm live.
+1. Confirmed 2.0.19 on daily driver AND the live bridge process (start-time vs install mtime).
+2. Diagnosed the codex `502 … input exceeds the context window` — it's a passthrough of the
+   codex model's own window (400K gpt-5.x / 200K o-series), bridge forwards untrimmed. Not a
+   bridge bug. Wrote it up as a gotcha.
+3. Parked bridge-side pre-trim as a floating plan (active-work Open questions).
 
 ## Next task
 
-Nothing code-pending on the steal list.
+**Nothing code-pending.** Drive normal.
 
-1. **Update daily driver to 2.0.19** (`npm i -g wisp-router@2.0.19`) and restart
-   the bridge process so the new binary is what's on `:41184`.
-2. Drive normal. One-shot writes should stay cheap; multi-turn should still
-   retain the prefix across idle gaps.
-3. Reopen polish only if meter regresses, or bridge grows shared-prefix side
-   calls (then #3 `skipCacheWrite`).
+- Codex 502s are operational, not bugs — `/compact` (or `/clear`) before switching to a codex
+  model shrinks the convo under its window; keep images off big codex turns; or run codex work
+  in a fresh `/slot` subagent. See gotcha
+  [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]].
+- Reopen bridge code only if the usage meter regresses, or you decide to build the pre-trim
+  feature, or the bridge grows shared-prefix side calls (then optional #3 `skipCacheWrite`).
 
-**Load-bearing invariant:** do NOT remove the cache breakpoints — silently
-restores ~10× plan burn (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
+**Load-bearing invariant:** do NOT remove the cache breakpoints — silently restores ~10× plan
+burn (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
 
 ## Landmines
 

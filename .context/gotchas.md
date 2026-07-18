@@ -9,6 +9,7 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]] — codex `502 … input exceeds the context window` is a passthrough of the codex window (400K gpt-5.x / 200K o-series), not a bridge bug; bridge forwards untrimmed, `/compact` before codex turns
 - [[live-verify-the-bridge-from-source-isolated-wisp-home-on-a-spare-port]] — test bridge changes with `WISP_HOME=<tmp>` + `serve` on a spare port (41185), never kill 41184; `x-api-key` = top-level `bridgeSecret` in auth.json, not `.anthropic.bridgeSecret`
 - [[select-mouse-leans-on-opentui-privates]] — SELECT_MOUSE (scrollbar drag/wheel/row click) reads opentui privates, pinned 0.4.3; new selects must spread it, upgrades must re-run `bun test` in packages/tui
 - [[slot-skill-has-two-copies-personal-vs-plugin]] — Slot skill is plugin-only now (personal copy retired 2026-07-17); repo edits to `plugins/slot/**` need `claude plugin update wisp-slot` (versioned cache) — except the statusline badge, which the wrapper runs from the checkout
