@@ -11,7 +11,7 @@
  * buildAnthropicMessagesBody without a second mapping.
  */
 
-import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo } from './catalog';
+import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage } from './catalog';
 
 // ----------------------------- Inbound: OpenAI request -> Wisp ----------------------------- //
 
@@ -126,7 +126,10 @@ export type BridgeStreamEvent =
   | { type: 'thinking_start' }
   | { type: 'thinking'; text: string }
   | { type: 'thinking_signature'; signature: string }
-  | { type: 'redacted_thinking'; data: string };
+  | { type: 'redacted_thinking'; data: string }
+  // Real token usage from the backend (Anthropic upstream only). Carries no wire content — the Anthropic
+  // door's encoder folds it into message_start/message_delta usage; other doors/reducers ignore it.
+  | { type: 'usage'; usage: BridgeUsage };
 
 // The terminal finish_reason: 'tool_calls' when the turn emitted any tool call (the client must run them),
 // else 'stop'. Mid-stream chunks carry finish_reason null until the terminal chunk.

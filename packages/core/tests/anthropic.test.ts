@@ -8,6 +8,7 @@ import {
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
+  anthropicUsage,
   type Provider, type SseEvent,
 } from '../src/catalog';
 import { anthropicMessagesHeaders, anthropicStream } from '../src/anthropicClient';
@@ -1051,5 +1052,31 @@ describe('anthropicStream (streaming IO)', () => {
   it('throws the backend error message on a content-less error frame', async () => {
     stub(['event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"boom"}}']);
     await expect(collect(anthropicStream(args))).rejects.toThrow('boom');
+  });
+});
+
+// The real token usage the Bridge otherwise discards — forwarding it makes the wisped client's token meter
+// match native Claude Code. Samples are the exact shapes captured off the live Messages wire.
+describe('anthropicUsage', () => {
+  const ev = (event: string, data: unknown): SseEvent => ({ event, data });
+
+  it('reads the initial input/cache snapshot off message_start', () => {
+    const u = anthropicUsage(ev('message_start', { message: { usage: { input_tokens: 2, cache_creation_input_tokens: 1755, cache_read_input_tokens: 0, output_tokens: 7 } } }));
+    expect(u).toEqual({ input_tokens: 2, cache_creation_input_tokens: 1755, cache_read_input_tokens: 0, output_tokens: 7 });
+  });
+
+  it('reads the final cumulative counts off message_delta', () => {
+    const u = anthropicUsage(ev('message_delta', { usage: { input_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 1755, output_tokens: 20 } }));
+    expect(u).toEqual({ input_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 1755, output_tokens: 20 });
+  });
+
+  it('defaults absent cache/output fields to 0 (a bare input_tokens still yields usage)', () => {
+    expect(anthropicUsage(ev('message_start', { message: { usage: { input_tokens: 5 } } }))).toEqual({ input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 });
+  });
+
+  it('is undefined for events without usage (content deltas, tool blocks, ping)', () => {
+    expect(anthropicUsage(ev('content_block_delta', { delta: { type: 'text_delta', text: 'hi' } }))).toBeUndefined();
+    expect(anthropicUsage(ev('ping', {}))).toBeUndefined();
+    expect(anthropicUsage(ev('message_delta', { delta: { stop_reason: 'end_turn' } }))).toBeUndefined();
   });
 });

@@ -5,6 +5,7 @@ import {
   parseAnthropicMessagesRequest,
   buildAnthropicSse,
   buildAnthropicMessageResponse,
+  createAnthropicSseEncoder,
   buildAnthropicModelsList,
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
@@ -46,6 +47,19 @@ describe('buildAnthropicMessageResponse', () => {
     expect(res.stop_reason).toBe('end_turn');
     expect(typeof res.usage.input_tokens).toBe('number');
     expect(typeof res.usage.output_tokens).toBe('number');
+  });
+
+  // A usage event carries the real token counts through — the reply's usage block reflects them (input,
+  // both cache tiers, output) instead of the synthesized zeros, and the event is NOT rendered as content.
+  it('folds a usage event into the reply usage block, not into content', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'usage', usage: { input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 1 } },
+      { type: 'text', text: 'OK' },
+      { type: 'usage', usage: { input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 12 } },
+    ];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([{ type: 'text', text: 'OK' }]);
+    expect(res.usage).toEqual({ input_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 12 });
   });
 
   // A tool call becomes a tool_use block with its args parsed back to an object, and flips stop_reason.
@@ -504,6 +518,48 @@ describe('buildAnthropicSse', () => {
   it('frames each event two-line + blank-line terminated', () => {
     const sse = buildAnthropicSse([], meta);
     expect(sse.endsWith('event: message_stop\ndata: {"type":"message_stop"}\n\n')).toBe(true);
+  });
+});
+
+// The real token meter: the encoder folds usage (via setUsage, the way the streaming door feeds it) into the
+// message_start + message_delta usage blocks so the wisped client reads real counts, not synthesized zeros.
+describe('createAnthropicSseEncoder usage', () => {
+  const parse = (s: string) => frames(s).map((f) => f.data);
+
+  // The door ordering: setUsage(start snapshot) → start(); content; setUsage(final) → finish(). message_start
+  // carries the initial input/cache snapshot, message_delta the final cumulative counts.
+  it('emits real usage in message_start and message_delta', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.setUsage({ input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 3 });
+    let out = enc.start();
+    out += enc.push({ type: 'text', text: 'OK' });
+    enc.setUsage({ input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 15 });
+    out += enc.finish();
+    const f = parse(out);
+    const start = f.find((d) => d.type === 'message_start')!;
+    const delta = f.find((d) => d.type === 'message_delta')!;
+    expect(start.message.usage).toMatchObject({ input_tokens: 4, cache_read_input_tokens: 2617, output_tokens: 3 });
+    expect(delta.usage).toEqual({ input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 2617, output_tokens: 15 });
+  });
+
+  // No usage seen (a non-Anthropic provider routed through the door) → the old zero shape survives, so the
+  // usage block still exists and is numeric (Claude Code's /model probe reads it).
+  it('falls back to numeric zeros when no usage was fed', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    const f = parse(enc.start() + enc.push({ type: 'text', text: 'hi' }) + enc.finish());
+    expect(f.find((d) => d.type === 'message_start')!.message.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
+    expect(f.find((d) => d.type === 'message_delta')!.usage).toEqual({ output_tokens: 0 });
+  });
+
+  // A usage event pushed through buildAnthropicSse emits no content frame — it only updates the usage state
+  // the closing message_delta reports.
+  it('push(usage) adds no wire frame but reaches message_delta', () => {
+    const f = frames(buildAnthropicSse([
+      { type: 'usage', usage: { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 9, output_tokens: 6 } },
+      { type: 'text', text: 'hi' },
+    ], meta));
+    expect(f.map((x) => x.event)).toEqual(['message_start', 'ping', 'content_block_start', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop']);
+    expect(f.find((x) => x.event === 'message_delta')!.data.usage).toEqual({ input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 9, output_tokens: 6 });
   });
 });
 

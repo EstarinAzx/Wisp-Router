@@ -16,7 +16,7 @@
  *     fragments as they arrive so the native chat picker renders tokens live.
  */
 
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type EffortLevel } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
 type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; signal?: AbortSignal };
@@ -33,7 +33,10 @@ export type AnthropicStreamEvent =
   | { type: 'thinkingStart' }
   | { type: 'thinking'; value: string }
   | { type: 'thinkingSignature'; value: string }
-  | { type: 'redactedThinking'; data: string };
+  | { type: 'redactedThinking'; data: string }
+  // Real token usage off message_start (initial input/cache) and message_delta (final counts) — the door
+  // forwards it to the client's meter. The other doors that consume this stream ignore it.
+  | { type: 'usage'; usage: BridgeUsage };
 
 // Inquire is non-streaming (spinner → diff): a bounded 16K output keeps the single request under the fetch
 // timeout ceiling while leaving ample room for the edit blocks. The STREAMING path deliberately does NOT
@@ -142,6 +145,10 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     const ev = parseSseBlock(block);
     if (!ev) continue;
     if (ev.event === 'error') throw new Error(ev.data?.error?.message ?? 'Anthropic response failed');
+    // Usage rides on message_start (initial input/cache) and message_delta (final counts). Yield it but
+    // don't consume the event — message_delta still needs its stop_reason read below.
+    const usage = anthropicUsage(ev);
+    if (usage) yield { type: 'usage', usage };
     const text = anthropicTextDelta(ev);
     if (text) { sawDelta = true; yield { type: 'text', value: text }; continue; }
     // Thinking passthrough: the block start, thinking deltas, the closing signature, and whole redacted

@@ -75,6 +75,16 @@ export type CodexResponsesEvent = { event: string; data: any };
 // its own vocabulary.
 export type SseEvent = CodexResponsesEvent;
 
+// The real token counts the backend reports — input, the two cache tiers, and output. The Bridge forwards
+// this end-to-end (stream event → door encoder) so the wisped client's token meter matches native Claude
+// Code instead of reading the zeros the re-encode used to synthesize.
+export type BridgeUsage = {
+  input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  output_tokens: number;
+};
+
 // Parse ONE SSE block (blank-line-separated event:/data: lines) into an event. data: lines are joined
 // before JSON parsing (SSE splits long payloads across lines). undefined for a block with no event/data,
 // the [DONE] sentinel, or unparseable JSON. Shared by the non-streaming reader and the streaming path.

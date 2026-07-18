@@ -7,77 +7,61 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-18 by Claude (local session — v2.0.17 shipped)._
-_At commit: `971cefd` on `main` (pushed, tagged `v2.0.17`, released, binary installed)._
+_Last updated: 2026-07-18 by Claude (local session — real usage meter built, committed on branch, NOT released)._
+_Branched from `971cefd` (`main`, tagged `v2.0.17`). Work lives on `claude/real-usage-meter`; not on main, not released._
 
 ## Current focus
 
-**Nothing in flight — clean slate.** Third ship cycle of 2026-07-18: **thinking
-passthrough as v2.0.17** — the last fidelity gap. `thinking`/`redacted_thinking`
-blocks now round-trip client ↔ Anthropic (raw-sidecar verbatim replay outbound,
-live thinking SSE frames inbound), and Claude 5 models (fable-5/sonnet-5) joined
-the effort-capable set — previously /effort was silently dropped on the DEFAULT
-model. Grilled first per the held-task agreement (7 locked decisions), built
-TDD, review found 2 real bugs (fixed), live-probed extensively against the real
-OAuth endpoint. Anthropic-OAuth path now believed at FULL quota + fidelity
-parity with native Claude Code.
+**Real token meter through the Anthropic door.** Before this session the door
+re-encoded every reply and **synthesized `usage: {input_tokens:0, output_tokens:0}`**
+— the wisped client's token/cost gauge read zeros, and `cache_read` (the proof
+caching works) was invisible. Now the backend's real usage rides end-to-end:
+`message_start` carries the real input/cache snapshot, `message_delta` the final
+cumulative counts. Built TDD, live-verified through a from-source bridge.
 
 ## State
 
-- **In flight:** None.
-- **Done this session (v2.0.17 cycle):**
-  - Grill: 7 decisions locked (stateless passthrough, raw sidecar, event
-    vocabulary extension, Wisp keeps param control, evidence-before-insurance,
-    silent drop on non-Anthropic, straight implement). See
-    [[2026-07-18-thinking-passthrough-raw-sidecar]].
-  - TDD implementation across parse → body builder → stream → encoder →
-    buffered reply; OpenAI door + chatProvider guarded against the new event
-    kinds.
-  - Live probes surfaced two facts folded in same cycle: OAuth endpoint emits
-    thinking blocks with EMPTY text + signature (needed explicit
-    `thinkingStart` event), and Claude 5 was missing from all three effort
-    regexes (accepted through `max`, live-probed both models).
-  - cavecrew review: 2 real findings fixed (tool calls now yield at stream
-    position so interleaved thinking order survives; sidecar sheds client
-    `cache_control` markers to protect the 4-breakpoint budget). 2 findings
-    overruled/accepted with evidence (see decision entry).
-  - Live-verified: full tool-continuation round trip through the door on
-    opus-4-8 AND fable-5; cross-model signature replay tolerated (200);
-    thinking-strip tolerated; codex smoke clean.
-  - Released v2.0.17: bump, span-baseline recaptured, CHANGELOG, tag,
-    release.yml green ×4 runners + publish, `npm i -g wisp-router@2.0.17`.
-  - Deleted `claude/thinking-passthrough` (merged fast-forward).
-- **Held deliberately (backlog, NOT bugs):**
-  - Codex `reasoning` summaries surfaced as thinking blocks out the Anthropic
-    door — adjacent feature, own loop to reason through (unsigned blocks
-    resent to Codex targets). Grill-first if picked up.
-  - Thinking-only turn on the OpenAI door / vscode chatProvider renders a
-    silent empty completion (those doors drop thinking; old behavior was a
-    loud 502 — both dead ends, accepted ceiling).
-  - TUI model-switch cache warning in `routingScreens.tsx` (speculative,
-    build only if hit).
+- **In flight:** None — the feature is complete and committed on the branch.
+- **Done this session:**
+  - `anthropicUsage(ev)` pure helper (catalog) reads `message_start.message.usage`
+    + `message_delta.usage`; wire shape proven with a live probe first.
+  - `usage` variant threaded through both stream unions (`AnthropicStreamEvent`,
+    `BridgeStreamEvent`); `anthropicStream` yields it, `mapOAuthStream` passes it.
+  - Encoder gains `setUsage`; real usage in `message_start`/`message_delta`.
+    `buildAnthropicMessageResponse` folds usage into the reply block.
+  - Door streaming loop **defers `message_start` until the first usage event**
+    so it carries real input/cache (Anthropic's first frame, near-instant).
+  - See [[2026-07-18-real-usage-meter-forward-not-synthesize]].
+- **Verified:** core vitest **506** (was 498; +8 new), all 3 packages typecheck
+  clean, **live E2E** through from-source bridge on an isolated home/spare port —
+  client-facing `cache_read=1757` on a warm call, real output in `message_delta`.
+- **NOT done — the gap to close before it's useful:** **not released.** The
+  running install (port 41184) is still the old v2.0.17 zeros build, so *your
+  own session's meter is still fake* until a release + `npm i -g`.
 - **Blocked:** None.
 
 ## Pick up here
 
-See [[pick-up]]. No mandatory next task.
+See [[pick-up]]. Next task = **release the real-usage-meter branch** (or discard
+if not wanted). Release makes the meter live in the daily driver.
 
 ## Open questions
 
-- Does full fidelity hold under real interleaved multi-thinking turns? Probes
-  covered single thinking blocks; stream-position tool yields should preserve
-  interleave, but a long agentic session on wisped fable is the true test —
-  user daily-driving is the verification.
-- Elucidate's badge is also purple — unrelated older open question, still open.
+- Does Claude Code read input tokens from `message_start` or `message_delta`?
+  We populate BOTH with real values, so correct under either reading — but
+  unconfirmed which the client actually surfaces. Real daily-driving after
+  release is the test.
+- Non-Anthropic providers routed through the Anthropic door (e.g. `sol` alias)
+  still emit zero usage — no upstream usage event. Accepted; out of scope.
 
 ## Recent context
 
-- Test suite totals: core vitest **498** (was 481), tui bun test 13.
-- The OAuth endpoint is lenient where docs are silent: foreign/model-mismatched
-  thinking signatures → 200, stripped thinking on continuation → 200,
-  `adaptive` + `output_config.effort` (incl. xhigh/max) on Claude 5 → 200.
-  All live-probed 2026-07-18.
-- `wisp --version` is not a flag — version reads off the TUI splash.
+- Live-probe recipe for bridge changes: isolated `WISP_HOME` + `serve` on a
+  spare port. See [[live-verify-the-bridge-from-source-isolated-wisp-home-on-a-spare-port]].
+- `bridgeSecret` is **top-level** in `auth.json`, not under `.anthropic`.
+- The real wire: `message_delta.usage` carries the COMPLETE final usage
+  (input + both cache tiers + output); `message_start.output_tokens` is only an
+  initial ~7, so any correct client reads `message_delta` for the final.
 
 ## Related
 
@@ -86,4 +70,4 @@ See [[pick-up]]. No mandatory next task.
 - [[stack]]
 - [[decisions]]
 - [[gotchas]]
-- [[2026-07-18-thinking-passthrough-raw-sidecar]]
+- [[2026-07-18-real-usage-meter-forward-not-synthesize]]

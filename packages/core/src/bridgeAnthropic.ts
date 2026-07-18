@@ -13,8 +13,17 @@
  * send-builders — no second normalized shape.
  */
 
-import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel } from './catalog';
+import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel, BridgeUsage } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
+
+// A message_start usage block (initial input/cache snapshot, small initial output_tokens) — mirrors the
+// real wire's four core fields. The message_delta block reports the final cumulative output_tokens.
+const startUsage = (u: BridgeUsage | null) => u
+  ? { input_tokens: u.input_tokens, cache_creation_input_tokens: u.cache_creation_input_tokens, cache_read_input_tokens: u.cache_read_input_tokens, output_tokens: u.output_tokens }
+  : { input_tokens: 0, output_tokens: 0 };
+const deltaUsage = (u: BridgeUsage | null) => u
+  ? { input_tokens: u.input_tokens, cache_creation_input_tokens: u.cache_creation_input_tokens, cache_read_input_tokens: u.cache_read_input_tokens, output_tokens: u.output_tokens }
+  : { output_tokens: 0 };
 
 // ----------------------------- Inbound: Anthropic Messages request -> Wisp ----------------------------- //
 
@@ -204,6 +213,7 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
   let openKind: 'text' | 'tool' | 'thinking' | null = null;   // the currently-open block's kind, or none
   let openIndex = 0;             // the currently-open block's index
   let sawTool = false;           // any tool call emitted → stop_reason is tool_use, not end_turn
+  let usage: BridgeUsage | null = null;   // latest real token usage — start()/finish() read it; null → zeros
 
   // Close whatever block is open (no-op if none), returning its content_block_stop frame.
   const closeOpen = (): string => {
@@ -214,18 +224,26 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
   };
 
   return {
+    // Update the running token usage. The streaming door calls this on each upstream usage event (before
+    // start(), then again before finish()) so message_start/message_delta report real counts.
+    setUsage: (u: BridgeUsage): void => { usage = u; },
+
     // The opening frames: message_start (the message envelope, empty content) + a ping keepalive — the shape
-    // slice #44 confirmed real Claude Code accepts.
+    // slice #44 confirmed real Claude Code accepts. usage is the real input/cache snapshot when the door fed
+    // one before start(), else the numeric-zero shape (Claude Code's /model probe reads usage.input_tokens).
     start: (): string =>
       frame('message_start', {
         type: 'message_start',
-        message: { id: meta.id, type: 'message', role: 'assistant', model: meta.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } },
+        message: { id: meta.id, type: 'message', role: 'assistant', model: meta.model, content: [], stop_reason: null, stop_sequence: null, usage: startUsage(usage) },
       }) + frame('ping', { type: 'ping' }),
 
     // Handle one stream event. Text opens (once) a text block then streams text_delta fragments into it. A
     // tool call closes any open block, opens its own tool_use block, streams the whole args as one
     // input_json_delta (Wisp folds tool calls whole — no fragments), then closes immediately.
     push: (ev: BridgeStreamEvent): string => {
+      // Usage carries no wire content — record it (the buffered buildAnthropicSse path routes usage here;
+      // the live door uses setUsage) so the closing message_delta reports real counts. No frame emitted.
+      if (ev.type === 'usage') { usage = ev.usage; return ''; }
       // Thinking passthrough: thinking_start opens a block (the OAuth wire sends EMPTY thinking blocks —
       // start straight to signature — so the start must open on its own); thinking deltas stream into it
       // (opening one themselves if no start arrived); the signature_delta is the last delta and CLOSES the
@@ -282,7 +300,7 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
     // else end_turn) + message_stop.
     finish: (): string =>
       closeOpen() +
-      frame('message_delta', { type: 'message_delta', delta: { stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 0 } }) +
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: deltaUsage(usage) }) +
       frame('message_stop', { type: 'message_stop' }),
   };
 };
@@ -317,7 +335,7 @@ export type AnthropicMessageResponse = {
   content: AntReplyBlock[];
   stop_reason: 'end_turn' | 'tool_use';
   stop_sequence: null;
-  usage: { input_tokens: number; output_tokens: number };
+  usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
 };
 
 // Reduce a whole ordered Wisp stream to one non-streaming Messages object — the buffered counterpart of
@@ -327,7 +345,9 @@ export type AnthropicMessageResponse = {
 export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta: AnthropicSseMeta): AnthropicMessageResponse => {
   const content: AntReplyBlock[] = [];
   let sawTool = false;
+  let usage: BridgeUsage | null = null;
   for (const ev of events) {
+    if (ev.type === 'usage') { usage = ev.usage; continue; }  // real counts → the reply usage block, not content
     if (ev.type === 'text') {
       const last = content[content.length - 1];
       if (last && last.type === 'text') last.text += ev.text;
@@ -357,9 +377,10 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
   return {
     id: meta.id, type: 'message', role: 'assistant', model: meta.model,
     content, stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null,
-    // Wisp doesn't meter tokens — zeroed, same as the streaming frames report. The field must exist and be
-    // numeric: Claude Code's /model validation reads usage.input_tokens, and a missing usage is the crash.
-    usage: { input_tokens: 0, output_tokens: 0 },
+    // Real counts when the backend reported them (Anthropic upstream), else the numeric-zero fallback (a
+    // non-Anthropic provider through this door emits no usage). The field must exist and be numeric:
+    // Claude Code's /model validation reads usage.input_tokens, and a missing usage is the crash.
+    usage: usage ?? { input_tokens: 0, output_tokens: 0 },
   };
 };
 

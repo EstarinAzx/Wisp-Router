@@ -454,6 +454,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       else if (ev.type === 'thinking') { if (ev.value) yield { type: 'thinking', text: ev.value }; }
       else if (ev.type === 'thinkingSignature') yield { type: 'thinking_signature', signature: ev.value };
       else if (ev.type === 'redactedThinking') yield { type: 'redacted_thinking', data: ev.data };
+      else if (ev.type === 'usage') yield { type: 'usage', usage: ev.usage };
     }
   };
 
@@ -576,8 +577,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       const enc = createAnthropicSseEncoder(meta);
-      res.write(enc.start());
-      for await (const ev of result.events) res.write(enc.push(ev));
+      // message_start is deferred until the first upstream usage event (the Anthropic wire's first frame,
+      // arriving near-instantly) so it carries the real input/cache counts — not synthesized zeros. Usage
+      // rides via setUsage, never a content frame; the final usage event updates the closing message_delta.
+      // A provider that emits no usage (non-Anthropic through this door) starts on its first content instead.
+      let started = false;
+      const ensureStarted = (): void => { if (!started) { res.write(enc.start()); started = true; } };
+      for await (const ev of result.events) {
+        if (ev.type === 'usage') { enc.setUsage(ev.usage); ensureStarted(); continue; }
+        ensureStarted();
+        res.write(enc.push(ev));
+      }
+      ensureStarted();
       res.write(enc.finish());
       res.end();
     } catch (err) {

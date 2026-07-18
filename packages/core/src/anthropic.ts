@@ -18,7 +18,7 @@ import type { Provider } from './catalog';
 import {
   sortByReleaseDesc,
   type ModelCaps, type ModelsDevCatalog, type EffortLevel,
-  type SseEvent, type ToolSpec, type AssembledToolCall,
+  type SseEvent, type ToolSpec, type AssembledToolCall, type BridgeUsage,
 } from './shared';
 
 // ----------------------------- Anthropic OAuth Provider (pure cores) ----------------------------- //
@@ -301,6 +301,24 @@ export const anthropicTextDelta = (ev: SseEvent): string =>
   ev.event === 'content_block_delta' && ev.data?.delta?.type === 'text_delta' && typeof ev.data.delta.text === 'string'
     ? ev.data.delta.text
     : '';
+
+// The token usage the Bridge otherwise throws away: message_start.message.usage carries the initial
+// input/cache snapshot, message_delta.usage the final cumulative counts (output included). Forwarded through
+// the stream so the door re-emits real numbers instead of the synthesized zeros — the wisped client's token
+// meter then matches native. Cache/output fields default to 0 (a message_start can predate any cache read);
+// a bare input_tokens still yields usage. Any other event carries none.
+export const anthropicUsage = (ev: SseEvent): BridgeUsage | undefined => {
+  const u = ev.event === 'message_start' ? ev.data?.message?.usage
+    : ev.event === 'message_delta' ? ev.data?.usage
+    : undefined;
+  if (!u || typeof u.input_tokens !== 'number') return undefined;
+  return {
+    input_tokens: u.input_tokens,
+    cache_creation_input_tokens: typeof u.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0,
+    cache_read_input_tokens: typeof u.cache_read_input_tokens === 'number' ? u.cache_read_input_tokens : 0,
+    output_tokens: typeof u.output_tokens === 'number' ? u.output_tokens : 0,
+  };
+};
 
 // Reduce a whole Messages SSE run to its answer text — concatenate the text_delta fragments in order. An
 // `error` event is a backend failure (throw its message). anthropicStream yields the same per-event
