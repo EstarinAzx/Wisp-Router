@@ -64,17 +64,25 @@ lines.push(
 );
 
 // Stale lease = a previous Slot rebind never restored — slot skill step 2 applies.
-const leasePath = path.join(os.homedir(), '.claude', 'slot', 'lease.json');
-if (fs.existsSync(leasePath)) {
-  let lease = '';
-  try {
-    lease = ' Contents: ' + JSON.stringify(JSON.parse(fs.readFileSync(leasePath, 'utf8')));
-  } catch {}
+// Per-family leases: ~/.claude/slot/lease-<family>.json (legacy lease.json also matched).
+const slotDir = path.join(os.homedir(), '.claude', 'slot');
+let leaseFiles = [];
+try {
+  leaseFiles = fs.readdirSync(slotDir).filter((f) => /^lease.*\.json$/.test(f));
+} catch {}
+if (leaseFiles.length) {
   lines.push(
     '',
-    `WARNING: unrecovered Slot lease at ${leasePath} — a family route may still be`,
-    'rebound. Recover it (slot skill, step 2) before any new rebind.' + lease,
+    `WARNING: ${leaseFiles.length} unrecovered Slot lease(s) in ${slotDir} — a family`,
+    'route may still be rebound. Recover each (slot skill, step 2) before rebinding that family:',
   );
+  for (const f of leaseFiles) {
+    let lease = '';
+    try {
+      lease = ' — ' + JSON.stringify(JSON.parse(fs.readFileSync(path.join(slotDir, f), 'utf8')));
+    } catch {}
+    lines.push('  ' + f + lease);
+  }
 }
 
 process.stdout.write(lines.join('\n') + '\n');

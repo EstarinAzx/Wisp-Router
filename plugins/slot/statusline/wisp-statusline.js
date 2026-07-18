@@ -41,8 +41,13 @@ try {
 
 // Lease marker rides on any badge form — visibility must not depend on the model
 // match. ASCII on purpose: wide ⚠ glyphs overlap the next cell in some terminals.
-const leasePath = path.join(os.homedir(), '.claude', 'slot', 'lease.json');
-if (fs.existsSync(leasePath)) badge = badge.replace(/\]$/, ' !LEASE]');
+// Per-family leases: count lease-<family>.json (legacy lease.json also matched).
+let leaseCount = 0;
+try {
+  leaseCount = fs.readdirSync(path.join(os.homedir(), '.claude', 'slot'))
+    .filter((f) => /^lease.*\.json$/.test(f)).length;
+} catch {}
+if (leaseCount) badge = badge.replace(/\]$/, leaseCount > 1 ? ` !LEASE×${leaseCount}]` : ' !LEASE]');
 
 // Wisp purple — the signature accent (#a78bfa in the TUI theme; xterm 141 is the nearest
 // 256-color). Joins the colored badge row (caveman orange, elucidate purple, ponytail pink).

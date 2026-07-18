@@ -1,7 +1,7 @@
 {
   "name": "wisp-slot",
   "description": "Slot workflow: safely rebind a Claude family route to any Wisp Target, spawn a subagent through it, restore when done",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "author": {
     "name": "EstarinAzx"
   }

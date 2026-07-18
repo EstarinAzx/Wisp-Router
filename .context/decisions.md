@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-18-slot-parallel-per-family-leases]] — wisp-slot 1.2.0: concurrent Slots via per-family `lease-<family>.json`, up to 4 distinct Targets at once; reverses #110 §98 out-of-scope line (safety invariant is per-family)
 - [[2026-07-18-thinking-passthrough-raw-sidecar]] — thinking fidelity via stateless raw-sidecar replay + event vocabulary; live probes killed the strip-retry insurance; Claude 5 joins the effort regexes (v2.0.17)
 - [[2026-07-17-wisp-router-gets-its-own-changelog]] — TUI/CLI releases changelog in `packages/tui/CHANGELOG.md` from 2.0.11 on; vscode product changelog stays extension-versioned (folds ≤2.0.10)
 - [[2026-07-17-slot-plugin-only-session-awareness-hook-badge]] — wisp-slot 1.1.0: SessionStart hook + statusline badge (env+home detection, node, family-level badge); personal skill copy retired — plugin via local directory marketplace is the one copy (#124)
