@@ -189,6 +189,38 @@ describe('parseAnthropicMessagesRequest', () => {
     });
   });
 
+  // A document content block (a dragged-in PDF) becomes a normalized document — was silently dropped before,
+  // so PDF content just vanished from the conversation.
+  it('maps a document block to documents', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
+        { type: 'text', text: 'summarize this' },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0]).toEqual({
+      role: 'user', text: 'summarize this', toolCalls: [], toolResults: [],
+      documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }],
+    });
+  });
+
+  // Claude Code's Read on a PDF returns the pages as a document block INSIDE tool_result content — hoist
+  // it into the turn's documents[] the same way Read-on-image hoists pixels into images[].
+  it('hoists a document block inside tool_result content into documents', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'toolu_9', content: [
+          { type: 'text', text: 'PDF 12 pages' },
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
+        ] },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0]).toEqual({
+      role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'toolu_9', content: 'PDF 12 pages' }],
+      documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }],
+    });
+  });
+
   // Tools ride through: name/description kept, input_schema → inputSchema (Anthropic's JSON schema verbatim).
   it('maps tools to ToolSpec', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }],

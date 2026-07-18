@@ -25,7 +25,8 @@ type AntTextBlock = { type: 'text'; text: string };
 type AntToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[]; is_error?: boolean };
 type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
-type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock;
+type AntDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
+type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock | AntDocumentBlock;
 type AntMessage = { role: 'user' | 'assistant' | 'system'; content: string | AntContentBlock[] };
 type AntTool = { name: string; description?: string; input_schema?: object };
 type AntToolChoice = { type: 'auto' } | { type: 'any' } | { type: 'none' } | { type: 'tool'; name: string };
@@ -83,25 +84,30 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
   text: string;
   toolResults: { callId: string; content: string; isError?: boolean }[];
   images: { mimeType: string; dataBase64: string }[];
+  documents: { mimeType: string; dataBase64: string }[];
 } => {
   let text = '';
   const toolResults: { callId: string; content: string; isError?: boolean }[] = [];
   const images: { mimeType: string; dataBase64: string }[] = [];
-  // An image block, wherever it sits, joins the turn's images[] — the normalized shape has no per-result slot.
-  const takeImage = (b: AntContentBlock | undefined): void => {
+  const documents: { mimeType: string; dataBase64: string }[] = [];
+  // An image or document block, wherever it sits, joins the turn's images[]/documents[] — the normalized
+  // shape has no per-result slot. ponytail: base64 sources only — text/url document sources stay dropped
+  // until a client actually sends one.
+  const takeMedia = (b: AntContentBlock | undefined): void => {
     if (b?.type === 'image' && b.source?.data) images.push({ mimeType: b.source.media_type ?? '', dataBase64: b.source.data });
+    else if (b?.type === 'document' && b.source?.type === 'base64' && b.source.data) documents.push({ mimeType: b.source.media_type ?? '', dataBase64: b.source.data });
   };
   for (const b of blocks) {
     if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
     else if (b?.type === 'tool_result') {
       // is_error rides through so the backend keeps Claude Code's explicit "this tool failed" signal.
       toolResults.push({ callId: b.tool_use_id, content: blockText(b.content), ...(b.is_error ? { isError: true } : {}) });
-      // Claude Code's Read-on-image puts the pixels INSIDE tool_result content — hoist them, don't drop them.
-      if (Array.isArray(b.content)) for (const inner of b.content) takeImage(inner);
-    } else takeImage(b);
+      // Claude Code's Read-on-image/PDF puts the payload INSIDE tool_result content — hoist it, don't drop it.
+      if (Array.isArray(b.content)) for (const inner of b.content) takeMedia(inner);
+    } else takeMedia(b);
     // Unknown / partial blocks are skipped, never dereferenced blindly — the body is untrusted.
   }
-  return { text, toolResults, images };
+  return { text, toolResults, images, documents };
 };
 
 // Parse an Anthropic /v1/messages body into Wisp's normalized shape. System text is lifted out of the turn
@@ -136,8 +142,8 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
       }
       turns.push({ role: 'assistant', text, toolCalls, toolResults: [] });
     } else {
-      const { text, toolResults, images } = splitUserBlocks(blocks);
-      turns.push({ role: 'user', text, toolCalls: [], toolResults, ...(images.length ? { images } : {}) });
+      const { text, toolResults, images, documents } = splitUserBlocks(blocks);
+      turns.push({ role: 'user', text, toolCalls: [], toolResults, ...(images.length ? { images } : {}), ...(documents.length ? { documents } : {}) });
     }
   }
 

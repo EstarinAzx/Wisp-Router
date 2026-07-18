@@ -347,6 +347,9 @@ export type NormalizedTurn = {
   // the OpenAI door has no equivalent field and leaves it unread.
   toolResults: { callId: string; content: string; isError?: boolean }[];
   images?: { mimeType: string; dataBase64: string }[];
+  // documents carries base64 PDF blocks through the Anthropic door (the only backend that accepts them);
+  // the other doors leave the field unread, so a PDF routed to Codex/xAI is still dropped.
+  documents?: { mimeType: string; dataBase64: string }[];
 };
 
 // One OpenAI message-content part for a multimodal (vision) user message.

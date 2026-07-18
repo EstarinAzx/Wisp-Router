@@ -721,6 +721,38 @@ describe('buildAnthropicMessagesBody — images', () => {
   });
 });
 
+describe('buildAnthropicMessagesBody — documents', () => {
+  // A document-bearing user turn becomes a content-block array: the document block (base64 source) before
+  // the text block, mirroring the image ordering. Was silently dropped before — the vanishing-PDF bug.
+  it('serializes a document user turn as document-then-text blocks', () => {
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+      { role: 'user', content: 'summarize this', documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }] },
+    ] }) as any;
+    expect(body.messages[0]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
+        { type: 'text', text: 'summarize this', cache_control: { type: 'ephemeral', ttl: '1h' } },
+      ],
+    });
+  });
+
+  // Full ordering on one turn: tool_result leads (API pairing rule), then documents, then images, then text.
+  it('orders tool_result before document before image before text on one user turn', () => {
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+      { role: 'user', content: 'and this?', toolResults: [{ callId: 'toolu_1', content: 'done' }],
+        images: [{ mimeType: 'image/png', dataBase64: 'CCCC' }],
+        documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }] },
+    ] }) as any;
+    expect(body.messages[0].content).toEqual([
+      { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
+      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral', ttl: '1h' } },
+    ]);
+  });
+});
+
 describe('anthropicTruncationReason', () => {
   // The message_delta stop_reason that means the reply was CUT SHORT (budget / filter / refusal) — the only
   // signal the streamed text deltas can't carry, so #87 surfaces it as a visible marker. The Anthropic analogue
