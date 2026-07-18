@@ -35,9 +35,14 @@ openclaude. That is intentional and stays.
 openclaude: default ephemeral; `ttl:'1h'` only when latched subscriber + !overage + allowlist.
 Wisp today: always `ttl:'1h'` (`anthropic.ts:237`).
 
-**Port shape (if needed):** bare `{type:'ephemeral'}` by default; add `ttl:'1h'` when the
-session is multi-turn / interactive. Optional: drop 1h after an overage/rate-limit signal.
+**Biggest optional steal, not biggest problem** — real burn already fixed by #111.
+**Port shape (if needed):** bare `{type:'ephemeral'}` by default; add `ttl:'1h'` only when
+this request body's user/assistant turn count (after system strip) is `>= 2`. Not session
+lifetime, not openclaude's subscriber/overage/GB stack.
+- 1 user msg (Inquire / probe) → 5m write
+- 2+ turns already in body → 1h
 **Skip if** plan usage already stable post-#111 — then YAGNI.
+**Gate status 2026-07-18:** OPENED by user request. Steal #1 landed in `buildAnthropicMessagesBody` (`anthropic.ts`): bare ephemeral when `convo.length < 2`, `ttl:'1h'` when `>= 2`. Breakpoints unchanged.
 
 ### 2. Single message marker for short chats
 openclaude: exactly one message-level marker.
@@ -67,13 +72,16 @@ openclaude shifts the marker to 2nd-to-last so fire-and-forget forks don't pollu
 ```
 #111 already: place markers + strip inbound
 optional next in buildAnthropicMessagesBody only (~20 lines, no new module):
-  if messages block-count small → 2 markers (system + last)
-  if large tool storm → keep STEP walk
-  ttl: '1h' only when turns >= 2; else bare ephemeral
+  small block-count → 2 markers (system + last)
+  large             → keep STEP walk
+  turns >= 2 (this request body, after system strip) → ttl: '1h'
+  turns < 2                                          → bare { type: 'ephemeral' }
 ```
 
 **Load-bearing invariant unchanged:** do not remove breakpoints — silent restore of ~10× plan burn
 (see [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]]).
+
+**Gate 2026-07-18:** opened by request; steal #1 shipped. #2 already true for short convos (STEP walk places one end marker). #3 still parked (no side-queries).
 
 ## Related
 - [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]]

@@ -177,9 +177,9 @@ describe('buildAnthropicMessagesBody', () => {
       max_tokens: 16_000,
       system: [
         { type: 'text', text: anthropicAttribution('edit this', '0.19.0') },
-        { type: 'text', text: 'rules', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'rules', cache_control: { type: 'ephemeral' } },
       ],
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral', ttl: '1h' } }] }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral' } }] }],
     });
   });
 
@@ -209,7 +209,7 @@ describe('buildAnthropicMessagesBody', () => {
         model: 'm', maxTokens: 1, version: 'v', tools,
         messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
       }) as any;
-      expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral' }); // one-shot → bare 5m
       expect(body.system[0].cache_control).toBeUndefined();
       expect(body.tools).toEqual(tools); // no cache_control on tools — the system breakpoint caches them
     });
@@ -229,7 +229,7 @@ describe('buildAnthropicMessagesBody', () => {
       ] }) as any;
       const blocks = body.messages[0].content;
       expect(blocks[0].cache_control).toBeUndefined();
-      expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral', ttl: '1h' } });
+      expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } });
     });
 
     // A single heavy parallel-tool turn collapses into one message of many blocks. With only the final
@@ -242,13 +242,35 @@ describe('buildAnthropicMessagesBody', () => {
       ] }) as any;
       const blocks = body.messages[0].content as any[];
       const marked = blocks.flatMap((b, i) => (b.cache_control ? [i] : []));
-      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' }); // the growing edge is always marked
+      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral' }); // one-shot → bare 5m; growing edge still marked
       expect(marked.length).toBeLessThanOrEqual(3); // 4/request cap − 1 for the system block
       // Every gap between consecutive markers — and from the first marker back to the covered tail — is
       // within the lookback window.
       for (let i = 1; i < marked.length; i++) expect(marked[i] - marked[i - 1]).toBeLessThanOrEqual(20);
       const systemMarks = body.system.filter((b: any) => b.cache_control).length;
       expect(systemMarks + marked.length).toBeLessThanOrEqual(4); // never exceed the per-request breakpoint cap
+    });
+
+    // openclaude steal #1: ttl:'1h' only when this request body already has 2+ user/assistant turns.
+    // One-shot (Inquire / probe / first turn) pays the cheaper 5m write; multi-turn keeps the idle-gap TTL.
+    it('uses bare ephemeral on a one-shot body and ttl:1h once the body is multi-turn', () => {
+      const oneShot = buildAnthropicMessagesBody({
+        model: 'm', maxTokens: 1, version: 'v',
+        messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
+      }) as any;
+      expect(oneShot.system[oneShot.system.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+      expect(oneShot.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
+
+      const multi = buildAnthropicMessagesBody({
+        model: 'm', maxTokens: 1, version: 'v',
+        messages: [
+          { role: 'user', content: 'hi' },
+          { role: 'assistant', content: 'hello' },
+          { role: 'user', content: 'more' },
+        ],
+      }) as any;
+      expect(multi.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      expect(multi.messages[2].content[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     });
 
     // Plain chat turns are bare strings and can't carry a marker. When a run of them straddles a step
@@ -672,7 +694,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
       role: 'user',
       content: [
         { type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' },
-        { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -759,7 +781,7 @@ describe('buildAnthropicMessagesBody — images', () => {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
-        { type: 'text', text: 'do u see this image?', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'do u see this image?', cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -771,7 +793,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     ] }) as any;
     expect(body.messages[0]).toEqual({
       role: 'user',
-      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' }, cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'BBBB' }, cache_control: { type: 'ephemeral' } }],
     });
   });
 
@@ -783,7 +805,7 @@ describe('buildAnthropicMessagesBody — images', () => {
     expect(body.messages[0].content).toEqual([
       { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
-      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral', ttl: '1h' } },
+      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral' } },
     ]);
   });
 });
@@ -799,7 +821,7 @@ describe('buildAnthropicMessagesBody — documents', () => {
       role: 'user',
       content: [
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
-        { type: 'text', text: 'summarize this', cache_control: { type: 'ephemeral', ttl: '1h' } },
+        { type: 'text', text: 'summarize this', cache_control: { type: 'ephemeral' } },
       ],
     });
   });
@@ -815,7 +837,7 @@ describe('buildAnthropicMessagesBody — documents', () => {
       { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done' },
       { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERI' } },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'CCCC' } },
-      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral', ttl: '1h' } },
+      { type: 'text', text: 'and this?', cache_control: { type: 'ephemeral' } },
     ]);
   });
 });

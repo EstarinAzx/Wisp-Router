@@ -192,7 +192,7 @@ export const buildAnthropicMessagesBody = (args: {
   const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
   const convo = args.messages.filter((m) => m.role !== 'system');
   const firstUserMessage = convo[0]?.content ?? '';
-  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl: '1h' } }> = [
+  const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '1h' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
@@ -231,10 +231,15 @@ export const buildAnthropicMessagesBody = (args: {
   // marker caches the tool definitions AND the system prompt together (the big stable prefix). Without a
   // marker a bridged Claude Code session re-bills its whole history uncached every turn (~10x usage) — the
   // Bridge flattens away the markers Claude Code sent, so we reconstruct our own here.
-  // ttl:'1h' matches native Claude Code: the prefix survives idle gaps (a user stepping away mid-session)
-  // instead of expiring after the 5-minute default and re-writing on return. 1h writes cost 2x vs 1.25x,
-  // but an interactive session reads the prefix many times over, so the extra write pays for itself.
-  const CACHE = { cache_control: { type: 'ephemeral' as const, ttl: '1h' as const } };
+  // ttl policy (openclaude steal #1): bare {type:'ephemeral'} (5m, 1.25× write) for a one-shot body
+  // (Inquire / probe / first turn); ttl:'1h' (2× write) only when this request already carries 2+
+  // user/assistant turns — multi-turn sessions re-read the prefix enough that the longer TTL pays.
+  // Turn count = this request's body after system strip, not session lifetime.
+  const CACHE = {
+    cache_control: convo.length >= 2
+      ? { type: 'ephemeral' as const, ttl: '1h' as const }
+      : { type: 'ephemeral' as const },
+  };
   system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
 
   // A bare-string final turn can't carry a marker — expand it to a single text block (earlier plain turns
