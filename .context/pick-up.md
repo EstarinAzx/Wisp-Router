@@ -11,72 +11,65 @@ tags: [context, pick-up]
 
 ## Where you are
 
-**On `main` at `ff35e66`, tagged `v2.0.16`, released and installed. Nothing in
-flight.** Two ship cycles landed 2026-07-18: the #111 cache follow-ups as
-v2.0.15 (breakpoint spread, forward-slide hardening, 1h TTL, is_error — TTL
-live-verified against the real OAuth endpoint), then **PDF passthrough as
-v2.0.16** — base64 `document` blocks now ride the Anthropic door (top-level
-user blocks AND hoisted out of `tool_result` content, mirroring images), built
-TDD (4 new tests, 481 total green) and live-verified: a generated PDF fed
-through the source Bridge came back read correctly (`WISP PDF TEST 42`).
-Anthropic-door only — a PDF routed to Codex/xAI/Go targets is still dropped.
-npm has 2.0.16, global binary reinstalled. Quota parity with native Claude
-Code believed complete; fidelity now too, except thinking blocks.
+**On `main` at `971cefd`, tagged `v2.0.17`, released and installed. Nothing in
+flight.** Three ship cycles landed 2026-07-18: v2.0.15 (cache follow-ups),
+v2.0.16 (PDF passthrough), and **v2.0.17 — thinking passthrough, the last
+fidelity gap, closed.** `thinking`/`redacted_thinking` blocks round-trip
+client ↔ Anthropic: raw-sidecar verbatim replay outbound (signatures +
+interleaved order intact, client cache_control shed), live thinking SSE frames
+inbound (incl. the OAuth wire's empty-text signed blocks via `thinkingStart`).
+Claude 5 (fable-5/sonnet-5) joined the effort regexes — /effort reaches the
+default model now, at every level through `max`. Grilled first (7 decisions —
+see [[2026-07-18-thinking-passthrough-raw-sidecar]]), TDD (498 core tests, was
+481), review-fixed (stream-position tool yields; sidecar cache strip),
+live-verified end to end on opus-4-8 AND fable-5 incl. tool continuation,
+cross-model replay, and codex smoke. **Anthropic-OAuth path now believed at
+full quota + fidelity parity with native Claude Code.**
 
-## What last session did — ship v2.0.15
+## What last session did — ship v2.0.17
 
-1. Reviewed the stacked review branch diff (no findings), fresh-verified
-   (compile clean, 477 tests), fast-forward merged to `main`, pushed.
-2. Cleared the pre-release caveat: live bridged round-trip through the
-   Anthropic-OAuth path with the new body builder — endpoint accepted
-   `ttl:'1h'` markers.
-3. Release prep: `packages/tui/package.json` 2.0.14→2.0.15, span-baseline
-   recaptured (32 Screens), `packages/tui/CHANGELOG.md` entry, commit
-   `df913e6`, tag `v2.0.15` pushed → release.yml green → npm publish →
-   `npm i -g wisp-router@2.0.15`.
-4. Deleted both `claude/*rehydration*` branches.
+1. `/preset pick-up` → grill (7 locked decisions) → TDD build across
+   parse/body-builder/stream/encoder/reply → cavecrew review (2 real bugs
+   fixed, 2 findings overruled with live evidence) → live probes → release.
+2. Live probes against the real OAuth endpoint (probe scripts pattern:
+   scratchpad `probe-direct.ts`/`probe-continue.ts`/`probe-door-continue.ts`
+   using the REAL `buildAnthropicMessagesBody`): endpoint emits EMPTY-text
+   signed thinking blocks; tolerates foreign signatures (200), stripped
+   thinking (200); Claude 5 accepts adaptive+effort through max (200).
+3. Release: bump 2.0.16→2.0.17, span-baseline recaptured, tui CHANGELOG,
+   tag `v2.0.17`, release.yml green ×4 + publish, `npm i -g` confirmed.
+4. Branch `claude/thinking-passthrough` merged fast-forward + deleted.
 
 ## Next task — none mandatory; backlog if idle
 
-No queued work. Candidates, deliberately held:
-
-- **thinking / redacted_thinking preservation — the last fidelity gap, HELD,
-  risky to do casually.** User wants wisped Claude uncapped, so this WILL come
-  up. Anthropic requires thinking blocks passed back byte-for-byte with
-  signatures intact; Wisp also routes to non-Anthropic backends where they
-  must be dropped; `NormalizedTurn` has no thinking slot. Architecturally
-  significant (CLAUDE.md §3) — start with a design discussion (grill/`/hp`),
-  NOT a quick patch. Agreed 2026-07-18: grill first when the user asks.
-- **PDF passthrough — DONE in v2.0.16** (base64 documents, Anthropic door;
-  Codex/xAI/Go targets still drop them — extend only if a backend gains PDF
-  support).
-- **TUI model-switch cache warning — backlog, speculative.** Surface a
-  heads-up in `/routing` (`routingScreens.tsx`) when re-pointing the MAIN-LOOP
-  target of an active session (model switch cold-writes the model-scoped
-  cache). Low value; build only if someone actually hits it.
+- **Real-world soak** — fidelity now verified by probes; the true test is
+  daily-driving wisped fable through long agentic sessions (interleaved
+  multi-thinking turns). If a session bricks on a 400 mentioning
+  thinking/signature: capture the request body, re-run the scratchpad-style
+  probes, only then consider strip-retry (deliberately skipped — endpoint
+  tolerates today).
+- **Codex reasoning → thinking blocks out the Anthropic door** — backlog,
+  grill-first (unsigned fabricated blocks get resent by clients; reason the
+  loop through before building).
+- **TUI model-switch cache warning** — backlog, speculative, build only if hit.
 
 ## Landmines
 
-- Release checklist (for any future `v2.x`): bump `packages/tui/package.json` →
-  recapture span-baseline (`bun scripts/span-baseline.tsx --update` from
-  `packages/tui`) → update `packages/tui/CHANGELOG.md` → tag must equal the
-  package.json version or release.yml refuses. Changelog split is policy:
-  vscode changelog is extension-only.
-- `wisp --version` doesn't exist — it launches the TUI; version is on the
-  splash.
-- Live-testing the Bridge from source: check port 41184 is free first (an
-  installed-binary Bridge would be a stale-code listener and #63 loud-fail on
-  double-start); `bun packages/tui/src/index.tsx serve`, then
-  `bun packages/tui/src/claude-wisp.ts -p "..."` from a neutral cwd. Or curl
-  the door directly: `x-api-key: <bridgeSecret from ~/.wisp/auth.json>` +
-  `anthropic-version` header on POST /v1/messages.
-- **Killing a background-started Bridge: TaskStop/shell-kill only gets the
-  wrapper — the bun server survives as an orphan holding 41184.** Find and
-  kill the real PID: `Get-NetTCPConnection -LocalPort 41184 -State Listen` →
-  `Stop-Process -Id <OwningProcess>`.
+- Release checklist: bump `packages/tui/package.json` → span-baseline
+  (`bun scripts/span-baseline.tsx --update` from packages/tui) → tui
+  CHANGELOG → tag == package.json version or release.yml refuses.
+- PS 5.1 `Set-Content -Encoding utf8` writes a BOM — package.json got one this
+  session and needed a BOM-less rewrite. Prefer `[IO.File]::WriteAllText` with
+  `UTF8Encoding($false)` for files npm reads.
+- Bridge from source: port 41184 must be free; killing the background wrapper
+  orphans the bun server — kill the PID from
+  `Get-NetTCPConnection -LocalPort 41184 -State Listen`.
+- Thinking-only turns on the OpenAI door / vscode chatProvider render as
+  silent empty completions (those doors drop thinking; accepted ceiling).
+- `wisp --version` doesn't exist — version is on the TUI splash.
 - `plugins/slot/**` edits need `claude plugin update wisp-slot@wisp-router`.
 
 ## Related
 
 - [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]]
-- [[2026-07-16-anthropic-cache-breakpoints-are-wisp-placed]]
+- [[2026-07-18-thinking-passthrough-raw-sidecar]]
