@@ -7,60 +7,77 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-19 18:xx by Opus 4.8 (1M) (wrap-up)._
-_At commit: fc355e6 (release 2.0.21 + context)._
+_Last updated: 2026-07-19 by Opus 4.8 (1M) (wrap-up)._
+_At commit: 2f0e61a (release 2.0.22)._
 
 ## Current focus
 
-**Nothing code-pending — drive normal.** Native Advisor through the Bridge is merged and
-**2.0.21 is live** (npm `wisp-router@2.0.21` + GitHub release `v2.0.21`, release.yml green). The
-user confirmed it live in a real `claude-wisp` session: Opus 4.8 advised, round-trip reached the
-full conversation.
+**2.0.22 is committed, not yet tagged/pushed.** Two commits on `main`:
+- `82d90e2` fix(bridge): stop advisor 400 from cache_control marker leak + reviewer echo
+- `2f0e61a` chore(release): 2.0.22 - advisor cache_control leak + reviewer harden
+
+Live-verified on a real heavy session (effort=xhigh, thinking, tool history,
+images=4): no more `"Found 5"` 400, reviewer returns real advice, continuation
+round-trips. Tag `v2.0.22` + push is the remaining release step (triggers
+`release.yml` → 4 binaries + npm `wisp-router@2.0.22`).
 
 ## State
 
-- **In flight:** none.
-- **Done this session:** shipped the Wisp-native Advisor (Stages 0–4 of
-  [[2026-07-19-wisp-native-advisor-via-door-server-tool]]). The Anthropic door now plays the
-  advisor server-tool role — forwards a synthetic `advisor` tool to the base Target, runs a
-  separate reviewer pass when called (advisor model routed through the Routing map, any Target
-  advising any other), streams `server_tool_use` + `advisor_tool_result` back for the native UI,
-  and resumes the base turn with the advice. `advisorToolSpec` + `runAdvisorLoop` are pure +
-  unit-tested (`bridgeAnthropic.ts`); the door wiring is in `bridgeServer.ts`. The launcher +
-  setup snippets set `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` (the client-side prereq).
-  Stale `/bridge` + vscode "endpoint-gated, use native claude" warning removed. Merged
-  `claude/wisp-native-advisor` → main `--no-ff`, cut release 2.0.21 (`ef6726a`: package.json +
-  CHANGELOG + span-baseline `--update`), tag `v2.0.21`. Also merged the pushed
-  `claude/repo-context-rehydrate-r1w1yw` context branch first (`dc7be49`).
-- **Verified:** 532 core tests · core `tsc` · tui `tsc` · vscode compile all clean; release run
-  29675147778 all-green; live-verified on isolated port 41185 (kimi base + opus reviewer,
-  cross-provider) AND in the user's real session.
+- **In flight:** tag + push of `v2.0.22` (user-authorized; wrap-up does not push).
+- **Done this session:** diagnosed and fixed two live Advisor failures on top of
+  the 2.0.21 ship:
+  1. **Root 400:** `buildAnthropicMessagesBody` mutated caller `rawContent` by
+     reference when placing #111 breakpoints. Advisor builds 2–3× from the same
+     `parsed.turns` → markers stacked past Anthropic's cap of 4. Fix: replay a
+     stripped *copy* of `rawContent` (`anthropic.ts`). Regression test asserts
+     the input stays marker-free across repeated builds.
+  2. **Reviewer echo:** reviewer sub-call forwarded `parsed.system` (Claude
+     Code's `# Advisor Tool` section) + raw turns → even real Opus parroted
+     meta-instructions. Fix: pure `reviewerSystem()` + `serializeForReview()`
+     in `bridgeAnthropic.ts`; door wiring in `bridgeServer.ts` uses them only.
+     Reviewer is text-only (images noted, not embedded).
+  - Live path: wrong binary first (installed 2.0.21 held `:41184`; version
+    banner can't discriminate without a bump) → source `bun run dev` after kill
+    → real advice + still-Found-5 on continuation → mutation fix → restart →
+    clean round-trip. 537 core tests, core/tui/vscode tsc clean, span baseline
+    recaptured for splash `v2.0.22` only (32 screens, no functional drift).
+- **Verified:** live on source Bridge (port 41184) after the mutation fix —
+  advisor returned a full critical review and the continuation completed with
+  no 400 in the Bridge log.
 - **Blocked:** none.
 
 ## Pick up here
 
-No active work — pick a new task. Housekeeping: the merged `claude/wisp-native-advisor` local
-branch is already deleted; its remote (and the older `claude/anthropic-cache-ttl-fix`,
-`claude/repo-context-rehydrate-r1w1yw`) can be pruned on GitHub whenever.
+1. Tag + push: `git tag v2.0.22 && git push origin main --tags` (tag must equal
+   `packages/tui/package.json` version — release.yml hard-checks).
+2. Watch `release.yml` go green; confirm npm `wisp-router@2.0.22` + GitHub
+   release assets.
+3. Optional: `npm i -g wisp-router@2.0.22` (note: running `wisp.exe` locks the
+   binary and can block the npm unlink — stop the Bridge first).
+4. Nothing else code-pending after the release lands.
 
 ## Skills for next session
 
-_None clearly apply — new task will pick its own route._
+- `/preset ci-babysit` (or just watch the release run) if the tag is pushed.
+- Otherwise drive normal.
 
 ## Open questions
 
-- Advisor reviewer prompt (`REVIEWER_SYSTEM` in `bridgeServer.ts`) is a first cut — tune if the
-  advice reads generic. `maxConsults` caps advisor rounds at 4/turn (ponytail default).
+- Reviewer is text-only by design post-2.0.22 (`serializeForReview` notes
+  images, doesn't embed). Revisit only if an advisor use case needs to *see*
+  pasted screenshots.
 - Optional openclaude cache steal #3 (`skipCacheWrite` for forks) still parked.
 
 ## Recent context
 
-- The advisor was NEVER endpoint-gated — Stage 0 (from the real `claude` 2.1.215 binary) proved a
-  wisp session is `firstParty`. The only missing piece was Wisp playing the server role.
-- Live prereq that bit the user first: a `claude-wisp-*` base model has no `advisor_rank`, so
-  Claude Code only injects the advisor tool under `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`
-  — otherwise the model reports "advisor tool not there." Launcher sets it now.
-- "test advisor" on an empty session may legitimately not fire (the model decides when to consult).
+- The "Found 5" was **not** "too many breakpoints in one build" — the builder
+  hard-caps at 4. It was cross-build leakage via shared `rawContent` arrays.
+  Don't "fix" it by lowering `MSG_BREAKPOINTS`.
+- Version banner alone cannot tell installed `wisp.exe` from `bun run dev`
+  when package.json hasn't been bumped yet — check bind log + that the old
+  exe is dead (EADDRINUSE / `unlink …wisp.exe` permission errors are the tells).
+- Don't remove #111 cache breakpoints; don't re-derive TTL from `convo.length`
+  (see [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]).
 
 ## Related
 
@@ -68,5 +85,6 @@ _None clearly apply — new task will pick its own route._
 - [[pick-up]]
 - [[decisions]]
 - [[gotchas]]
+- [[2026-07-19-advisor-cache-control-mutation-and-reviewer-frame]]
 - [[2026-07-19-wisp-native-advisor-via-door-server-tool]]
-- [[claude-code-advisor-is-endpoint-gated-past-the-bridge]]
+- [[buildanthropicmessagesbody-must-not-mutate-caller-rawcontent]]

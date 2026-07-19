@@ -9,26 +9,38 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE, shipped):** Wisp-native Advisor — the Anthropic door now plays the advisor
-server-tool role so Claude Code's `/advisor` works through the Bridge. Shipped
-`wisp-router@2.0.21` (npm + GitHub release, release.yml green), live-verified in the user's real
-session (Opus 4.8 advised, full round-trip). Details in
-[[2026-07-19-wisp-native-advisor-via-door-server-tool]].
+**Last task (DONE, committed, not yet tagged):** Advisor mid-turn 400 + reviewer
+echo — fixed and cut as `wisp-router@2.0.22` on `main` (`82d90e2` fix,
+`2f0e61a` release). Live-verified on a real heavy session (no more
+`"Found 5"` 400; reviewer returns real advice; continuation round-trips).
+Details in [[2026-07-19-advisor-cache-control-mutation-and-reviewer-frame]].
 
-**Next task:** none queued — pick a new one, or drive normal. Nothing code-pending.
+**Next task:** tag + push the release.
 
-**If advisor comes up again:**
-- Core: `advisorToolSpec` + `runAdvisorLoop` in `packages/core/src/bridgeAnthropic.ts` (pure,
-  unit-tested); door wiring + `REVIEWER_SYSTEM` in `packages/core/src/bridgeServer.ts`.
-- Live prereq: `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` (launcher sets it) or a
-  `claude-wisp-*` base model reports "advisor tool not there."
-- `REVIEWER_SYSTEM` prompt + `maxConsults` (4/turn) are the knobs if behavior needs tuning.
+```
+git tag v2.0.22
+git push origin main --tags
+```
 
-**Landmine:** don't remove the #111 cache breakpoints and don't re-derive the Anthropic cache TTL
-from `convo.length` (see [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]).
+Then watch `release.yml` (tag must equal `packages/tui/package.json` = `2.0.22`).
+After green: optional `npm i -g wisp-router@2.0.22` — **stop any running
+`wisp.exe` first** or the npm unlink fails (file locked).
+
+**If advisor / cache comes up again:**
+- Mutation root: `buildAnthropicMessagesBody` in `packages/core/src/anthropic.ts`
+  — always replay a *copy* of `rawContent`, never the caller's array. Regression
+  in `anthropic.test.ts` ("does not mutate the caller rawContent…").
+- Reviewer frame: `reviewerSystem` + `serializeForReview` in
+  `bridgeAnthropic.ts`; door wiring in `bridgeServer.ts`. Don't forward
+  `parsed.system` or raw turns to the reviewer.
+- Landmine: don't remove #111 cache breakpoints; don't re-derive TTL from
+  `convo.length` ([[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]).
+- Binary trap: version banner can't tell installed vs source until the version
+  bumps — confirm bind log + that the old exe is dead before live-testing.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
-- [[2026-07-19-wisp-native-advisor-via-door-server-tool]]
+- [[2026-07-19-advisor-cache-control-mutation-and-reviewer-frame]]
+- [[buildanthropicmessagesbody-must-not-mutate-caller-rawcontent]]
