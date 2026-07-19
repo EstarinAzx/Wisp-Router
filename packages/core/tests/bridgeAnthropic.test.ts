@@ -10,9 +10,31 @@ import {
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
   buildClaudeLaunch,
+  advisorToolSpec,
+  runAdvisorLoop,
 } from '../src/bridgeAnthropic';
-import type { ChatModelInfo } from '../src/catalog';
+import type { ChatModelInfo, NormalizedTurn } from '../src/catalog';
 import type { BridgeStreamEvent } from '../src/bridge';
+
+// Collect an async generator to an array — the loop tests assert on the full event sequence.
+const drain = async (gen: AsyncIterable<BridgeStreamEvent>): Promise<BridgeStreamEvent[]> => {
+  const out: BridgeStreamEvent[] = [];
+  for await (const ev of gen) out.push(ev);
+  return out;
+};
+
+// A base-pass fake: given a script of events per pass, returns them as async iterables in order and
+// records the turns each pass was invoked with (so continuation-turn assembly can be asserted).
+const scriptedBase = (passes: BridgeStreamEvent[][]) => {
+  const calls: NormalizedTurn[][] = [];
+  let i = 0;
+  const basePass = (turns: NormalizedTurn[]): AsyncIterable<BridgeStreamEvent> => {
+    calls.push(turns);
+    const events = passes[i++] ?? [];
+    return (async function* () { for (const ev of events) yield ev; })();
+  };
+  return { basePass, calls };
+};
 
 // Minimal ChatModelInfo builder — buildAnthropicModelsList only reads id + name, the rest is filler.
 const modelInfo = (id: string, name = `${id} model`): ChatModelInfo => ({
@@ -626,46 +648,53 @@ describe('buildAnthropicModelsList', () => {
 describe('buildClaudeCodeSnippets', () => {
   const snips = buildClaudeCodeSnippets('http://127.0.0.1:8971', 's3cret_x');
 
-  // Per-session PowerShell lines: $env: form, quoted values, all three vars, bare origin (no /v1).
+  // Per-session PowerShell lines: $env: form, quoted values, all four vars, bare origin (no /v1). The
+  // advisor flag rides along so the native /advisor works through the Bridge (a claude-wisp-* base model
+  // has no advisor_rank, so Claude Code only injects the advisor tool under this experimental flag).
   it('builds the PowerShell per-session lines', () => {
     expect(snips.powershell).toBe(
       '$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8971"\n' +
       '$env:ANTHROPIC_API_KEY = "s3cret_x"\n' +
-      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"',
+      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"\n' +
+      '$env:CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL = "1"',
     );
   });
 
-  // Per-session bash lines: export form, same three vars.
+  // Per-session bash lines: export form, same four vars.
   it('builds the bash per-session lines', () => {
     expect(snips.bash).toBe(
       'export ANTHROPIC_BASE_URL=http://127.0.0.1:8971\n' +
       'export ANTHROPIC_API_KEY=s3cret_x\n' +
-      'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1',
+      'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1\n' +
+      'export CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1',
     );
   });
 
   // The persistent variant is a valid project .claude/settings.json env block — parseable JSON carrying
-  // exactly the three vars. The global ~/.claude form must never be produced (PRD #43 ban).
+  // exactly the four vars. The global ~/.claude form must never be produced (PRD #43 ban).
   it('builds a parseable project settings.json env block', () => {
     expect(JSON.parse(snips.settingsJson)).toEqual({
       env: {
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
         ANTHROPIC_API_KEY: 's3cret_x',
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+        CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
       },
     });
   });
 });
 
 describe('buildClaudeLaunch', () => {
-  // The launcher's whole contract in one shape: the Bridge env trio plus CLAUDE_BINARY (so relay-style
-  // respawners inside the session re-use the wrapper), argv verbatim.
-  it('builds the env trio + CLAUDE_BINARY from port + secret', () => {
+  // The launcher's whole contract in one shape: the Bridge env vars (discovery + advisor) plus CLAUDE_BINARY
+  // (so relay-style respawners inside the session re-use the wrapper), argv verbatim. The advisor flag lets
+  // the native /advisor work through the Bridge out of the box.
+  it('builds the env vars + CLAUDE_BINARY from port + secret', () => {
     const launch = buildClaudeLaunch(8971, 's3cret_x', []);
     expect(launch.env).toEqual({
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
       ANTHROPIC_API_KEY: 's3cret_x',
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
       CLAUDE_BINARY: 'claude-wisp',
     });
   });
@@ -682,5 +711,276 @@ describe('buildClaudeLaunch', () => {
     const launch = buildClaudeLaunch(8971, 's', argv);
     launch.args.push('extra');
     expect(argv).toEqual(['-p']);
+  });
+});
+
+// ----------------------------- Advisor (server tool) — parse + emit ----------------------------- //
+
+describe('parseAnthropicMessagesRequest — advisor', () => {
+  // Claude Code injects {type:'advisor_20260301', name:'advisor', model} into tools when the Advisor is on.
+  // The door extracts it (the model rides to the reviewer sub-call) and keeps it OUT of the regular tools —
+  // forwarding it schema-less was the old dangle.
+  it('extracts the advisor server tool from tools and exposes its model', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [
+      { type: 'advisor_20260301', name: 'advisor', model: 'claude-opus-4-8' },
+      { name: 'read', description: 'read a file', input_schema: { type: 'object' } },
+    ] } as any);
+    expect(parsed.advisor).toEqual({ model: 'claude-opus-4-8' });
+    expect(parsed.tools).toEqual([{ name: 'read', description: 'read a file', inputSchema: { type: 'object' } }]);
+  });
+
+  // No advisor tool → the field stays absent, and a plain request is byte-identical to before.
+  it('leaves advisor absent when the tool is not sent', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [
+      { name: 'read', description: '', input_schema: { type: 'object' } },
+    ] } as any);
+    expect(parsed.advisor).toBeUndefined();
+  });
+
+  // A server_tool_use block in assistant history becomes a normalized toolCall (input → argsJson), so the
+  // backend sees the same regular-tool exchange the door synthesized live — not a silently dropped block.
+  it('maps an assistant server_tool_use block to a toolCall', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'text', text: 'consulting' },
+        { type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0].toolCalls).toEqual([{ id: 'srvtoolu_1', name: 'advisor', argsJson: '{}' }]);
+    expect(parsed.turns[0].text).toBe('consulting');
+  });
+
+  // The advisor_tool_result rides in the SAME assistant message on the wire, but the normalized shape (and
+  // every backend) wants tool results on the NEXT user turn — so the advice text carries forward as a
+  // toolResult there, paired to the server_tool_use id.
+  it('carries an assistant advisor_tool_result forward to the next user turn as a toolResult', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_result', text: 'do X first' } },
+        { type: 'text', text: 'ok, doing X' },
+      ] },
+      { role: 'user', content: 'thanks' },
+    ] } as any);
+    expect(parsed.turns[1].toolResults).toEqual([{ callId: 'srvtoolu_1', content: 'do X first' }]);
+    expect(parsed.turns[1].text).toBe('thanks');
+    expect(parsed.turns[0].text).toBe('ok, doing X');
+  });
+
+  // An error result (advisor_tool_result_error content) carries forward as an isError toolResult.
+  it('carries an advisor error result forward as an isError toolResult', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 'srvtoolu_2', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 'srvtoolu_2', content: { type: 'advisor_tool_result_error', error_code: 'unavailable' } },
+      ] },
+      { role: 'user', content: 'go on' },
+    ] } as any);
+    expect(parsed.turns[1].toolResults).toEqual([{ callId: 'srvtoolu_2', content: 'advisor error: unavailable', isError: true }]);
+  });
+
+  // A trailing advisor result with no following user turn has nowhere to land — dropped, never a crash.
+  it('drops a trailing advisor result with no following user turn', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 's1', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+      ] },
+    ] } as any);
+    expect(parsed.turns).toHaveLength(1);
+  });
+
+  // On a thinking-bearing turn the rawContent sidecar replays verbatim to the Anthropic backend — but the
+  // backend never saw advisor blocks (the door executed them as a regular tool round-trip). server_tool_use
+  // rewrites to a plain tool_use; advisor_tool_result drops (its text lives on the next user turn).
+  it('scrubs advisor blocks from the rawContent sidecar', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'thinking', thinking: 'hm', signature: 'sig' },
+        { type: 'server_tool_use', id: 's1', name: 'advisor', input: { focus: 'plan' } },
+        { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+        { type: 'text', text: 'after' },
+      ] },
+      { role: 'user', content: 'k' },
+    ] } as any);
+    expect(parsed.turns[0].rawContent).toEqual([
+      { type: 'thinking', thinking: 'hm', signature: 'sig' },
+      { type: 'tool_use', id: 's1', name: 'advisor', input: { focus: 'plan' } },
+      { type: 'text', text: 'after' },
+    ]);
+  });
+});
+
+describe('anthropic SSE encoder — advisor events', () => {
+  // A server_tool_use event emits the whole block: start (empty input) + one input_json_delta + stop —
+  // the same whole-call folding the regular tool_use path uses, under the server_tool_use block type.
+  it('emits a server_tool_use block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'server_tool_use', call: { id: 'srvtoolu_1', name: 'advisor', argsJson: '{"a":1}' } }));
+    expect(fs.map((f) => f.event)).toEqual(['content_block_start', 'content_block_delta', 'content_block_stop']);
+    expect(fs[0].data.content_block).toEqual({ type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} });
+    expect(fs[1].data.delta).toEqual({ type: 'input_json_delta', partial_json: '{"a":1}' });
+  });
+
+  // The advisor result is one whole block: Claude Code copies the full content off content_block_start,
+  // so start carries everything and stop follows immediately.
+  it('emits an advisor_tool_result block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'advisor_result', toolUseId: 'srvtoolu_1', text: 'do X' }));
+    expect(fs.map((f) => f.event)).toEqual(['content_block_start', 'content_block_stop']);
+    expect(fs[0].data.content_block).toEqual({
+      type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_result', text: 'do X' },
+    });
+  });
+
+  // The error twin: content is the advisor_tool_result_error shape Claude Code renders as "Advisor unavailable".
+  it('emits an advisor error result block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'advisor_error', toolUseId: 'srvtoolu_1', errorCode: 'unavailable' }));
+    expect(fs[0].data.content_block).toEqual({
+      type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_tool_result_error', error_code: 'unavailable' },
+    });
+  });
+
+  // Advisor is a SERVER tool — fully handled inside the turn, so it must not flip stop_reason to tool_use
+  // (that would tell Claude Code to run a client tool that doesn't exist). Text around it stays intact.
+  it('keeps stop_reason end_turn across an advisor round-trip', () => {
+    const sse = buildAnthropicSse([
+      { type: 'text', text: 'before' },
+      { type: 'server_tool_use', call: { id: 's1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_result', toolUseId: 's1', text: 'advice' },
+      { type: 'text', text: 'after' },
+    ], meta);
+    const fs = frames(sse);
+    const delta = fs.find((f) => f.event === 'message_delta');
+    expect(delta?.data.delta.stop_reason).toBe('end_turn');
+    // Indexes stay strictly increasing across text → server_tool_use → result → text blocks.
+    const starts = fs.filter((f) => f.event === 'content_block_start');
+    expect(starts.map((f) => f.data.index)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('buildAnthropicMessageResponse — advisor events', () => {
+  // The buffered mirror: advisor events become their blocks in order, stop_reason stays end_turn.
+  it('renders advisor events as blocks without flipping stop_reason', () => {
+    const res = buildAnthropicMessageResponse([
+      { type: 'server_tool_use', call: { id: 's1', name: 'advisor', argsJson: '{"q":2}' } },
+      { type: 'advisor_result', toolUseId: 's1', text: 'advice' },
+      { type: 'text', text: 'done' },
+    ], meta);
+    expect(res.content).toEqual([
+      { type: 'server_tool_use', id: 's1', name: 'advisor', input: { q: 2 } },
+      { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+      { type: 'text', text: 'done' },
+    ]);
+    expect(res.stop_reason).toBe('end_turn');
+  });
+});
+
+describe('advisorToolSpec', () => {
+  // The synthetic REGULAR tool the door forwards to the base backend so it has an 'advisor' to call —
+  // the backend isn't Anthropic-first-party and can't do server tools, so the advisor rides as an ordinary
+  // no-input tool, and the door intercepts the call.
+  it('is a no-input tool named advisor', () => {
+    const spec = advisorToolSpec();
+    expect(spec.name).toBe('advisor');
+    expect(spec.inputSchema).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+    expect(typeof spec.description).toBe('string');
+    expect(spec.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runAdvisorLoop', () => {
+  const initial: NormalizedTurn[] = [{ role: 'user', text: 'ship it?', toolCalls: [], toolResults: [] }];
+
+  // No advisor call: the loop is a pass-through — base events stream out unchanged, one base pass only.
+  it('passes base events through when the model never calls advisor', async () => {
+    const { basePass, calls } = scriptedBase([[{ type: 'text', text: 'looks good' }]]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'x' }));
+    expect(events).toEqual([{ type: 'text', text: 'looks good' }]);
+    expect(calls).toHaveLength(1);
+  });
+
+  // The core round-trip: base emits text then an advisor call → the loop emits the text, a server_tool_use,
+  // the advisor_result from the reviewer, then the continuation pass's text. The reviewer sees the turns.
+  it('runs the reviewer on an advisor call and streams the result then the continuation', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'let me check. ' }, { type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'advisor says yes, shipping.' }],
+    ]);
+    let reviewerTurns: NormalizedTurn[] | undefined;
+    const reviewer = async (turns: NormalizedTurn[]) => { reviewerTurns = turns; return 'yes, safe to ship'; };
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer }));
+    expect(events).toEqual([
+      { type: 'text', text: 'let me check. ' },
+      { type: 'server_tool_use', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_result', toolUseId: 'srv1', text: 'yes, safe to ship' },
+      { type: 'text', text: 'advisor says yes, shipping.' },
+    ]);
+    expect(reviewerTurns).toEqual(initial);
+    expect(calls).toHaveLength(2);
+  });
+
+  // The continuation pass carries the advisor exchange in history: the assistant turn holds the accumulated
+  // text + the advisor toolCall, and a following user turn holds the advice as a toolResult — so the base
+  // backend resumes with the advice in context.
+  it('appends the advisor exchange to the continuation pass turns', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'thinking… ' }, { type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'done' }],
+    ]);
+    await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'do X' }));
+    expect(calls[1]).toEqual([
+      ...initial,
+      { role: 'assistant', text: 'thinking… ', toolCalls: [{ id: 'srv1', name: 'advisor', argsJson: '{}' }], toolResults: [] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'srv1', content: 'do X' }] },
+    ]);
+  });
+
+  // A reviewer failure surfaces as an advisor_error block (Claude Code renders "Advisor unavailable"), and
+  // the loop still continues once with the error fed back so the base model isn't left dangling.
+  it('emits advisor_error when the reviewer throws and continues', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'proceeding without advice' }],
+    ]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => { throw new Error('boom'); } }));
+    expect(events).toEqual([
+      { type: 'server_tool_use', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_error', toolUseId: 'srv1', errorCode: 'boom' },
+      { type: 'text', text: 'proceeding without advice' },
+    ]);
+    expect(calls[1][calls[1].length - 1].toolResults[0].isError).toBe(true);
+  });
+
+  // A non-advisor (client) tool call is terminal: it streams through as a tool_call for Claude Code to run,
+  // and the loop stops — no continuation pass, no reviewer.
+  it('passes a non-advisor tool call through and stops', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'reading' }, { type: 'tool_call', call: { id: 't1', name: 'read', argsJson: '{"path":"a"}' } }],
+      [{ type: 'text', text: 'SHOULD NOT RUN' }],
+    ]);
+    let reviewerRan = false;
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => { reviewerRan = true; return ''; } }));
+    expect(events).toEqual([
+      { type: 'text', text: 'reading' },
+      { type: 'tool_call', call: { id: 't1', name: 'read', argsJson: '{"path":"a"}' } },
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(reviewerRan).toBe(false);
+  });
+
+  // Safety cap: a model that keeps calling advisor every pass is bounded — after maxConsults the loop stops
+  // rather than looping forever. Each consult still emits its result; only further continuation is cut.
+  it('caps the number of advisor consults', async () => {
+    const advisorPass: BridgeStreamEvent[] = [{ type: 'tool_call', call: { id: 'srv', name: 'advisor', argsJson: '{}' } }];
+    const { basePass, calls } = scriptedBase([advisorPass, advisorPass, advisorPass, advisorPass]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'a', maxConsults: 2 }));
+    const consults = events.filter((e) => e.type === 'advisor_result').length;
+    expect(consults).toBe(2);
+    expect(calls).toHaveLength(2);
   });
 });

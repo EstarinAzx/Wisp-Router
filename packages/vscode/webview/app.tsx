@@ -621,9 +621,9 @@ export const App = () => {
           Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: <code class="snippet">/plugin marketplace add EstarinAzx/Wisp-Router</code>
         </p>
 
-        {/* Advisor is endpoint-gated upstream — the Bridge can't intercept it, so warn where the wiring happens. */}
-        <p class="hint text-[var(--vscode-editorWarning-foreground,#fbbf24)]">
-          Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.
+        {/* Advisor now works through Wisp — the door plays the server-tool role (2.0.21). Note it where the wiring happens. */}
+        <p class="hint">
+          Advisor works through Wisp: /advisor picks the reviewer model, routed through your Routing map. claude-wisp enables it automatically; a manual setup needs <code class="snippet">CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1</code>.
         </p>
       </section>
 

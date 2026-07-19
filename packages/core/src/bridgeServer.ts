@@ -40,8 +40,10 @@ import {
 } from './bridge';
 import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
+  advisorToolSpec, runAdvisorLoop,
   type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
+import type { NormalizedTurn } from './catalog';
 import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
@@ -435,6 +437,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
   // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
 
+  // The reviewer instruction for the advisor sub-call: the door hands the advisor Target the conversation
+  // and asks for a second opinion. Claude Code's own advisor instructions steered the BASE model to CALL
+  // advisor; this steers the ADVISOR to answer. Kept short — the value is the review, not the framing.
+  const REVIEWER_SYSTEM =
+    'You are acting as an advisor: a stronger model giving a second opinion on the conversation above. '
+    + 'Review what the assistant is about to do — especially any risky, irreversible, or uncertain step — '
+    + 'and reply with concise, direct guidance: what looks wrong, what to verify, what to do next. '
+    + 'You are advising the assistant, not the user; do not address the user or use tools.';
+
   // Anthropic-door traffic is told apart from OpenAI-door traffic on the shared routes by the headers only an
   // Anthropic client sends. Slice #44 verified `anthropic-version || x-api-key` cleanly separates them (a
   // Bearer-only OpenAI client hits neither), so this is the live door selector.
@@ -552,7 +563,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // — plus how many images the request carried (the vision observable: 0 here means the client never sent
     // pixels; >0 means any blindness is downstream of the door).
     const imageCount = parsed.turns.reduce((n, t) => n + (t.images?.length ?? 0), 0);
-    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'}) images=${imageCount}`);
+    // The advisor observable: whether the request carried the server tool + which model will review (the door
+    // now plays the server role — a dangling advisor call was the old failure). off when Claude Code didn't send it.
+    const advisorNote = parsed.advisor ? ` advisor=${parsed.advisor.model ?? 'default'}` : '';
+    deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'}) images=${imageCount}${advisorNote}`);
 
     const controller = new AbortController();
     req.on('close', () => controller.abort());
@@ -560,9 +574,47 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const requested = (body as { model?: unknown }).model;
     const meta: AnthropicSseMeta = { id: `msg_${crypto.randomBytes(12).toString('hex')}`, model: typeof requested === 'string' ? requested : parsed.model };
 
+    // Advisor (server tool): the base pass carries the synthetic `advisor` tool so the Target can call it,
+    // and the reviewer sub-call routes the picker's advisor model through the Routing map (Stage 4). Absent
+    // an advisor tool this whole block is skipped and the door behaves exactly as before.
+    const advisorTools = parsed.advisor ? [...parsed.tools, advisorToolSpec()] : parsed.tools;
+    // The reviewer: hand the advisor Target the conversation + the review instruction, no tools, drain its
+    // text as the advice. Its own model route is the picker's choice (claude-wisp- stripped like body.model),
+    // falling back to the base route so the Target advises itself when no separate advisor model resolves.
+    const reviewer = async (turns: NormalizedTurn[]): Promise<string> => {
+      const advModel = (parsed.advisor?.model ?? '').replace(/^claude-wisp-/, '');
+      const advRoute = (advModel ? routeFor(advModel) : undefined) ?? route;
+      const reviewParsed: BridgeAnthropicRequest = {
+        ...parsed, turns, tools: [], advisor: undefined,
+        system: parsed.system ? `${parsed.system}\n\n${REVIEWER_SYSTEM}` : REVIEWER_SYSTEM,
+      };
+      const r = await startProviderStream(reviewParsed, advRoute.provider, advRoute.pinnedModel, controller);
+      if (!r.ok) throw new Error(r.message);
+      let text = '';
+      for await (const ev of r.events) if (ev.type === 'text') text += ev.text;
+      return text.trim();
+    };
+
     try {
-      const result = await startProviderStream(parsed, provider, route.pinnedModel, controller);
+      const result = await startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller);
       if (!result.ok) return sendError(res, result.status, result.message);
+
+      // The event source: with an advisor tool, the door plays the server role via runAdvisorLoop (the first
+      // base pass reuses the eager stream above so a signed-out provider still 4xxs before headers; later
+      // continuation passes call the backend fresh). Without one, it's the plain single-pass stream.
+      let eventsSource: AsyncIterable<BridgeStreamEvent> = result.events;
+      if (parsed.advisor) {
+        let firstPass = true;
+        const basePass = (turns: NormalizedTurn[]): AsyncIterable<BridgeStreamEvent> => {
+          if (firstPass) { firstPass = false; return result.events; }
+          return (async function* () {
+            const r = await startProviderStream({ ...parsed, turns, tools: advisorTools }, provider, route.pinnedModel, controller);
+            if (!r.ok) throw new Error(r.message);
+            yield* r.events;
+          })();
+        };
+        eventsSource = runAdvisorLoop({ turns: parsed.turns, basePass, reviewer });
+      }
 
       // Non-streaming request (notably Claude Code's /model validation probe): buffer the provider stream
       // into one JSON Messages object with a usage block. The door used to always stream — handing an SSE
@@ -570,7 +622,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // the catch below with the head not yet sent, so a clean JSON error goes out, not a torn stream.
       if (!parsed.stream) {
         const events: BridgeStreamEvent[] = [];
-        for await (const ev of result.events) events.push(ev);
+        for await (const ev of eventsSource) events.push(ev);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(buildAnthropicMessageResponse(events, meta)));
         return;
@@ -585,7 +637,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       let started = false;
       let lastUsage: BridgeUsage | undefined;               // message_delta carries the final cumulative counts
       const ensureStarted = (): void => { if (!started) { res.write(enc.start()); started = true; } };
-      for await (const ev of result.events) {
+      for await (const ev of eventsSource) {
         if (ev.type === 'usage') { lastUsage = ev.usage; enc.setUsage(ev.usage); ensureStarted(); continue; }
         ensureStarted();
         res.write(enc.push(ev));

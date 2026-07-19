@@ -58,14 +58,14 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
         .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
     </box>
 
-    {/* Advisor is endpoint-gated upstream — its calls never hit the configurable base URL,
-        so the Bridge can't intercept them and no fix exists on our side. Warn here, where
+    {/* Advisor now works through Wisp (the door plays the server-tool role — 2.0.21). The
+        claude-wisp launcher sets CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL so /advisor is
+        offered for the claude-wisp-* aliases (which carry no advisor_rank). Note here, where
         Claude Code gets wired. Hand-wrapped (panel rows never use opentui wrap); -2 = the
-        panel's inner padding. Plain-text amber, no glyph — ⚠ is ambiguous-width and smears
-        on common Windows fonts, same reason the select indicator is off. */}
+        panel's inner padding. Plain-text, no glyph — ambiguous-width smears on Windows fonts. */}
     <box marginTop={1} flexDirection="column">
-      {wrapWords("Heads up: Claude Code's Advisor won't work through Wisp even when bound to Claude OAuth — it's endpoint-gated upstream. Use native claude for advisor tasks.", cols - 2)
-        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg="#fbbf24">{l}</text>)}
+      {wrapWords("Advisor works through Wisp: /advisor picks the reviewer model, routed through your Routing map. claude-wisp enables it automatically; a manual setup needs CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1.", cols - 2)
+        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
     </box>
 
     <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — listener stays up · /bridge off stops · /quit kills</text>
