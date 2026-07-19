@@ -6,6 +6,28 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.20] — 2026-07-19
+
+### Fixed
+
+- **Anthropic cache TTL no longer flips mid-session** — the cache TTL on the #111
+  breakpoints was derived from this request's turn count (`≥ 2` turns → `1h`, else
+  `5m`), so turn 1 of a bridged session wrote `5m` and turn 2 flipped to `1h`. A TTL
+  change rewrites `cache_control` and busts the server-side prompt cache, re-billing
+  the whole system+tools prefix at the 2× write rate on turn 2 of **every** session.
+  The TTL is now fixed per request **path**: `anthropicStream` (Bridge sessions +
+  native chat) → `1h`, `anthropicInquire` (one-shot) → `5m`, haiku always `5m`. The
+  #111 breakpoint placement is unchanged — only the TTL value moved from turn-count to
+  call-path.
+
+### Added
+
+- **`prompt-cache MISS` log on the Bridge's Anthropic door** — a pure
+  `anthropicCacheOutcome` classifier (`hit`/`fresh`/`miss`/`none`) over the wire's
+  token usage; the door logs one line when a past-first-exchange request reads nothing
+  from cache while billing a large uncached input (the #111 regression shape). The
+  observability that cache regression previously had none of.
+
 ## [2.0.19] — 2026-07-18
 
 ### Changed
