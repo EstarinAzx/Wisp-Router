@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-19-wisp-native-advisor-via-door-server-tool]] — Wisp CAN make Claude Code's Advisor work: the door executes the server tool itself (separate reviewer call) and emits `advisor_tool_result` back; corrects the "endpoint-gated, no fix" gotcha (native picker works through the Bridge; Wisp just never played the server role); staged plan, Stage 0 confirms Flavor A (native `/advisor`) vs B (look-alike); queued **2.0.21 behind 2.0.20**
 - [[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]] — cache TTL fixed per request PATH (`anthropicStream`→1h, `anthropicInquire`→5m, haiku always 5m), never from `convo.length`; supersedes the TTL half of #111, shipped 2.0.20; the turn-count proxy flipped 5m→1h mid-session and busted the prefix cache
 - [[2026-07-18-vscode-panel-mirrors-tui-bridge-no-env-snippets]] — vscode Claude Code card mirrors the TUI `/bridge` screen (launch line + plugin nudge + Advisor caveat); removed #47's copy-paste env snippets because they rendered the live secret as plaintext; core builder kept for a future guarded reveal
 - [[2026-07-18-openclaude-cache-control-steal-list]] — OpenClaude cache_control steal list: #1 (bare 5m one-shot / ttl:1h multi-turn) SHIPPED 2.0.19; #2 already true via STEP; #3 parked; do NOT port cache_edits / break detection / marker pass-through (#111 stays load-bearing)
