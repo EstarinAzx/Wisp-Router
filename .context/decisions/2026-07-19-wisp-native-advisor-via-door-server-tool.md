@@ -5,13 +5,29 @@ updated: 2026-07-19
 tags: [context, decision]
 ---
 
-# Wisp-native Advisor: the door plays the server-tool role (planned 2.0.21)
+# Wisp-native Advisor: the door plays the server-tool role — SHIPPED 2.0.21
 
-**Decision.** Wisp *can* make Claude Code's Advisor work through the Bridge, and will — as a
-new capability in the Anthropic door. The old "endpoint-gated, no code fix" gotcha was the
-wrong root cause. Real fix: teach the door to **execute the advisor server tool itself** and
-hand the result back. Queued as **2.0.21, behind 2.0.20** (`claude/anthropic-cache-ttl-fix`).
-Not started — investigation + plan only.
+**Decision (SHIPPED `wisp-router@2.0.21`, live-verified).** Wisp makes Claude Code's Advisor work
+through the Bridge as a new capability in the Anthropic door. The old "endpoint-gated, no code fix"
+gotcha was the wrong root cause. The door now **executes the advisor server tool itself** and hands
+the result back. Merge `claude/wisp-native-advisor` → main, tag `v2.0.21`.
+
+## Outcome (what actually shipped)
+
+- **Stage 0 = Flavor A, confirmed from the real `claude` 2.1.215 binary** (beats the planned live-log).
+  The advisor master gate `D9()` needs `vn()==="firstParty"`; `vn()` only returns `"gateway"` when
+  `gatewayAuth` is set — NOT from `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`. So a wisp session is
+  first-party and the advisor fully enables client-side. Native `/advisor` revived, no look-alike needed.
+- **New prerequisite the plan didn't have:** the base-model gate `_1e()` fails for a `claude-wisp-*` alias
+  (no `advisor_rank` in the catalog), so Claude Code injects the advisor tool ONLY under
+  `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`. Without it the model says "advisor tool not there."
+  The launcher + snippets now set it → works out of the box.
+- **Live-verified on isolated port 41185:** a kimi-k3 base (opencode-go) called the forwarded `advisor`
+  tool, an opus reviewer (anthropic) produced real advice, kimi incorporated it — stream carried
+  `server_tool_use` → `advisor_tool_result` → continuation text, `stop_reason: end_turn`. **Cross-provider
+  advisor works** (any Target advises any other). Regression (plain request) unchanged.
+- Pure translator + loop control are unit-tested (bridgeAnthropic.test.ts, 532 green); the impure door
+  wiring is the glue. The stale `/bridge` + panel "use native claude" warning is removed.
 
 ## What the Advisor actually is (openclaude source, 2026-07-19)
 
