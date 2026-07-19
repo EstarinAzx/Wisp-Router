@@ -8,8 +8,8 @@ import {
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
-  anthropicUsage,
-  type Provider, type SseEvent,
+  anthropicUsage, anthropicCacheOutcome,
+  type Provider, type SseEvent, type BridgeUsage,
 } from '../src/catalog';
 import { anthropicMessagesHeaders, anthropicStream } from '../src/anthropicClient';
 
@@ -169,7 +169,7 @@ describe('buildAnthropicMessagesBody', () => {
   // attribution rides as the FIRST system block, its fingerprint derived from the first user message.
   it('moves the system turn to a top-level block after the attribution', () => {
     const body = buildAnthropicMessagesBody({
-      model: 'claude-opus-4-8', maxTokens: 16_000, version: '0.19.0',
+      model: 'claude-opus-4-8', maxTokens: 16_000, version: '0.19.0', cacheTtl: '5m',
       messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'edit this' }],
     });
     expect(body).toEqual({
@@ -206,7 +206,7 @@ describe('buildAnthropicMessagesBody', () => {
     it('marks the last system block and leaves tools unannotated (system breakpoint covers them)', () => {
       const tools = [{ name: 'readFile', description: 'd', input_schema: { type: 'object' as const, properties: {} } }];
       const body = buildAnthropicMessagesBody({
-        model: 'm', maxTokens: 1, version: 'v', tools,
+        model: 'm', maxTokens: 1, version: 'v', tools, cacheTtl: '5m',
         messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
       }) as any;
       expect(body.system[body.system.length - 1].cache_control).toEqual({ type: 'ephemeral' }); // one-shot → bare 5m
@@ -224,7 +224,7 @@ describe('buildAnthropicMessagesBody', () => {
     });
 
     it('annotates the last block of an already-block-shaped final turn', () => {
-      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
         { role: 'user', content: 'thanks', toolResults: [{ callId: 'toolu_1', content: 'file body' }] },
       ] }) as any;
       const blocks = body.messages[0].content;
@@ -237,7 +237,7 @@ describe('buildAnthropicMessagesBody', () => {
     // Intermediate markers keep every gap ≤ the window, and total breakpoints stay within the 4/request cap.
     it('spreads intermediate breakpoints so no gap exceeds the 20-block lookback on a fat turn', () => {
       const toolResults = Array.from({ length: 40 }, (_, i) => ({ callId: `toolu_${i}`, content: `r${i}` }));
-      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
         { role: 'user', content: '', toolResults },
       ] }) as any;
       const blocks = body.messages[0].content as any[];
@@ -251,26 +251,34 @@ describe('buildAnthropicMessagesBody', () => {
       expect(systemMarks + marked.length).toBeLessThanOrEqual(4); // never exceed the per-request breakpoint cap
     });
 
-    // openclaude steal #1: ttl:'1h' only when this request body already has 2+ user/assistant turns.
-    // One-shot (Inquire / probe / first turn) pays the cheaper 5m write; multi-turn keeps the idle-gap TTL.
-    it('uses bare ephemeral on a one-shot body and ttl:1h once the body is multi-turn', () => {
-      const oneShot = buildAnthropicMessagesBody({
-        model: 'm', maxTokens: 1, version: 'v',
-        messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
-      }) as any;
+    // TTL is fixed by the CALLER's request path, not by this body's turn count — so the SAME session can't
+    // flip 5m→1h between turn 1 and turn 2 (a TTL flip busts the server-side cache, #111). The single-turn
+    // body below carries ttl:'1h' when the caller asked for '1h', proving the turn count no longer decides it.
+    it('takes the TTL from the caller and does not derive it from turn count', () => {
+      const args = { model: 'm', maxTokens: 1, version: 'v', messages: [{ role: 'user' as const, content: 'hi' }] };
+      const oneShot = buildAnthropicMessagesBody({ ...args, cacheTtl: '5m' }) as any;
       expect(oneShot.system[oneShot.system.length - 1].cache_control).toEqual({ type: 'ephemeral' });
       expect(oneShot.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral' });
 
-      const multi = buildAnthropicMessagesBody({
-        model: 'm', maxTokens: 1, version: 'v',
-        messages: [
-          { role: 'user', content: 'hi' },
-          { role: 'assistant', content: 'hello' },
-          { role: 'user', content: 'more' },
-        ],
+      // Same single-turn body, session path — 1h even though it's "turn 1", so turn 2 won't be a flip.
+      const session = buildAnthropicMessagesBody({ ...args, cacheTtl: '1h' }) as any;
+      expect(session.system[session.system.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      expect(session.messages[0].content[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+
+      // Default (no cacheTtl) is the dominant session path → 1h.
+      const dflt = buildAnthropicMessagesBody(args) as any;
+      expect(dflt.system[dflt.system.length - 1].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    });
+
+    // Haiku is carved out of 1h (its caching behaves differently; Claude Code excludes it too): a haiku turn
+    // always takes the bare 5m marker even when the caller asks for '1h'.
+    it('never gives haiku the 1h TTL, even on a session path', () => {
+      const body = buildAnthropicMessagesBody({
+        model: 'claude-haiku-4-5', maxTokens: 1, version: 'v', cacheTtl: '1h',
+        messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'more' }],
       }) as any;
-      expect(multi.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
-      expect(multi.messages[2].content[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      expect(body.system[0].cache_control).toEqual({ type: 'ephemeral' });
+      expect(body.messages[2].content[0].cache_control).toEqual({ type: 'ephemeral' });
     });
 
     // Plain chat turns are bare strings and can't carry a marker. When a run of them straddles a step
@@ -687,7 +695,7 @@ describe('buildAnthropicMessagesBody — tools', () => {
 
   // A tool result rides on a user turn as a tool_result block, which must come FIRST (before any text).
   it('serializes a tool-result user turn with the tool_result block first', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: 'thanks', toolResults: [{ callId: 'toolu_1', content: 'file body' }] },
     ] }) as any;
     expect(body.messages[0]).toEqual({
@@ -774,7 +782,7 @@ describe('buildAnthropicMessagesBody — images', () => {
   // An image-bearing user turn becomes a content-block array: the image block (base64 source) before the
   // text block (Anthropic's recommended vision ordering). Was silently dropped before — the screenshot bug.
   it('serializes an image user turn as image-then-text blocks', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: 'do u see this image?', images: [{ mimeType: 'image/png', dataBase64: 'AAAA' }] },
     ] }) as any;
     expect(body.messages[0]).toEqual({
@@ -788,7 +796,7 @@ describe('buildAnthropicMessagesBody — images', () => {
 
   // An image with no accompanying prose emits just the image block — no empty text block (Anthropic rejects it).
   it('omits the text block for an image-only user turn', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: '', images: [{ mimeType: 'image/jpeg', dataBase64: 'BBBB' }] },
     ] }) as any;
     expect(body.messages[0]).toEqual({
@@ -799,7 +807,7 @@ describe('buildAnthropicMessagesBody — images', () => {
 
   // tool_result must still lead; images and text follow it on the same user turn.
   it('orders tool_result before image before text on one user turn', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: 'and this?', toolResults: [{ callId: 'toolu_1', content: 'done' }], images: [{ mimeType: 'image/png', dataBase64: 'CCCC' }] },
     ] }) as any;
     expect(body.messages[0].content).toEqual([
@@ -814,7 +822,7 @@ describe('buildAnthropicMessagesBody — documents', () => {
   // A document-bearing user turn becomes a content-block array: the document block (base64 source) before
   // the text block, mirroring the image ordering. Was silently dropped before — the vanishing-PDF bug.
   it('serializes a document user turn as document-then-text blocks', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: 'summarize this', documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }] },
     ] }) as any;
     expect(body.messages[0]).toEqual({
@@ -828,7 +836,7 @@ describe('buildAnthropicMessagesBody — documents', () => {
 
   // Full ordering on one turn: tool_result leads (API pairing rule), then documents, then images, then text.
   it('orders tool_result before document before image before text on one user turn', () => {
-    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
+    const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m', messages: [
       { role: 'user', content: 'and this?', toolResults: [{ callId: 'toolu_1', content: 'done' }],
         images: [{ mimeType: 'image/png', dataBase64: 'CCCC' }],
         documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBERI' }] },
@@ -1100,5 +1108,32 @@ describe('anthropicUsage', () => {
     expect(anthropicUsage(ev('content_block_delta', { delta: { type: 'text_delta', text: 'hi' } }))).toBeUndefined();
     expect(anthropicUsage(ev('ping', {}))).toBeUndefined();
     expect(anthropicUsage(ev('message_delta', { delta: { stop_reason: 'end_turn' } }))).toBeUndefined();
+  });
+});
+
+// The Bridge's #111 regression guard: classify a completed request's cache economics from its usage so a
+// silently-broken prefix (everything re-billed uncached) shows up in the log instead of only on the bill.
+describe('anthropicCacheOutcome', () => {
+  const usage = (over: Partial<BridgeUsage>): BridgeUsage => ({ input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0, ...over });
+
+  it('reads a cached prefix as a hit', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 12_000, input_tokens: 40 }), 5).kind).toBe('hit');
+  });
+
+  it('reads a first write (no read, some creation) as fresh — not a miss', () => {
+    expect(anthropicCacheOutcome(usage({ cache_creation_input_tokens: 9_000, input_tokens: 40 }), 1).kind).toBe('fresh');
+  });
+
+  it('flags a multi-turn request that read nothing while billing a large uncached input as a miss', () => {
+    const out = anthropicCacheOutcome(usage({ cache_read_input_tokens: 0, input_tokens: 18_000 }), 5);
+    expect(out).toEqual({ kind: 'miss', readTokens: 0, creationTokens: 0, uncachedInput: 18_000 });
+  });
+
+  it('does not flag turn 1 as a miss — there is no prior write to read yet', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 0, input_tokens: 18_000 }), 1).kind).not.toBe('miss');
+  });
+
+  it('does not flag a small uncached input as a miss (no real prefix to have cached)', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 0, input_tokens: 200 }), 5).kind).toBe('none');
   });
 });

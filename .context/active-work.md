@@ -7,17 +7,30 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-18 by Claude (local session — vscode side-panel UI refactor + vsix release)._
+_Last updated: 2026-07-18 by Claude (remote session — Anthropic cache TTL fix, branch pending review)._
 
 ## Current focus
 
-**None.** Side-panel UI refactor shipped as `wisp-1.7.0.vsix`, appended to the existing
-`v2.0.19` GitHub release. Extension version is **1.7.0** (independent of the TUI's 2.0.19).
+**Branch `claude/anthropic-cache-ttl-fix` awaiting review** (user merges → releases 2.0.20). Fixes two
+Anthropic-caching flaws found by comparing against openclaude (github.com/Gitlawb/openclaude, the OSS
+Claude Code):
+1. **TTL flip (the real bug).** `buildAnthropicMessagesBody` derived the cache TTL from `convo.length`
+   (`>=2 → 1h`, else 5m), so turn 1 of a bridged session sent 5m and turn 2 flipped to 1h — a TTL change
+   busts the server-side cache, re-billing the whole system+tools prefix at 2× on turn 2 of every session.
+   Fix: TTL is now fixed per call PATH — `anthropicStream` (sessions) → 1h, `anthropicInquire` (one-shot)
+   → 5m, haiku always 5m. See [[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]].
+2. **No cache-break observability.** Added pure `anthropicCacheOutcome`; the Bridge's Anthropic door logs a
+   `prompt-cache MISS …` line when a past-first-exchange request reads nothing from cache.
+
+Prior shipped work still stands: side-panel UI refactor `wisp-1.7.0.vsix` on the `v2.0.19` release.
 
 ## State
 
-- **In flight:** None.
-- **Done this session:**
+- **In flight:** `claude/anthropic-cache-ttl-fix` pushed, awaiting the user's review + merge → 2.0.20.
+  Touches `packages/core/src/{anthropic,anthropicClient,bridgeServer}.ts` + `tests/anthropic.test.ts`
+  (513 tests green; `bun run compile` + TUI `tsc` clean). Placement logic from #111 untouched — only the
+  TTL value moved from turn-count to call-path, plus the new `anthropicCacheOutcome` miss-logger.
+- **Done this session (earlier, already shipped):**
   - Refactored the vscode webview side panel (`packages/vscode/webview/`) into a **card**
     layout — Connection · Model · Bridge · Routing map · Claude Code as bordered sections.
     Added a `WISP_` wordmark header (gradient display font) + inline status pills

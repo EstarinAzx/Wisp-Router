@@ -79,14 +79,14 @@ export const anthropicMessagesHeaders = (bearer: string, stream?: boolean): Reco
 // POST one conversation to the Messages endpoint and return the raw Response. Bearer = the OAuth access
 // token. A non-2xx carries the status + body so a failed round-trip is diagnosable. Shared by
 // anthropicInquire (reads it whole) and anthropicStream (reads it as it flows).
-const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: boolean; maxTokens: number }): Promise<Response> => {
+const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: boolean; maxTokens: number; cacheTtl: '5m' | '1h' }): Promise<Response> => {
   const bearer = args.creds.accessToken;
   if (!bearer) throw new Error('Not signed in to Claude.');
 
   const res = await fetch(`${args.baseUrl}/v1/messages`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -101,7 +101,8 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
 // concatenated; tool_use / thinking blocks (none expected here) are not answer text.
 export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<string> => {
   // Bounded: a whole-file edit is large but finite, and the non-streaming request must clear the fetch timeout.
-  const res = await anthropicMessagesRequest({ ...args, maxTokens: INQUIRE_MAX_TOKENS });
+  // Inquire is genuinely one-shot — no later turn re-reads the prefix — so it takes the cheaper 5m cache write.
+  const res = await anthropicMessagesRequest({ ...args, maxTokens: INQUIRE_MAX_TOKENS, cacheTtl: '5m' });
   const data = await res.json() as { content?: { type?: string; text?: string }[] };
   return (data.content ?? []).filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
 };
@@ -130,7 +131,9 @@ export const anthropicInquire = async (args: AnthropicRequestArgs): Promise<stri
 export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerator<AnthropicStreamEvent> {
   // #88: request the model's own output ceiling, not a hard 16K — a high-effort turn must be able to think
   // AND still reach its answer. Only a reply genuinely past the model max is cut, and #87 makes that visible.
-  const res = await anthropicMessagesRequest({ ...args, stream: true, maxTokens: anthropicModelCaps(args.model).maxOutput });
+  // Streaming is the conversational path (Bridge sessions + native chat): the system+tools prefix is re-read
+  // every turn, so it takes the 1h cache TTL — fixed here, not per-turn, so it can't flip mid-session (#111).
+  const res = await anthropicMessagesRequest({ ...args, stream: true, maxTokens: anthropicModelCaps(args.model).maxOutput, cacheTtl: '1h' });
   if (!res.body) return;
   let sawDelta = false;                     // any answer text arrived (tool-only turns count via toolCalls below)
   let sawThinking = false;                  // any thinking/redacted block arrived — delivered content too
