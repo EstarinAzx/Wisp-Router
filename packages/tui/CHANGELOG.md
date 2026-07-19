@@ -6,6 +6,27 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.21] — 2026-07-19
+
+### Added
+
+- **Claude Code's native Advisor now works through the Bridge.** The Advisor is a
+  server-executed tool: the model emits an `advisor` call and waits for the *server*
+  to run a stronger reviewer and hand back the verdict. Through Wisp the server is the
+  Bridge — which never played that role, so the call dangled and the model reported
+  "advisor tool not there." The Anthropic door now fulfills it: it forwards an
+  `advisor` tool to the base Target, and when the Target calls it, runs a separate
+  reviewer pass over the conversation (the model chosen in `/advisor`, routed through
+  your Routing map — any Target can advise any other), streams the result back for the
+  native Advisor UI, then resumes the base turn with the advice in context. The
+  `claude-wisp` launcher and the copy-paste setup snippets now set
+  `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` so `/advisor` is offered for the
+  `claude-wisp-*` model aliases (which carry no advisor rank in Claude Code's catalog,
+  the client-side gate that otherwise keeps the tool from ever being sent). The old
+  `/bridge` and side-panel warning that the Advisor was "endpoint-gated, use native
+  claude" is removed — that root cause was wrong; a Bridge session is first-party, and
+  the only missing piece was Wisp playing the server role.
+
 ## [2.0.20] — 2026-07-19
 
 ### Fixed
