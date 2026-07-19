@@ -6,6 +6,26 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.23] — 2026-07-19
+
+### Fixed
+
+- **`/show-log` no longer clips long lines.** Route and messages lines were painted
+  with `wrapMode="none"`, so anything past the panel edge (the model id on a
+  `[bridge] route …` line, the image count on `messages …`) vanished. Lines are
+  hand-wrapped with the same `wrapWords` helper the rest of the TUI uses, so the
+  full text stays readable inside the scrollbox.
+
+### Changed
+
+- **Model-swap lines stand out in `/show-log`.** Lines that start with
+  `[bridge] route ` render in a sky accent (`LOG_ROUTE`); other traffic stays dim.
+- **The wisp-slot plugin recommend blurb on `/bridge` is gold (`#D59D24`).** The
+  advisor note under it stays dim so the install nudge is the one that pops.
+- **Drag-selecting text copies it to the clipboard.** opentui already painted the
+  highlight; the shell now listens for finished selections and copies via OSC 52,
+  falling back to `clip.exe` on Windows when the terminal rejects OSC 52.
+
 ## [2.0.22] — 2026-07-19
 
 ### Fixed

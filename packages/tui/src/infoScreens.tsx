@@ -19,9 +19,12 @@
 
 import { useEffect, useState } from 'react';
 import { SLASH_COMMANDS } from '@wisp/core';
-import { ACCENT, DIM, PANEL, SELECT_COLORS } from './theme';
+import { ACCENT, DIM, LOG_ROUTE, PANEL, PLUGIN_NUDGE, SELECT_COLORS } from './theme';
 import { wrapWords, SELECT_MOUSE } from './widgets';
 import type { RingLog } from './logBuffer';
+
+// Model-swap lines from bridgeServer's resolveRoute log — colour only these in /show-log.
+export const isRouteLogLine = (line: string): boolean => line.startsWith('[bridge] route ');
 
 // ----------------------------------------- /bridge ----------------------------------------- //
 
@@ -55,7 +58,7 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
         advisor warning below. */}
     <box marginTop={1} flexDirection="column">
       {wrapWords('Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: /plugin marketplace add EstarinAzx/Wisp-Router', cols - 2)
-        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
+        .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={PLUGIN_NUDGE}>{l}</text>)}
     </box>
 
     {/* Advisor now works through Wisp (the door plays the server-tool role — 2.0.21). The
@@ -76,11 +79,14 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
 
 // The Bridge log tail (#122) — scrollbox stickyScroll gives auto-follow with scroll-to-pause
 // and a mouse-draggable native scrollbar; no SELECT_MOUSE needed (that's the <select> shim).
-export const LogScreen = ({ log, running }: { log: RingLog; running: boolean }) => {
+// Long lines are hand-wrapped (opentui wrapMode overlays siblings) so model ids don't clip.
+export const LogScreen = ({ log, running, cols }: { log: RingLog; running: boolean; cols: number }) => {
   // subscribe → tick: one re-render per pushed line while the Screen is open
   const [, setTick] = useState(0);
   useEffect(() => log.subscribe(() => setTick((t) => t + 1)), [log]);
   const lines = log.lines();
+  // -2 = the panel's inner padding (same as BridgeScreen blurb wrap).
+  const width = Math.max(cols - 2, 20);
   return (
     <box {...PANEL} title="Bridge log" marginTop={1} padding={1} flexDirection="column">
       <text wrapMode="none" flexShrink={0}>
@@ -89,7 +95,12 @@ export const LogScreen = ({ log, running }: { log: RingLog; running: boolean }) 
       <scrollbox height={16} marginTop={1} stickyScroll stickyStart="bottom" scrollY>
         {lines.length === 0
           ? <text wrapMode="none" fg={DIM}>{running ? 'No traffic yet.' : 'Nothing logged yet.'}</text>
-          : lines.map((l, i) => <text key={i} wrapMode="none" fg={DIM}>{l}</text>)}
+          : lines.flatMap((l, i) => {
+              const fg = isRouteLogLine(l) ? LOG_ROUTE : DIM;
+              return wrapWords(l, width).map((w, j) => (
+                <text key={`${i}-${j}`} wrapMode="none" flexShrink={0} fg={fg}>{w}</text>
+              ));
+            })}
       </scrollbox>
       <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — scroll up pauses follow, bottom resumes · buffer keeps collecting</text>
     </box>

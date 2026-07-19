@@ -25,6 +25,10 @@ export const SPLASH = [
 
 export const ACCENT = '#a78bfa';
 export const DIM = '#71717a';
+// /show-log: [bridge] route … lines (model swaps) — pop against DIM traffic.
+export const LOG_ROUTE = '#38bdf8';
+// /bridge panel: wisp-slot plugin recommend blurb.
+export const PLUGIN_NUDGE = '#D59D24';
 
 // One shared frame spread into every panel box — rounded dim border + accent title, so the
 // whole TUI reads as one system instead of per-screen defaults. flexShrink 0 because a short

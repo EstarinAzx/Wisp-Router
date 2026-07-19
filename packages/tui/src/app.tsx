@@ -24,9 +24,9 @@
  *     which step back one level: sub-screen → its section → overview → palette.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
-import type { InputRenderable } from '@opentui/core';
+import type { InputRenderable, Selection } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider,
@@ -53,6 +53,7 @@ import { PaletteScreen } from './paletteScreen';
 import { TestScreen, streamTestReply } from './testScreen';
 import { BridgeScreen, HelpScreen, LogScreen } from './infoScreens';
 import { createRingLog } from './logBuffer';
+import { copyText } from './clipboard';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -101,6 +102,19 @@ export const App = () => {
   const panelCols = Math.max(termWidth - 6, 20);
   // Palette suggestion rows sit outside any PANEL — only the outer padding (2+2) eats width.
   const paletteCols = Math.max(termWidth - 4, 20);
+
+  // Drag-select → clipboard. opentui paints the highlight but never copies; finishSelection
+  // emits "selection" with isDragging=false. Mid-drag events are ignored so SELECT_MOUSE
+  // scrubbing and text-select don't fight.
+  useEffect(() => {
+    const onSelection = (selection: Selection) => {
+      if (selection.isDragging) return;
+      const text = selection.getSelectedText().replace(/\s+$/u, '');
+      if (text) copyText(renderer, text);
+    };
+    renderer.on('selection', onSelection);
+    return () => { renderer.off('selection', onSelection); };
+  }, [renderer]);
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
   // the alternate screen — destroy the renderer first, always.
@@ -525,7 +539,7 @@ export const App = () => {
 
       {mode.kind === 'bridge' && <BridgeScreen address={mode.address} secret={mode.secret} cols={panelCols} />}
 
-      {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} />}
+      {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} cols={panelCols} />}
 
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
 
