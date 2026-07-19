@@ -5,43 +5,30 @@ updated: 2026-07-19
 tags: [context, pick-up]
 ---
 
-# Pick up here
+# Pick up
 
-**Start:** read `.context/overview.md` + `.context/active-work.md`, then continue below.
+Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-## Latest (2026-07-19): 2.0.20 shipped live — Anthropic cache TTL fix
+**Last task (DONE, shipped):** Wisp-native Advisor — the Anthropic door now plays the advisor
+server-tool role so Claude Code's `/advisor` works through the Bridge. Shipped
+`wisp-router@2.0.21` (npm + GitHub release, release.yml green), live-verified in the user's real
+session (Opus 4.8 advised, full round-trip). Details in
+[[2026-07-19-wisp-native-advisor-via-door-server-tool]].
 
-Branch **`claude/anthropic-cache-ttl-fix`** merged to main and released as **2.0.20**
-(npm `wisp-router@2.0.20` + GitHub `v2.0.20`, all 4 platform binaries; release.yml green).
-The fix moves the Anthropic cache TTL from turn-count (`convo.length >= 2 ? 1h : 5m`, which
-flipped mid-session and busted the prefix cache) to **fixed per call path**: `anthropicStream`
-(sessions)→1h, `anthropicInquire` (one-shot)→5m, haiku always 5m. Added a `prompt-cache MISS`
-log on the Bridge's Anthropic door. #111 breakpoint placement untouched. Details:
-[[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]] +
-[[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]].
+**Next task:** none queued — pick a new one, or drive normal. Nothing code-pending.
 
-## Next task
+**If advisor comes up again:**
+- Core: `advisorToolSpec` + `runAdvisorLoop` in `packages/core/src/bridgeAnthropic.ts` (pure,
+  unit-tested); door wiring + `REVIEWER_SYSTEM` in `packages/core/src/bridgeServer.ts`.
+- Live prereq: `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` (launcher sets it) or a
+  `claude-wisp-*` base model reports "advisor tool not there."
+- `REVIEWER_SYSTEM` prompt + `maxConsults` (4/turn) are the knobs if behavior needs tuning.
 
-**Nothing code-pending. Drive normal.**
-
-Only housekeeping left: delete the merged branch `claude/anthropic-cache-ttl-fix`
-(local + remote) — safe now that 2.0.20 is live.
-
-## Landmines
-
-- **Do NOT re-derive the Anthropic cache TTL from `convo.length`** — that's exactly the bug
-  2.0.20 fixed. TTL is fixed per call path at the two `anthropicClient` entry points.
-- **Do NOT remove the #111 cache breakpoints** — silently restores ~10× plan burn
-  (`2026-07-16-anthropic-cache-breakpoints-are-wisp-placed`).
-- **Release checklist order** (release.yml gates tag == tui version): bump
-  `packages/tui/package.json` → `bun scripts/span-baseline.tsx --update` (version string renders
-  in the splash → baseline must match) → tui CHANGELOG → tag `v<x.y.z>` == package.json version.
-- **Use the Edit tool for any package.json version bump** (PS 5.1 `Set-Content -Encoding utf8`
-  writes a BOM that breaks the file).
-- **vscode ext version ≠ TUI version.** `packages/vscode/package.json` is 1.7.0; TUI is 2.0.20.
+**Landmine:** don't remove the #111 cache breakpoints and don't re-derive the Anthropic cache TTL
+from `convo.length` (see [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]).
 
 ## Related
 
-- [[active-work]] · [[overview]] · [[stack]] · [[decisions]] · [[gotchas]] · [[flows]]
-- [[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]]
-- [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]]
+- [[active-work]]
+- [[overview]]
+- [[2026-07-19-wisp-native-advisor-via-door-server-tool]]
