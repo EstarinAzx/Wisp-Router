@@ -10,9 +10,31 @@ import {
   anthropicErrorFrame,
   buildClaudeCodeSnippets,
   buildClaudeLaunch,
+  advisorToolSpec,
+  runAdvisorLoop,
 } from '../src/bridgeAnthropic';
-import type { ChatModelInfo } from '../src/catalog';
+import type { ChatModelInfo, NormalizedTurn } from '../src/catalog';
 import type { BridgeStreamEvent } from '../src/bridge';
+
+// Collect an async generator to an array — the loop tests assert on the full event sequence.
+const drain = async (gen: AsyncIterable<BridgeStreamEvent>): Promise<BridgeStreamEvent[]> => {
+  const out: BridgeStreamEvent[] = [];
+  for await (const ev of gen) out.push(ev);
+  return out;
+};
+
+// A base-pass fake: given a script of events per pass, returns them as async iterables in order and
+// records the turns each pass was invoked with (so continuation-turn assembly can be asserted).
+const scriptedBase = (passes: BridgeStreamEvent[][]) => {
+  const calls: NormalizedTurn[][] = [];
+  let i = 0;
+  const basePass = (turns: NormalizedTurn[]): AsyncIterable<BridgeStreamEvent> => {
+    calls.push(turns);
+    const events = passes[i++] ?? [];
+    return (async function* () { for (const ev of events) yield ev; })();
+  };
+  return { basePass, calls };
+};
 
 // Minimal ChatModelInfo builder — buildAnthropicModelsList only reads id + name, the rest is filler.
 const modelInfo = (id: string, name = `${id} model`): ChatModelInfo => ({
@@ -848,5 +870,110 @@ describe('buildAnthropicMessageResponse — advisor events', () => {
       { type: 'text', text: 'done' },
     ]);
     expect(res.stop_reason).toBe('end_turn');
+  });
+});
+
+describe('advisorToolSpec', () => {
+  // The synthetic REGULAR tool the door forwards to the base backend so it has an 'advisor' to call —
+  // the backend isn't Anthropic-first-party and can't do server tools, so the advisor rides as an ordinary
+  // no-input tool, and the door intercepts the call.
+  it('is a no-input tool named advisor', () => {
+    const spec = advisorToolSpec();
+    expect(spec.name).toBe('advisor');
+    expect(spec.inputSchema).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+    expect(typeof spec.description).toBe('string');
+    expect(spec.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runAdvisorLoop', () => {
+  const initial: NormalizedTurn[] = [{ role: 'user', text: 'ship it?', toolCalls: [], toolResults: [] }];
+
+  // No advisor call: the loop is a pass-through — base events stream out unchanged, one base pass only.
+  it('passes base events through when the model never calls advisor', async () => {
+    const { basePass, calls } = scriptedBase([[{ type: 'text', text: 'looks good' }]]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'x' }));
+    expect(events).toEqual([{ type: 'text', text: 'looks good' }]);
+    expect(calls).toHaveLength(1);
+  });
+
+  // The core round-trip: base emits text then an advisor call → the loop emits the text, a server_tool_use,
+  // the advisor_result from the reviewer, then the continuation pass's text. The reviewer sees the turns.
+  it('runs the reviewer on an advisor call and streams the result then the continuation', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'let me check. ' }, { type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'advisor says yes, shipping.' }],
+    ]);
+    let reviewerTurns: NormalizedTurn[] | undefined;
+    const reviewer = async (turns: NormalizedTurn[]) => { reviewerTurns = turns; return 'yes, safe to ship'; };
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer }));
+    expect(events).toEqual([
+      { type: 'text', text: 'let me check. ' },
+      { type: 'server_tool_use', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_result', toolUseId: 'srv1', text: 'yes, safe to ship' },
+      { type: 'text', text: 'advisor says yes, shipping.' },
+    ]);
+    expect(reviewerTurns).toEqual(initial);
+    expect(calls).toHaveLength(2);
+  });
+
+  // The continuation pass carries the advisor exchange in history: the assistant turn holds the accumulated
+  // text + the advisor toolCall, and a following user turn holds the advice as a toolResult — so the base
+  // backend resumes with the advice in context.
+  it('appends the advisor exchange to the continuation pass turns', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'thinking… ' }, { type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'done' }],
+    ]);
+    await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'do X' }));
+    expect(calls[1]).toEqual([
+      ...initial,
+      { role: 'assistant', text: 'thinking… ', toolCalls: [{ id: 'srv1', name: 'advisor', argsJson: '{}' }], toolResults: [] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'srv1', content: 'do X' }] },
+    ]);
+  });
+
+  // A reviewer failure surfaces as an advisor_error block (Claude Code renders "Advisor unavailable"), and
+  // the loop still continues once with the error fed back so the base model isn't left dangling.
+  it('emits advisor_error when the reviewer throws and continues', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'proceeding without advice' }],
+    ]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => { throw new Error('boom'); } }));
+    expect(events).toEqual([
+      { type: 'server_tool_use', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_error', toolUseId: 'srv1', errorCode: 'boom' },
+      { type: 'text', text: 'proceeding without advice' },
+    ]);
+    expect(calls[1][calls[1].length - 1].toolResults[0].isError).toBe(true);
+  });
+
+  // A non-advisor (client) tool call is terminal: it streams through as a tool_call for Claude Code to run,
+  // and the loop stops — no continuation pass, no reviewer.
+  it('passes a non-advisor tool call through and stops', async () => {
+    const { basePass, calls } = scriptedBase([
+      [{ type: 'text', text: 'reading' }, { type: 'tool_call', call: { id: 't1', name: 'read', argsJson: '{"path":"a"}' } }],
+      [{ type: 'text', text: 'SHOULD NOT RUN' }],
+    ]);
+    let reviewerRan = false;
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => { reviewerRan = true; return ''; } }));
+    expect(events).toEqual([
+      { type: 'text', text: 'reading' },
+      { type: 'tool_call', call: { id: 't1', name: 'read', argsJson: '{"path":"a"}' } },
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(reviewerRan).toBe(false);
+  });
+
+  // Safety cap: a model that keeps calling advisor every pass is bounded — after maxConsults the loop stops
+  // rather than looping forever. Each consult still emits its result; only further continuation is cut.
+  it('caps the number of advisor consults', async () => {
+    const advisorPass: BridgeStreamEvent[] = [{ type: 'tool_call', call: { id: 'srv', name: 'advisor', argsJson: '{}' } }];
+    const { basePass, calls } = scriptedBase([advisorPass, advisorPass, advisorPass, advisorPass]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => 'a', maxConsults: 2 }));
+    const consults = events.filter((e) => e.type === 'advisor_result').length;
+    expect(consults).toBe(2);
+    expect(calls).toHaveLength(2);
   });
 });

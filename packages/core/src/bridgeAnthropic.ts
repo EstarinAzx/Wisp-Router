@@ -13,7 +13,7 @@
  * send-builders — no second normalized shape.
  */
 
-import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel, BridgeUsage } from './catalog';
+import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel, BridgeUsage, AssembledToolCall } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
 // A message_start usage block (initial input/cache snapshot, small initial output_tokens) — mirrors the
@@ -458,6 +458,73 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
 // real message rather than reporting an "empty or malformed" response.
 export const anthropicErrorFrame = (message: string): string =>
   frame('error', { type: 'error', error: { type: 'api_error', message } });
+
+// ----------------------------- Advisor: the door plays the server-tool role ----------------------------- //
+
+// The advisor arrives as a first-party server tool ({type:'advisor_20260301'}). A Wisp Target isn't
+// Anthropic-first-party, so it can't run server tools — instead the door forwards THIS ordinary no-input
+// tool named `advisor`, and the base model (already carrying Claude Code's advisor instructions in the
+// system prompt) calls it. The door intercepts that call and plays the server. Empty schema: the reviewer
+// reviews the whole conversation, so the call takes no arguments.
+export const advisorToolSpec = (): ToolSpec => ({
+  name: 'advisor',
+  description: 'Consult a stronger advisor model for a second opinion on the conversation so far. Call it at key moments (before a risky or irreversible step, when unsure) to get review before proceeding.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+});
+
+// The agentic loop that lets the door play the advisor server role. A base pass streams the Target's reply;
+// when the Target calls `advisor`, the door announces it (server_tool_use), runs the injected reviewer over
+// the conversation, streams the verdict (advisor_result / advisor_error), then re-runs the base pass with
+// the exchange appended so the Target resumes WITH the advice — the same continuation the real API server
+// does. Any other tool call is a client tool: it streams through and ends the turn. Advisor is server-side,
+// so none of its events flip stop_reason (the encoder already keeps end_turn).
+//
+// Pure: the impure edges (which backend, how the reviewer runs) are injected, so the loop control is
+// unit-tested without a live socket. maxConsults bounds a Target that calls advisor every pass.
+// ponytail: default cap 4 consults/turn — bump only if a real turn legitimately needs more review rounds.
+export type AdvisorLoopParams = {
+  turns: NormalizedTurn[];
+  basePass: (turns: NormalizedTurn[]) => AsyncIterable<BridgeStreamEvent>;
+  reviewer: (turns: NormalizedTurn[], argsJson: string) => Promise<string>;
+  maxConsults?: number;
+};
+export const runAdvisorLoop = async function* (params: AdvisorLoopParams): AsyncGenerator<BridgeStreamEvent> {
+  const maxConsults = params.maxConsults ?? 4;
+  let turns = params.turns;
+  let consults = 0;
+  // Each iteration is one base pass. `continueLoop` flips true only on an advisor consult (there's more to
+  // generate); a client tool call or a plain end_turn leaves it false and the loop stops.
+  for (;;) {
+    let acc = '';                                    // text this pass — carried into the continuation history
+    let consult: AssembledToolCall | undefined;      // the advisor call this pass, if any
+    let clientTool = false;                          // a non-advisor tool ended the turn
+    for await (const ev of params.basePass(turns)) {
+      if ((ev.type === 'tool_call') && ev.call.name === 'advisor') { consult = ev.call; break; }
+      if (ev.type === 'tool_call') { clientTool = true; yield ev; continue; }
+      if (ev.type === 'text') acc += ev.text;
+      yield ev;
+    }
+    if (!consult || clientTool) return;              // end_turn or a client tool — nothing more for the door to do
+
+    yield { type: 'server_tool_use', call: consult };
+    let advice = '';
+    let failed = false;
+    try { advice = await params.reviewer(turns, consult.argsJson); }
+    catch (err) { failed = true; advice = err instanceof Error ? err.message : String(err); }
+    yield failed
+      ? { type: 'advisor_error', toolUseId: consult.id, errorCode: advice }
+      : { type: 'advisor_result', toolUseId: consult.id, text: advice };
+    consults++;
+
+    // Feed the exchange back so the Target resumes with the advice (or the error) in context.
+    turns = [
+      ...turns,
+      { role: 'assistant', text: acc, toolCalls: [{ id: consult.id, name: 'advisor', argsJson: consult.argsJson }], toolResults: [] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: consult.id, content: advice, ...(failed ? { isError: true } : {}) }] },
+    ];
+    if (consults >= maxConsults) return;             // safety cap — stop starting new passes
+  }
+};
 
 // ----------------------------- Models: ChatModelInfo[] -> GET /v1/models ----------------------------- //
 
