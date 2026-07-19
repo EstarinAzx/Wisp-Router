@@ -573,16 +573,22 @@ export type ClaudeCodeSnippets = { powershell: string; bash: string; settingsJso
 // Build all three variants from the live Bridge address + access secret. ANTHROPIC_BASE_URL is the bare
 // origin (no /v1 — Claude Code appends /v1/messages itself); the discovery flag makes /model list the
 // claude-wisp-* aliases. Env is read at Claude Code startup only, so every variant implies a fresh terminal.
+// CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL turns on Claude Code's native /advisor through the Bridge:
+// a claude-wisp-* base model has no advisor_rank in Claude Code's catalog, so the advisor tool is only
+// injected under this experimental flag — without it the tool never reaches the door and the advisor is
+// inert. The door fulfills the server role (runAdvisorLoop); this flag is the client half of the pair.
 export const buildClaudeCodeSnippets = (address: string, secret: string): ClaudeCodeSnippets => ({
   powershell: [
     `$env:ANTHROPIC_BASE_URL = "${address}"`,
     `$env:ANTHROPIC_API_KEY = "${secret}"`,
     `$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"`,
+    `$env:CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL = "1"`,
   ].join('\n'),
   bash: [
     `export ANTHROPIC_BASE_URL=${address}`,
     `export ANTHROPIC_API_KEY=${secret}`,
     `export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
+    `export CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1`,
   ].join('\n'),
   // JSON.stringify keeps the block valid even if the secret ever carries a quotable character.
   settingsJson: JSON.stringify(
@@ -591,6 +597,7 @@ export const buildClaudeCodeSnippets = (address: string, secret: string): Claude
         ANTHROPIC_BASE_URL: address,
         ANTHROPIC_API_KEY: secret,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+        CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
       },
     },
     null,
@@ -614,6 +621,9 @@ export const buildClaudeLaunch = (port: number, secret: string, argv: string[]):
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     ANTHROPIC_API_KEY: secret,
     CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+    // Turn on the native /advisor through the Bridge — the door now plays the server role, and this
+    // experimental flag is what makes Claude Code inject the advisor tool for a claude-wisp-* base model.
+    CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
     CLAUDE_BINARY: 'claude-wisp',
   },
   args: [...argv],

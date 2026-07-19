@@ -648,46 +648,53 @@ describe('buildAnthropicModelsList', () => {
 describe('buildClaudeCodeSnippets', () => {
   const snips = buildClaudeCodeSnippets('http://127.0.0.1:8971', 's3cret_x');
 
-  // Per-session PowerShell lines: $env: form, quoted values, all three vars, bare origin (no /v1).
+  // Per-session PowerShell lines: $env: form, quoted values, all four vars, bare origin (no /v1). The
+  // advisor flag rides along so the native /advisor works through the Bridge (a claude-wisp-* base model
+  // has no advisor_rank, so Claude Code only injects the advisor tool under this experimental flag).
   it('builds the PowerShell per-session lines', () => {
     expect(snips.powershell).toBe(
       '$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8971"\n' +
       '$env:ANTHROPIC_API_KEY = "s3cret_x"\n' +
-      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"',
+      '$env:CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = "1"\n' +
+      '$env:CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL = "1"',
     );
   });
 
-  // Per-session bash lines: export form, same three vars.
+  // Per-session bash lines: export form, same four vars.
   it('builds the bash per-session lines', () => {
     expect(snips.bash).toBe(
       'export ANTHROPIC_BASE_URL=http://127.0.0.1:8971\n' +
       'export ANTHROPIC_API_KEY=s3cret_x\n' +
-      'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1',
+      'export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1\n' +
+      'export CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1',
     );
   });
 
   // The persistent variant is a valid project .claude/settings.json env block — parseable JSON carrying
-  // exactly the three vars. The global ~/.claude form must never be produced (PRD #43 ban).
+  // exactly the four vars. The global ~/.claude form must never be produced (PRD #43 ban).
   it('builds a parseable project settings.json env block', () => {
     expect(JSON.parse(snips.settingsJson)).toEqual({
       env: {
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
         ANTHROPIC_API_KEY: 's3cret_x',
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+        CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
       },
     });
   });
 });
 
 describe('buildClaudeLaunch', () => {
-  // The launcher's whole contract in one shape: the Bridge env trio plus CLAUDE_BINARY (so relay-style
-  // respawners inside the session re-use the wrapper), argv verbatim.
-  it('builds the env trio + CLAUDE_BINARY from port + secret', () => {
+  // The launcher's whole contract in one shape: the Bridge env vars (discovery + advisor) plus CLAUDE_BINARY
+  // (so relay-style respawners inside the session re-use the wrapper), argv verbatim. The advisor flag lets
+  // the native /advisor work through the Bridge out of the box.
+  it('builds the env vars + CLAUDE_BINARY from port + secret', () => {
     const launch = buildClaudeLaunch(8971, 's3cret_x', []);
     expect(launch.env).toEqual({
       ANTHROPIC_BASE_URL: 'http://127.0.0.1:8971',
       ANTHROPIC_API_KEY: 's3cret_x',
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL: '1',
       CLAUDE_BINARY: 'claude-wisp',
     });
   });
