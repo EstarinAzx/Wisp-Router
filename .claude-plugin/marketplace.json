@@ -9,7 +9,7 @@
       "name": "wisp-slot",
       "source": "./plugins/slot",
       "description": "Slot workflow: safely rebind a Claude family route to any Wisp Target, spawn a subagent through it, restore when done",
-      "version": "1.1.1"
+      "version": "1.2.1"
     }
   ]
 }
