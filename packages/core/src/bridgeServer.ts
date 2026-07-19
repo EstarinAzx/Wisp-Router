@@ -40,7 +40,7 @@ import {
 } from './bridge';
 import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
-  advisorToolSpec, runAdvisorLoop,
+  advisorToolSpec, runAdvisorLoop, reviewerSystem, serializeForReview,
   type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
 import type { NormalizedTurn } from './catalog';
@@ -437,15 +437,6 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
   // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
 
-  // The reviewer instruction for the advisor sub-call: the door hands the advisor Target the conversation
-  // and asks for a second opinion. Claude Code's own advisor instructions steered the BASE model to CALL
-  // advisor; this steers the ADVISOR to answer. Kept short — the value is the review, not the framing.
-  const REVIEWER_SYSTEM =
-    'You are acting as an advisor: a stronger model giving a second opinion on the conversation above. '
-    + 'Review what the assistant is about to do — especially any risky, irreversible, or uncertain step — '
-    + 'and reply with concise, direct guidance: what looks wrong, what to verify, what to do next. '
-    + 'You are advising the assistant, not the user; do not address the user or use tools.';
-
   // Anthropic-door traffic is told apart from OpenAI-door traffic on the shared routes by the headers only an
   // Anthropic client sends. Slice #44 verified `anthropic-version || x-api-key` cleanly separates them (a
   // Bearer-only OpenAI client hits neither), so this is the live door selector.
@@ -584,9 +575,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const reviewer = async (turns: NormalizedTurn[]): Promise<string> => {
       const advModel = (parsed.advisor?.model ?? '').replace(/^claude-wisp-/, '');
       const advRoute = (advModel ? routeFor(advModel) : undefined) ?? route;
+      // The reviewer request is deliberately minimal: reviewerSystem() only (never parsed.system — it carries
+      // Claude Code's `# Advisor Tool` section, which made the reviewer echo meta-instructions), and the whole
+      // conversation flattened to ONE plain-text user turn. Forwarding the raw turns tripped Anthropic's
+      // "max 4 blocks with cache_control … Found 5" 400 (a replayed thinking sidecar smuggled a 5th marker)
+      // AND let instruction-shaped turns be obeyed. One text turn = 2 cache markers, no tool/thinking blocks.
+      const reviewTurn: NormalizedTurn = {
+        role: 'user', text: `Conversation to review:\n\n${serializeForReview(turns)}`, toolCalls: [], toolResults: [],
+      };
       const reviewParsed: BridgeAnthropicRequest = {
-        ...parsed, turns, tools: [], advisor: undefined,
-        system: parsed.system ? `${parsed.system}\n\n${REVIEWER_SYSTEM}` : REVIEWER_SYSTEM,
+        ...parsed, turns: [reviewTurn], tools: [], advisor: undefined, system: reviewerSystem(),
       };
       const r = await startProviderStream(reviewParsed, advRoute.provider, advRoute.pinnedModel, controller);
       if (!r.ok) throw new Error(r.message);

@@ -206,7 +206,15 @@ export const buildAnthropicMessagesBody = (args: {
       // Thinking passthrough: a turn with the door's byte-for-byte sidecar replays it VERBATIM when this
       // body enables thinking — signatures + interleaved order intact. Thinking off → sidecar skipped,
       // normalized rebuild below (thinking dropped, matching the pre-passthrough behavior).
-      if (m.rawContent?.length && thinkingEffort.thinking) return { role: 'assistant' as const, content: m.rawContent };
+      // Replay a COPY with any cache_control stripped, never the caller's array: mark() below writes markers
+      // through by reference, and the advisor flow builds twice from the SAME parsed.turns (base pass +
+      // continuation). A marker placed on the first build leaked back into rawContent and stacked on the
+      // second, tripping Anthropic's "max 4 blocks with cache_control … Found 5". Anthropic also rejects
+      // cache_control on thinking blocks outright, so stripping is correct regardless.
+      if (m.rawContent?.length && thinkingEffort.thinking) {
+        const replay = m.rawContent.map((b) => (b && typeof b === 'object' && 'cache_control' in b) ? (({ cache_control, ...rest }) => rest)(b as Record<string, unknown>) : b);
+        return { role: 'assistant' as const, content: replay };
+      }
       // A plain text turn stays a bare string (the #29 shape); only a tool-call turn expands to blocks.
       if (!m.toolCalls?.length) return { role: 'assistant' as const, content: m.content };
       const blocks: unknown[] = [];

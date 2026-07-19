@@ -468,6 +468,31 @@ describe('buildAnthropicMessagesBody — thinking passthrough (rawContent)', () 
     expect(blocks.filter((b: any) => b.cache_control).length).toBeGreaterThanOrEqual(2);
     expect(blocks.filter((b: any) => b.type === 'thinking' && b.cache_control)).toEqual([]);
   });
+
+  // Regression (#111 advisor leak): the marker walk must NOT write cache_control back into the caller's
+  // rawContent array. The advisor flow builds twice from the SAME parsed.turns (base pass → reviewer →
+  // continuation); a marker leaked on an early build stacked on a later one and tripped Anthropic's
+  // "A maximum of 4 blocks with cache_control … Found 5". Building must leave the input untouched.
+  it('does not mutate the caller rawContent, so repeated builds stay under the cap', () => {
+    const raw2 = [
+      { type: 'thinking', thinking: 'hmm', signature: 's' },
+      ...Array.from({ length: 20 }, (_, i) => ({ type: 'text', text: `t${i}` })),
+    ];
+    const opts = {
+      model: 'claude-opus-4-8', maxTokens: 1, version: 'v', effort: 'high' as const,
+      messages: [
+        { role: 'assistant' as const, content: '', toolCalls: [], rawContent: raw2 },
+        { role: 'user' as const, content: 'go' },
+      ],
+    };
+    const countCC = (body: any) => body.system.filter((b: any) => b.cache_control).length
+      + body.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content : [])).filter((b: any) => b.cache_control).length;
+    const first = countCC(buildAnthropicMessagesBody(opts) as any);
+    const second = countCC(buildAnthropicMessagesBody(opts) as any); // same input object again — mimics the reused turns
+    expect(raw2.some((b: any) => b.cache_control)).toBe(false); // the smoking gun: input left clean
+    expect(first).toBeLessThanOrEqual(4);
+    expect(second).toBe(first);                                   // no accumulation across builds
+  });
 });
 
 describe('reduceAnthropicTextEvents', () => {

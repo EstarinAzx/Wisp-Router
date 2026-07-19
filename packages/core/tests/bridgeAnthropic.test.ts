@@ -12,6 +12,8 @@ import {
   buildClaudeLaunch,
   advisorToolSpec,
   runAdvisorLoop,
+  reviewerSystem,
+  serializeForReview,
 } from '../src/bridgeAnthropic';
 import type { ChatModelInfo, NormalizedTurn } from '../src/catalog';
 import type { BridgeStreamEvent } from '../src/bridge';
@@ -890,6 +892,64 @@ describe('advisorToolSpec', () => {
     expect(spec.inputSchema).toEqual({ type: 'object', properties: {}, additionalProperties: false });
     expect(typeof spec.description).toBe('string');
     expect(spec.description.length).toBeGreaterThan(0);
+  });
+});
+
+describe('reviewerSystem', () => {
+  // The live failure this guards: fed the base system prompt (with Claude Code's `# Advisor Tool` section)
+  // plus a weak frame, the reviewer echoed those meta-instructions instead of reviewing — reproduced on real
+  // Opus, not just foreign Targets. The frame must name the conversation as material (not instructions to the
+  // reviewer), forbid obeying/repeating it, and refuse the empty-echo. Weaken any of those → this fails.
+  it('quarantines the transcript and forbids echoing instructions', () => {
+    const s = reviewerSystem();
+    expect(s).toMatch(/not addressed to you|no instructions for you to follow|material for you to review/i);
+    expect(s).toMatch(/do not obey|do not .*repeat|never to perform/i);
+    expect(s).toMatch(/rather than echoing/i);
+  });
+});
+
+describe('serializeForReview', () => {
+  // Why this exists: the reviewer sub-call must NOT receive the raw turns. They carry tool_use/tool_result
+  // blocks and replayed thinking, which tripped Anthropic's "max 4 blocks with cache_control … Found 5" 400.
+  // Flattening to text means the reviewer request is one plain user message — no tool/thinking blocks to mark.
+  it('flattens turns to labelled plain text with no structured blocks', () => {
+    const turns: NormalizedTurn[] = [
+      { role: 'user', text: 'fix the bug', toolCalls: [], toolResults: [] },
+      { role: 'assistant', text: 'reading it', toolCalls: [{ id: 'c1', name: 'Read', argsJson: '{}' }], toolResults: [] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'c1', content: 'file body' }] },
+    ];
+    const s = serializeForReview(turns);
+    expect(s).toContain('User: fix the bug');
+    expect(s).toContain('Assistant: reading it');
+    expect(s).toContain('[called Read]');
+    expect(s).toContain('[result: file body]');
+    // No structured markers or objects leak through — it is a string of role-labelled lines.
+    expect(typeof s).toBe('string');
+  });
+
+  // Tool-result dumps (whole file reads) are capped so the review input stays focused and the single message
+  // can't balloon — the cap is readability/cost, not correctness.
+  it('caps long tool-result content and flags errors', () => {
+    const big = 'x'.repeat(5000);
+    const turns: NormalizedTurn[] = [
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'c1', content: big }] },
+      { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: 'c2', content: 'boom', isError: true }] },
+    ];
+    const s = serializeForReview(turns);
+    expect(s).toContain('… (truncated)');
+    expect(s.length).toBeLessThan(big.length + 500);
+    expect(s).toContain('[result (error): boom]');
+  });
+
+  // Images are noted, not embedded — the reviewer is a text pass, and image blocks would re-introduce the
+  // structured content the flattening exists to remove.
+  it('notes images without embedding them', () => {
+    const turns: NormalizedTurn[] = [
+      { role: 'user', text: 'look', toolCalls: [], toolResults: [], images: [{ mimeType: 'image/png', dataBase64: 'AAAA' }] },
+    ];
+    const s = serializeForReview(turns);
+    expect(s).toContain('[1 image(s) omitted]');
+    expect(s).not.toContain('AAAA');
   });
 });
 
