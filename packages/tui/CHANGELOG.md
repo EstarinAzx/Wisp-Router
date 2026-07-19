@@ -6,6 +6,29 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.22] — 2026-07-19
+
+### Fixed
+
+- **The native Advisor no longer 400s mid-turn on a real session.**
+  `buildAnthropicMessagesBody` placed its #111 cache-control breakpoints by mutating
+  the caller's `rawContent` thinking-sidecar array in place. The advisor flow builds the
+  request up to three times from the *same* turns (base pass → reviewer → continuation),
+  so a breakpoint written on one build leaked back into the turns and stacked on the next
+  — eventually exceeding Anthropic's cap ("A maximum of 4 blocks with cache_control may be
+  provided. Found 5.") and tearing the stream with a mid-response error. Replayed thinking
+  sidecars are now copied, with any `cache_control` stripped (Anthropic rejects it on
+  thinking blocks regardless), so every build is independent and the marker count stays
+  within the cap.
+- **The Advisor reviewer no longer echoes the conversation instead of reviewing it.** The
+  reviewer sub-call forwarded the base model's entire system prompt — including Claude
+  Code's own `# Advisor Tool` instructions — plus the raw turns, so a reviewer (even real
+  Opus) could parrot those meta-instructions back rather than give a second opinion. The
+  reviewer now gets a dedicated, quarantined system prompt and the conversation flattened
+  into a single plain-text transcript (structured tool / thinking / image blocks removed),
+  which also keeps its request well under the cache cap. The reviewer is text-only as a
+  result — pasted images are summarized as `[N image(s) omitted]`.
+
 ## [2.0.21] — 2026-07-19
 
 ### Added
