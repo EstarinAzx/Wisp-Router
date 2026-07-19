@@ -129,7 +129,14 @@ export type BridgeStreamEvent =
   | { type: 'redacted_thinking'; data: string }
   // Real token usage from the backend (Anthropic upstream only). Carries no wire content — the Anthropic
   // door's encoder folds it into message_start/message_delta usage; other doors/reducers ignore it.
-  | { type: 'usage'; usage: BridgeUsage };
+  | { type: 'usage'; usage: BridgeUsage }
+  // Advisor (server tool, Anthropic door only): the door itself PRODUCES these while playing the server
+  // role — the backend never emits them. server_tool_use announces the advisor call to Claude Code;
+  // advisor_result/advisor_error carry the reviewer's verdict back. None of them are client tool calls,
+  // so no door's finish/stop_reason logic may count them as one.
+  | { type: 'server_tool_use'; call: AssembledToolCall }
+  | { type: 'advisor_result'; toolUseId: string; text: string }
+  | { type: 'advisor_error'; toolUseId: string; errorCode: string };
 
 // The terminal finish_reason: 'tool_calls' when the turn emitted any tool call (the client must run them),
 // else 'stop'. Mid-stream chunks carry finish_reason null until the terminal chunk.

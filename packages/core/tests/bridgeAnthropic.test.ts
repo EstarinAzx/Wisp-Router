@@ -684,3 +684,169 @@ describe('buildClaudeLaunch', () => {
     expect(argv).toEqual(['-p']);
   });
 });
+
+// ----------------------------- Advisor (server tool) — parse + emit ----------------------------- //
+
+describe('parseAnthropicMessagesRequest — advisor', () => {
+  // Claude Code injects {type:'advisor_20260301', name:'advisor', model} into tools when the Advisor is on.
+  // The door extracts it (the model rides to the reviewer sub-call) and keeps it OUT of the regular tools —
+  // forwarding it schema-less was the old dangle.
+  it('extracts the advisor server tool from tools and exposes its model', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [
+      { type: 'advisor_20260301', name: 'advisor', model: 'claude-opus-4-8' },
+      { name: 'read', description: 'read a file', input_schema: { type: 'object' } },
+    ] } as any);
+    expect(parsed.advisor).toEqual({ model: 'claude-opus-4-8' });
+    expect(parsed.tools).toEqual([{ name: 'read', description: 'read a file', inputSchema: { type: 'object' } }]);
+  });
+
+  // No advisor tool → the field stays absent, and a plain request is byte-identical to before.
+  it('leaves advisor absent when the tool is not sent', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [{ role: 'user', content: 'hi' }], tools: [
+      { name: 'read', description: '', input_schema: { type: 'object' } },
+    ] } as any);
+    expect(parsed.advisor).toBeUndefined();
+  });
+
+  // A server_tool_use block in assistant history becomes a normalized toolCall (input → argsJson), so the
+  // backend sees the same regular-tool exchange the door synthesized live — not a silently dropped block.
+  it('maps an assistant server_tool_use block to a toolCall', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'text', text: 'consulting' },
+        { type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} },
+      ] },
+    ] } as any);
+    expect(parsed.turns[0].toolCalls).toEqual([{ id: 'srvtoolu_1', name: 'advisor', argsJson: '{}' }]);
+    expect(parsed.turns[0].text).toBe('consulting');
+  });
+
+  // The advisor_tool_result rides in the SAME assistant message on the wire, but the normalized shape (and
+  // every backend) wants tool results on the NEXT user turn — so the advice text carries forward as a
+  // toolResult there, paired to the server_tool_use id.
+  it('carries an assistant advisor_tool_result forward to the next user turn as a toolResult', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_result', text: 'do X first' } },
+        { type: 'text', text: 'ok, doing X' },
+      ] },
+      { role: 'user', content: 'thanks' },
+    ] } as any);
+    expect(parsed.turns[1].toolResults).toEqual([{ callId: 'srvtoolu_1', content: 'do X first' }]);
+    expect(parsed.turns[1].text).toBe('thanks');
+    expect(parsed.turns[0].text).toBe('ok, doing X');
+  });
+
+  // An error result (advisor_tool_result_error content) carries forward as an isError toolResult.
+  it('carries an advisor error result forward as an isError toolResult', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 'srvtoolu_2', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 'srvtoolu_2', content: { type: 'advisor_tool_result_error', error_code: 'unavailable' } },
+      ] },
+      { role: 'user', content: 'go on' },
+    ] } as any);
+    expect(parsed.turns[1].toolResults).toEqual([{ callId: 'srvtoolu_2', content: 'advisor error: unavailable', isError: true }]);
+  });
+
+  // A trailing advisor result with no following user turn has nowhere to land — dropped, never a crash.
+  it('drops a trailing advisor result with no following user turn', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 's1', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+      ] },
+    ] } as any);
+    expect(parsed.turns).toHaveLength(1);
+  });
+
+  // On a thinking-bearing turn the rawContent sidecar replays verbatim to the Anthropic backend — but the
+  // backend never saw advisor blocks (the door executed them as a regular tool round-trip). server_tool_use
+  // rewrites to a plain tool_use; advisor_tool_result drops (its text lives on the next user turn).
+  it('scrubs advisor blocks from the rawContent sidecar', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'thinking', thinking: 'hm', signature: 'sig' },
+        { type: 'server_tool_use', id: 's1', name: 'advisor', input: { focus: 'plan' } },
+        { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+        { type: 'text', text: 'after' },
+      ] },
+      { role: 'user', content: 'k' },
+    ] } as any);
+    expect(parsed.turns[0].rawContent).toEqual([
+      { type: 'thinking', thinking: 'hm', signature: 'sig' },
+      { type: 'tool_use', id: 's1', name: 'advisor', input: { focus: 'plan' } },
+      { type: 'text', text: 'after' },
+    ]);
+  });
+});
+
+describe('anthropic SSE encoder — advisor events', () => {
+  // A server_tool_use event emits the whole block: start (empty input) + one input_json_delta + stop —
+  // the same whole-call folding the regular tool_use path uses, under the server_tool_use block type.
+  it('emits a server_tool_use block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'server_tool_use', call: { id: 'srvtoolu_1', name: 'advisor', argsJson: '{"a":1}' } }));
+    expect(fs.map((f) => f.event)).toEqual(['content_block_start', 'content_block_delta', 'content_block_stop']);
+    expect(fs[0].data.content_block).toEqual({ type: 'server_tool_use', id: 'srvtoolu_1', name: 'advisor', input: {} });
+    expect(fs[1].data.delta).toEqual({ type: 'input_json_delta', partial_json: '{"a":1}' });
+  });
+
+  // The advisor result is one whole block: Claude Code copies the full content off content_block_start,
+  // so start carries everything and stop follows immediately.
+  it('emits an advisor_tool_result block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'advisor_result', toolUseId: 'srvtoolu_1', text: 'do X' }));
+    expect(fs.map((f) => f.event)).toEqual(['content_block_start', 'content_block_stop']);
+    expect(fs[0].data.content_block).toEqual({
+      type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_result', text: 'do X' },
+    });
+  });
+
+  // The error twin: content is the advisor_tool_result_error shape Claude Code renders as "Advisor unavailable".
+  it('emits an advisor error result block whole', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    const fs = frames(enc.push({ type: 'advisor_error', toolUseId: 'srvtoolu_1', errorCode: 'unavailable' }));
+    expect(fs[0].data.content_block).toEqual({
+      type: 'advisor_tool_result', tool_use_id: 'srvtoolu_1', content: { type: 'advisor_tool_result_error', error_code: 'unavailable' },
+    });
+  });
+
+  // Advisor is a SERVER tool — fully handled inside the turn, so it must not flip stop_reason to tool_use
+  // (that would tell Claude Code to run a client tool that doesn't exist). Text around it stays intact.
+  it('keeps stop_reason end_turn across an advisor round-trip', () => {
+    const sse = buildAnthropicSse([
+      { type: 'text', text: 'before' },
+      { type: 'server_tool_use', call: { id: 's1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_result', toolUseId: 's1', text: 'advice' },
+      { type: 'text', text: 'after' },
+    ], meta);
+    const fs = frames(sse);
+    const delta = fs.find((f) => f.event === 'message_delta');
+    expect(delta?.data.delta.stop_reason).toBe('end_turn');
+    // Indexes stay strictly increasing across text → server_tool_use → result → text blocks.
+    const starts = fs.filter((f) => f.event === 'content_block_start');
+    expect(starts.map((f) => f.data.index)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('buildAnthropicMessageResponse — advisor events', () => {
+  // The buffered mirror: advisor events become their blocks in order, stop_reason stays end_turn.
+  it('renders advisor events as blocks without flipping stop_reason', () => {
+    const res = buildAnthropicMessageResponse([
+      { type: 'server_tool_use', call: { id: 's1', name: 'advisor', argsJson: '{"q":2}' } },
+      { type: 'advisor_result', toolUseId: 's1', text: 'advice' },
+      { type: 'text', text: 'done' },
+    ], meta);
+    expect(res.content).toEqual([
+      { type: 'server_tool_use', id: 's1', name: 'advisor', input: { q: 2 } },
+      { type: 'advisor_tool_result', tool_use_id: 's1', content: { type: 'advisor_result', text: 'advice' } },
+      { type: 'text', text: 'done' },
+    ]);
+    expect(res.stop_reason).toBe('end_turn');
+  });
+});

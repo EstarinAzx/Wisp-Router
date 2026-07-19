@@ -37,9 +37,16 @@ type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: stri
 type AntDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: string; data: string } };
 type AntThinkingBlock = { type: 'thinking'; thinking: string; signature?: string };
 type AntRedactedThinkingBlock = { type: 'redacted_thinking'; data: string };
-type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock | AntDocumentBlock | AntThinkingBlock | AntRedactedThinkingBlock;
+// The advisor server-tool history blocks (Claude Code's Advisor): the model's call and the reviewer's
+// verdict, both riding in ASSISTANT content — the door itself produced them on the earlier live turn.
+type AntServerToolUseBlock = { type: 'server_tool_use'; id: string; name: string; input: unknown };
+type AntAdvisorResultContent = { type: 'advisor_result'; text: string } | { type: 'advisor_tool_result_error'; error_code: string };
+type AntAdvisorResultBlock = { type: 'advisor_tool_result'; tool_use_id: string; content: AntAdvisorResultContent };
+type AntContentBlock = AntTextBlock | AntToolUseBlock | AntToolResultBlock | AntImageBlock | AntDocumentBlock | AntThinkingBlock | AntRedactedThinkingBlock | AntServerToolUseBlock | AntAdvisorResultBlock;
 type AntMessage = { role: 'user' | 'assistant' | 'system'; content: string | AntContentBlock[] };
-type AntTool = { name: string; description?: string; input_schema?: object };
+// type/model are the server-tool fields (advisor: {type:'advisor_20260301', name:'advisor', model}) —
+// absent on ordinary client tools.
+type AntTool = { name: string; description?: string; input_schema?: object; type?: string; model?: string };
 type AntToolChoice = { type: 'auto' } | { type: 'any' } | { type: 'none' } | { type: 'tool'; name: string };
 export type AnthropicMessagesRequest = {
   model: string;
@@ -63,6 +70,9 @@ export type BridgeAnthropicRequest = BridgeChatRequest & {
   toolChoice?: NormalizedToolChoice;
   temperature?: number;
   effort?: EffortLevel; // Claude Code's /effort (output_config.effort) — overrides the panel effort when present
+  // Present when the request carried the advisor server tool: the door must play the server role (execute
+  // the reviewer itself). model is the advisor model Claude Code's picker chose, raw off the wire.
+  advisor?: { model?: string };
 };
 
 // Validate an inbound output_config.effort against Wisp's ladder — the body is untrusted, so an unknown
@@ -136,21 +146,35 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
   if (body.system !== undefined) systemParts.push(blockText(body.system, '\n\n'));
 
   const turns: NormalizedTurn[] = [];
+  // Advisor results ride in ASSISTANT content on the wire, but the normalized shape (and every backend)
+  // pairs tool results onto the NEXT user turn — so they buffer here and attach to the user turn that
+  // follows. A trailing result with no user turn after it is dropped (nowhere to land, never a crash).
+  let pendingAdvisorResults: { callId: string; content: string; isError?: boolean }[] = [];
   for (const msg of messages) {
     if (msg.role === 'system') { systemParts.push(blockText(msg.content, '\n\n')); continue; }
     if (typeof msg.content === 'string') {
-      turns.push({ role: msg.role, text: msg.content, toolCalls: [], toolResults: [] });
+      const carried = msg.role === 'user' ? pendingAdvisorResults : [];
+      if (msg.role === 'user') pendingAdvisorResults = [];
+      turns.push({ role: msg.role, text: msg.content, toolCalls: [], toolResults: carried });
       continue;
     }
     const blocks = Array.isArray(msg.content) ? msg.content : [];
     if (msg.role === 'assistant') {
       // Assistant blocks: text concatenates, tool_use → toolCalls with input stringified back to argsJson.
+      // The advisor pair folds back into the regular-tool vocabulary the door synthesized live:
+      // server_tool_use → a toolCall, advisor_tool_result → a pending toolResult for the next user turn.
       let text = '';
       const toolCalls: { id: string; name: string; argsJson: string }[] = [];
       let hasThinking = false;
       for (const b of blocks) {
         if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
-        else if (b?.type === 'tool_use') toolCalls.push({ id: b.id, name: b.name, argsJson: JSON.stringify(b.input ?? {}) });
+        else if (b?.type === 'tool_use' || b?.type === 'server_tool_use') toolCalls.push({ id: b.id, name: b.name, argsJson: JSON.stringify(b.input ?? {}) });
+        else if (b?.type === 'advisor_tool_result') {
+          const c = b.content;
+          pendingAdvisorResults.push(c?.type === 'advisor_result'
+            ? { callId: b.tool_use_id, content: c.text }
+            : { callId: b.tool_use_id, content: `advisor error: ${c?.error_code ?? 'unknown'}`, isError: true });
+        }
         else if (b?.type === 'thinking' || b?.type === 'redacted_thinking') hasThinking = true;
       }
       // A thinking-bearing turn keeps its ORIGINAL block array as the byte-for-byte replay sidecar —
@@ -165,14 +189,27 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
         }
         return b;
       };
-      turns.push({ role: 'assistant', text, toolCalls, toolResults: [], ...(hasThinking ? { rawContent: blocks.map(stripCache) } : {}) });
+      // The sidecar replays verbatim to the Anthropic backend — which never saw advisor blocks (the door
+      // executed the advisor as a regular tool round-trip). server_tool_use rewrites to the plain tool_use
+      // the backend actually emitted; advisor_tool_result drops (its text rides the next user turn).
+      const scrubAdvisor = (bs: AntContentBlock[]): AntContentBlock[] => bs
+        .filter((b) => b?.type !== 'advisor_tool_result')
+        .map((b) => b?.type === 'server_tool_use' ? { type: 'tool_use', id: b.id, name: b.name, input: b.input } as AntContentBlock : b);
+      turns.push({ role: 'assistant', text, toolCalls, toolResults: [], ...(hasThinking ? { rawContent: scrubAdvisor(blocks).map(stripCache) } : {}) });
     } else {
       const { text, toolResults, images, documents } = splitUserBlocks(blocks);
-      turns.push({ role: 'user', text, toolCalls: [], toolResults, ...(images.length ? { images } : {}), ...(documents.length ? { documents } : {}) });
+      const carried = pendingAdvisorResults;
+      pendingAdvisorResults = [];
+      turns.push({ role: 'user', text, toolCalls: [], toolResults: [...carried, ...toolResults], ...(images.length ? { images } : {}), ...(documents.length ? { documents } : {}) });
     }
   }
 
-  const tools: ToolSpec[] = (body.tools ?? []).map((t) => ({
+  // The advisor server tool ({type:'advisor_20260301', …}) is EXTRACTED, not forwarded: the door executes
+  // it itself, and forwarding it schema-less as a regular tool was the old dangle. Other typed server
+  // tools (web_search etc.) keep today's passthrough — advisor is the only one the door plays.
+  const rawTools = body.tools ?? [];
+  const advisorTool = rawTools.find((t) => typeof t?.type === 'string' && t.type.startsWith('advisor_'));
+  const tools: ToolSpec[] = rawTools.filter((t) => t !== advisorTool).map((t) => ({
     name: t.name ?? '',
     description: t.description ?? '',
     ...(t.input_schema !== undefined ? { inputSchema: t.input_schema } : {}),
@@ -190,6 +227,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
     ...(toolChoice !== undefined ? { toolChoice } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
     ...(effort !== undefined ? { effort } : {}),
+    ...(advisorTool ? { advisor: { ...(typeof advisorTool.model === 'string' ? { model: advisorTool.model } : {}) } } : {}),
   };
 };
 
@@ -286,6 +324,26 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
         }
         return s + frame('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'text_delta', text: ev.text } });
       }
+      // Advisor (server tool) events — the door produced these itself. Whole blocks, own index, and none
+      // of them touch sawTool: the turn is still the model's to finish, so stop_reason stays end_turn.
+      if (ev.type === 'server_tool_use') {
+        let s = closeOpen();
+        const idx = nextIndex++;
+        s += frame('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'server_tool_use', id: ev.call.id, name: ev.call.name, input: {} } });
+        if (ev.call.argsJson) s += frame('content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'input_json_delta', partial_json: ev.call.argsJson } });
+        return s + frame('content_block_stop', { type: 'content_block_stop', index: idx });
+      }
+      if (ev.type === 'advisor_result' || ev.type === 'advisor_error') {
+        let s = closeOpen();
+        const idx = nextIndex++;
+        // Claude Code copies the FULL block off content_block_start (no delta vocabulary for this type),
+        // so start carries the whole result and stop follows immediately.
+        const content = ev.type === 'advisor_result'
+          ? { type: 'advisor_result', text: ev.text }
+          : { type: 'advisor_tool_result_error', error_code: ev.errorCode };
+        s += frame('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content } });
+        return s + frame('content_block_stop', { type: 'content_block_stop', index: idx });
+      }
       sawTool = true;
       let s = closeOpen();
       openIndex = nextIndex++;
@@ -322,7 +380,9 @@ type AntReplyBlock =
   | AntTextBlock
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'thinking'; thinking: string; signature: string }
-  | { type: 'redacted_thinking'; data: string };
+  | { type: 'redacted_thinking'; data: string }
+  | { type: 'server_tool_use'; id: string; name: string; input: unknown }
+  | AntAdvisorResultBlock;
 
 // The non-streaming /v1/messages reply — the JSON Messages object Claude Code parses when it did NOT ask to
 // stream. Its `/model` validation probe is exactly this: a stream:false request whose body it reads
@@ -367,6 +427,15 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
       if (last && last.type === 'thinking') last.signature = ev.signature;
     } else if (ev.type === 'redacted_thinking') {
       content.push({ type: 'redacted_thinking', data: ev.data });
+    } else if (ev.type === 'server_tool_use') {
+      // Advisor call — the door's own doing, not a client tool: no sawTool flip, stop_reason stays end_turn.
+      let input: unknown = {};
+      try { input = ev.call.argsJson ? JSON.parse(ev.call.argsJson) : {}; } catch { input = {}; }
+      content.push({ type: 'server_tool_use', id: ev.call.id, name: ev.call.name, input });
+    } else if (ev.type === 'advisor_result') {
+      content.push({ type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content: { type: 'advisor_result', text: ev.text } });
+    } else if (ev.type === 'advisor_error') {
+      content.push({ type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content: { type: 'advisor_tool_result_error', error_code: ev.errorCode } });
     } else {
       sawTool = true;
       let input: unknown = {};
