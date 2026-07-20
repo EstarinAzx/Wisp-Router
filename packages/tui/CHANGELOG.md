@@ -6,6 +6,24 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.25] — 2026-07-20
+
+### Fixed
+
+- **Bridged Claude Code sessions no longer re-bill the whole prompt-cache prefix
+  when a `<system-reminder>` lands mid-session (#139).** The Anthropic door used
+  to fold every system block into one joined string with its only cache marker at
+  the end — each appended reminder mutated the marked block and re-billed the
+  entire tools+system+history prefix as `cache_creation` (the observed quota
+  spikes). The door now splits at the client's own `cache_control` marker: the
+  stable prefix keeps the breakpoint, the volatile tail rides after it as an
+  unmarked block, matching native Claude Code's layout. Verified live: a changed
+  reminder now re-bills only itself (read 9,385 / write 87 where the old shape
+  was read 0 / write 9,400+).
+- **The #111 cache-MISS log line now catches the creation-shaped bust.** A
+  multi-turn request that read nothing while re-writing a ≥4k-token prefix logs a
+  MISS even when `input_tokens` stays tiny.
+
 ## [2.0.24] — 2026-07-20
 
 ### Added
