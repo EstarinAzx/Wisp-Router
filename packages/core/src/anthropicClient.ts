@@ -19,7 +19,7 @@
 import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
-type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; signal?: AbortSignal };
+type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; signal?: AbortSignal };
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
@@ -86,7 +86,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   const res = await fetch(`${args.baseUrl}/v1/messages`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix })),
     signal: args.signal,
   });
   if (!res.ok) {

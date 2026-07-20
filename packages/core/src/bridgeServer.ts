@@ -508,8 +508,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // images here was the door's vision hole: inline attaches never reached the Anthropic backend.
       // rawContent is the thinking-passthrough sidecar — Anthropic-only, the other arms leave it unread.
       const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults, rawContent: t.rawContent }));
-      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal: controller.signal });
+      // #139: with a recorded split, only the STABLE side rides as the system message (it takes the cache
+      // marker); the volatile tail threads separately and lands after the breakpoint, so a mid-session
+      // <system-reminder> append re-bills itself, not the whole tools+system prefix. No split → full system.
+      const sys = parsed.systemSplit?.stable ?? parsed.system;
+      const messages = sys ? [{ role: 'system' as const, content: sys }, ...turns] : turns;
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream) };
     }
     if (isXaiProvider(provider)) {

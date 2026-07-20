@@ -29,8 +29,9 @@ const deltaUsage = (u: BridgeUsage | null) => u
 
 // The Anthropic request shapes we read. Structural (no SDK import) — only the fields the translator needs.
 // A text block appears both as a `system` entry and inside message content; tool_use/tool_result/image are
-// message-only. cache_control and other beta annotations ride along and are simply never read.
-type AntTextBlock = { type: 'text'; text: string };
+// message-only. Beta annotations ride along unread — except cache_control on system blocks, which #139
+// reads as the client's stable/volatile boundary.
+type AntTextBlock = { type: 'text'; text: string; cache_control?: unknown };
 type AntToolUseBlock = { type: 'tool_use'; id: string; name: string; input: unknown };
 type AntToolResultBlock = { type: 'tool_result'; tool_use_id: string; content: string | AntContentBlock[]; is_error?: boolean };
 type AntImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
@@ -70,6 +71,11 @@ export type BridgeAnthropicRequest = BridgeChatRequest & {
   toolChoice?: NormalizedToolChoice;
   temperature?: number;
   effort?: EffortLevel; // Claude Code's /effort (output_config.effort) — overrides the panel effort when present
+  // #139: the stable/volatile split of the system text, read off the client's own cache_control markers.
+  // `system` stays the FULL join (every backend arm keeps its meaning); the Anthropic arm alone uses the
+  // split to keep its cache breakpoint on the stable side so mid-session <system-reminder> appends stop
+  // busting the whole tools+system prefix. Absent when the client sent no marker.
+  systemSplit?: { stable: string; volatile: string };
   // Present when the request carried the advisor server tool: the door must play the server role (execute
   // the reviewer itself). model is the advisor model Claude Code's picker chose, raw off the wire.
   advisor?: { model?: string };
@@ -139,11 +145,16 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
 // The claude-wisp- discovery alias is stripped from `model` (slice-1 decision); a stock claude-* id (the
 // background tier's haiku) has no such prefix and passes verbatim. output_config.effort is read (Claude
 // Code's /effort — #47 threads it to the backend); the other beta fields (thinking, context_management,
-// metadata, cache_control) are simply never read — ignored, never rejected.
+// metadata) are simply never read — ignored, never rejected. cache_control on system blocks IS read (#139):
+// the last marked block is the client's own stable/volatile boundary, recorded as systemSplit.
 export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): BridgeAnthropicRequest => {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const systemParts: string[] = [];
   if (body.system !== undefined) systemParts.push(blockText(body.system, '\n\n'));
+  // #139: index of the LAST client-marked top-level system block — everything through it is the stable
+  // prefix, everything after (later blocks, mid-conversation system) is volatile. -1 = no marker, no split.
+  let stableEnd = -1;
+  if (Array.isArray(body.system)) body.system.forEach((b, i) => { if (b && typeof b === 'object' && b.cache_control !== undefined) stableEnd = i; });
 
   const turns: NormalizedTurn[] = [];
   // Advisor results ride in ASSISTANT content on the wire, but the normalized shape (and every backend)
@@ -217,6 +228,13 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
 
   const toolChoice = normalizeToolChoice(body.tool_choice);
   const effort = normalizeEffort(body.output_config?.effort);
+  // #139: split at the client's marker. stable = top-level blocks through the last marked one; volatile =
+  // the top-level tail plus every mid-conversation system part (systemParts[0] is the top-level join —
+  // present whenever stableEnd was found — so the mid parts are systemParts[1..]).
+  const systemSplit = stableEnd >= 0 ? {
+    stable: blockText((body.system as AntTextBlock[]).slice(0, stableEnd + 1), '\n\n'),
+    volatile: [blockText((body.system as AntTextBlock[]).slice(stableEnd + 1), '\n\n'), ...systemParts.slice(1)].filter(Boolean).join('\n\n'),
+  } : undefined;
   return {
     model: (body.model ?? '').replace(/^claude-wisp-/, ''),
     stream: body.stream ?? false,
@@ -224,6 +242,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
     turns,
     tools,
     // Only attach the extras when present, so a plain request stays byte-identical to a bare BridgeChatRequest.
+    ...(systemSplit ? { systemSplit } : {}),
     ...(toolChoice !== undefined ? { toolChoice } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
     ...(effort !== undefined ? { effort } : {}),
