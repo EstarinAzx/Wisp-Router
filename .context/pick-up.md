@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-20
+updated: 2026-07-21
 tags: [context, pick-up]
 ---
 
@@ -9,39 +9,37 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last tasks (DONE): #139 (v2.0.25) → #142 hotfix (v2.0.26) → #141 (v2.0.27).**
+**Last task (DONE): #143 (v2.0.28) — advisor cost visible to Claude Code.**
 
-- #139: Anthropic-door system-fold cache bust fixed, live-verified (kill-shot:
-  volatile change = 87 write tokens vs old full ~77k re-bill), PR #140. See
-  [[2026-07-20-system-split-at-client-marker]].
-- #142: same-day regression — the advisor reviewer inherited `systemSplit`
-  and lost its quarantine frame; fixed via pure `buildReviewerRequest`.
-- #141: advisor reviewer transcript now rides as per-turn `textBlocks`
-  (grilled 2026-07-21: seam mirrors systemSplit — `text` stays the full join
-  for non-Anthropic Targets; existing marker walk does placement; unit-tested,
-  no live repro — #139's kill-shot proved the physics). npm live at 2.0.27.
+- Advisor reviewer usage now rides as `usage.iterations` on the door's closing
+  usage frame: `advisor_message` entries (resolved Target model + tokens),
+  final base pass last. Grilled design in
+  [[2026-07-21-advisor-usage-iterations-shape]]; PR #144, live-verified
+  (Claude Code folded advisor tokens into `modelUsage` + `total_cost_usd`).
+- Advisor saga now fully closed: 2.0.26 quarantine → 2.0.27 cacheable
+  transcript → 2.0.28 visible cost.
 
 **Next task: none urgent.** Candidates:
 
-1. Remind the user to reinstall if they haven't: stop `wisp.exe`, then
-   `npm i -g wisp-router` (needs ≥ 2.0.26 for the quota fixes; 2.0.27 adds
-   the advisor cache win).
-2. **#143** (queued, needs design + live capture): surface advisor reviewer
-   token usage to the client (`usage.iterations` `advisor_message` shape) —
-   verify how Claude Code renders door-emitted iterations before picking the
-   wire shape.
-3. Idle chore: bump Node-20-deprecated actions in
-   `.github/workflows/release.yml` (checkout@v4, upload-artifact@v4 warnings).
+1. Remind the user to reinstall if they haven't: `wisp.exe` was left STOPPED
+   this session; `npm i -g wisp-router` → 2.0.28, then restart serve.
+2. Idle chore: bump Node-20-deprecated actions in
+   `.github/workflows/release.yml` (checkout@v4, upload-artifact@v4 warnings
+   on every release).
+3. New feature work → funnel (`/preset init` or grill).
 
 **Landmines:**
 
+- `usage.iterations` last entry MUST stay the final base pass — Claude Code
+  reads `iterations[-1]` as the authoritative context window; an advisor entry
+  there corrupts window math. Encoded in `usageIterations()` +
+  bridgeAnthropic tests; don't "simplify" it away.
+- Reviewer usage must never enter the `usage` event channel — top-level usage
+  + the #111 `anthropicCacheOutcome` guard read the base pass only.
 - `anthropicAttribution` fingerprint samples the FIRST user message —
   server-validated; don't change what text feeds it.
 - Max 4 `cache_control` markers per request; thinking blocks unmarkable; the
   mark() slide logic in anthropic.ts handles both — don't break.
-- If quota spikes return: watch serve output for the new
-  `prompt-cache MISS … creation=…` line (guard now catches the
-  creation-shaped bust). Benign one-offs: 1h-TTL expiry, post-compaction.
 
 ## Related
 

@@ -1,46 +1,48 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-20
+updated: 2026-07-21
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-20 by Fable 5 (wrap-up)._
-_At commit: db722a6 (v2.0.25 released) + this wrap-up commit._
+_Last updated: 2026-07-21 by Fable 5 (wrap-up)._
+_At commit: cca576c (v2.0.28 released) + this wrap-up commit._
 
 ## Current focus
 
-**Nothing in flight.** v2.0.25 shipped and live on npm: the #139
-Anthropic-door system-fold cache bust (the subscription-quota-spike bug) is
-fixed and live-verified. The v2.0.24 chain (#127–#132) landed earlier the
-same day; the relay chain at `.claude/relay/ticket-loop.md` is finished.
+**Nothing in flight.** v2.0.28 shipped and live on npm: #143 advisor reviewer
+token usage now surfaces to Claude Code as `usage.iterations`
+(`advisor_message` entries + final base pass last), so `/cost` and session
+totals include advisor consults. The advisor saga is closed: quarantine
+(2.0.26) → cacheable transcript (2.0.27) → visible cost (2.0.28).
 
 ## State
 
 - **In flight:** nothing. Ticket queue empty — no open `ready-for-agent` issues.
 - **Done this session:**
-  1. **#139 fixed** (issue → grilled design → TDD → PR #140 squash-merged →
-     `v2.0.25` tagged, release green, npm live). Design recorded in
-     [[2026-07-20-system-split-at-client-marker]]; mechanics live in code
-     comments (bridgeAnthropic.ts parse, anthropic.ts build, bridgeServer.ts
-     Anthropic arm, anthropicClient.ts threading). 575/575 tests (11 new).
-  2. **Live-verified twice:** real `claude-wisp -p` run (3-block system,
-     stable block byte-identical across requests, reads 55k+) and a synthetic
-     kill-shot (volatile reminder changed between requests → read 9,385 /
-     write 87; the old shape was read 0 / write 77k).
+  1. **#143 shipped** (grilled design → TDD → PR #144 squash-merged →
+     `v2.0.28` tagged, release green, npm live). Design recorded in
+     [[2026-07-21-advisor-usage-iterations-shape]]; mechanics in code comments
+     (bridgeAnthropic.ts `usageIterations` + `runAdvisorLoop`, bridgeServer.ts
+     reviewer). 586/586 tests (7 new).
+  2. **Live-verified:** headless source serve + real `claude-wisp -p` forcing
+     one advisor consult — Claude Code folded advisor tokens into `modelUsage`
+     (450 output = 445 advisor + 5 base) and `total_cost_usd`; serve log clean,
+     no cache-MISS line.
 - **Blocked:** none.
 
 ## Pick up here
 
 No queued task. Candidates, in rough value order:
 
-1. **User-side:** stop `wisp.exe`, `npm i -g wisp-router` — the fix only
-   protects sessions once the installed binary is 2.0.25.
-2. **Small chore:** release workflow prints Node 20 deprecation warnings for
-   `actions/checkout@v4` / `upload-artifact@v4` — bump action versions in
-   `.github/workflows/release.yml` some idle moment.
+1. **User-side:** stop `wisp.exe` (already stopped as of this session's end),
+   `npm i -g wisp-router` → 2.0.28. Advisor cost visibility only applies once
+   the installed binary is current.
+2. **Small chore:** bump Node-20-deprecated actions in
+   `.github/workflows/release.yml` (`actions/checkout@v4`,
+   `upload-artifact@v4` — warnings on every release run).
 3. New feature work → start at the funnel (`/preset init` or grill).
 
 ## Skills for next session
@@ -53,13 +55,16 @@ No queued task. Candidates, in rough value order:
 
 ## Recent context
 
-- Quota after the fix behaves like native Claude Code: advisor sub-calls
-  still bill the whole transcript fresh per invocation (by design), and
-  pinning cheap families to opus/fable-tier Targets still burns at the heavy
-  model's rate — user-visible costs, not bugs.
-- The new MISS guard logs `prompt-cache MISS … creation=…` in serve output if
-  the bust shape ever returns; silence = healthy. Benign one-off triggers:
-  1h-TTL expiry after idle, post-compaction.
+- openclaude parse facts pinned during #143 (worth remembering for any future
+  usage-shaping work): `getAdvisorUsage` filters `iterations` by
+  `type === 'advisor_message'`; `iterations[-1]` is the authoritative final
+  context window; streaming merge keeps the most recent frame's `iterations`;
+  unknown model ids price at `DEFAULT_UNKNOWN_MODEL_COST` + flag.
+- Advisor billing that is BY DESIGN (not bugs): each consult bills the
+  conversation fresh (cached where possible); cheap families pinned to heavy
+  Targets burn at the heavy rate.
+- The #111 MISS guard still logs `prompt-cache MISS … creation=…` in serve
+  output if the bust shape returns; silence = healthy.
 
 ## Related
 
