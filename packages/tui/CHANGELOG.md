@@ -6,6 +6,34 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.24] — 2026-07-20
+
+### Added
+
+- **`wisp snapshot` / `wisp snapshot revert` — row-based Routing-map snapshots.**
+  Record what a fixed Family route or user Alias points at, and restore it on
+  revert. Command decisions live in `@wisp/core` (`runSnapshotCommand`, pure) with
+  a thin TUI fs+console edge; the store round-trips in `~/.wisp/config.json`.
+  `snapshot` refuses a row already held (the only safety rail); `revert` is
+  unconditional and prints the overwritten value.
+- **Tab completes the highlighted slash command.** A pure `completeSlash` beside
+  `suggestSlash`; Tab fills the command but never runs it, adding a trailing space
+  only when the command declares args.
+- **Drag-select copy now flashes "Copied to clipboard."** A feedback-row note
+  appears after a successful copy; the ~1.5 s clear is generation-gated so a newer
+  status (or a second copy) wins over a stale timer.
+
+### Changed
+
+- **The `/bridge` wisp-slot blurb is now a why-explanation.** Claude Code only
+  knows Claude names; the plugin bridges that gap. Install line and gold nudge
+  color unchanged.
+- **The `wisp-slot` plugin goes CLI-native (v1.3.0).** It drives
+  `wisp snapshot` / `wisp snapshot revert` instead of hand-written
+  `~/.claude/slot/lease-*.json` files; the SessionStart hook and statusline read
+  held rows from the Wisp snapshot store, and the badge marker becomes `!SNAP`.
+  Requires wisp-router 2.0.24+. The word "lease" retires from the plugin.
+
 ## [2.0.23] — 2026-07-19
 
 ### Fixed
