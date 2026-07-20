@@ -24,7 +24,7 @@
  *     which step back one level: sub-screen → its section → overview → palette.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
@@ -82,6 +82,14 @@ export { streamTestReply } from './testScreen';
 const bridgeLog = createRingLog();
 const bridge = createTuiBridge((line) => bridgeLog.push(line));
 
+// ----------------------------------------- Copied indicator ----------------------------------------- //
+
+// Feedback-row note after a successful drag-select copy (#129). Shell-owned transient state —
+// the ~1.5 s clear timer is gen-gated so a newer status (or a second copy) wins and the stale
+// timer cannot wipe it.
+const COPIED_NOTE = 'Copied to clipboard';
+const COPIED_CLEAR_MS = 1500;
+
 // ----------------------------------------- App ----------------------------------------- //
 
 export const App = () => {
@@ -89,12 +97,15 @@ export const App = () => {
   const [line, setLine] = useState('');       // live palette input, drives suggestions
   const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
-  const [status, setStatus] = useState('');
+  const [status, setStatusRaw] = useState('');
   const inputRef = useRef<InputRenderable>(null);
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
   const testSeq = useRef(0);   // same guard for /test — a late delta/finish can't touch a later screen
   const testAbort = useRef<AbortController | null>(null);
   const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
+  // statusGen invalidates a pending copied-note clear whenever anything else writes the row.
+  const statusGen = useRef(0);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renderer = useRenderer();
   // Live text columns for the hand-wrap helpers: terminal minus the outer padding (2+2) and the
   // PANEL border (1+1). Floored so a pathological width can't produce empty wraps.
@@ -103,17 +114,33 @@ export const App = () => {
   // Palette suggestion rows sit outside any PANEL — only the outer padding (2+2) eats width.
   const paletteCols = Math.max(termWidth - 4, 20);
 
+  // Every non-copy status write bumps the gen so a pending ~1.5 s clear can't clobber it.
+  const setStatus = useCallback((message: string) => {
+    statusGen.current += 1;
+    setStatusRaw(message);
+  }, []);
+
   // Drag-select → clipboard. opentui paints the highlight but never copies; finishSelection
   // emits "selection" with isDragging=false. Mid-drag events are ignored so SELECT_MOUSE
-  // scrubbing and text-select don't fight.
+  // scrubbing and text-select don't fight. A successful copy flashes COPIED_NOTE (#129).
   useEffect(() => {
     const onSelection = (selection: Selection) => {
       if (selection.isDragging) return;
       const text = selection.getSelectedText().replace(/\s+$/u, '');
-      if (text) copyText(renderer, text);
+      if (!text || !copyText(renderer, text)) return;
+      const gen = ++statusGen.current;
+      setStatusRaw(COPIED_NOTE);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => {
+        copyTimer.current = null;
+        if (statusGen.current === gen) setStatusRaw('');
+      }, COPIED_CLEAR_MS);
     };
     renderer.on('selection', onSelection);
-    return () => { renderer.off('selection', onSelection); };
+    return () => {
+      renderer.off('selection', onSelection);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
   }, [renderer]);
 
   // Bare process.exit skips opentui's teardown and strands the terminal in raw mode /
