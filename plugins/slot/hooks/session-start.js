@@ -2,14 +2,14 @@
 
 /*
 Depends on:
-  node:fs — existence checks + lease read
+  node:fs — existence checks + config read
   node:os — home dir resolution
   node:path — path joins
   node:child_process — one `wisp routing --json` snapshot spawn
 
 Data shapes:
   RoutingMap — { families: { [family]: { providerId, model } }, aliases: [...] }
-  lease.json — { slot, temporary, prior }
+  config.json — { routing: RoutingMap, snapshots: { [row]: { providerId, model } | null } }
 */
 
 const fs = require('node:fs');
@@ -63,25 +63,22 @@ lines.push(
   '  wisp models <provider>       model ids for one provider',
 );
 
-// Stale lease = a previous Slot rebind never restored — slot skill step 2 applies.
-// Per-family leases: ~/.claude/slot/lease-<family>.json (legacy lease.json also matched).
-const slotDir = path.join(os.homedir(), '.claude', 'slot');
-let leaseFiles = [];
+// Held snapshot = a previous Slot rebind never reverted — slot skill "Recovery" applies.
+// Held rows live in the Wisp snapshot store (~/.wisp/config.json `snapshots`), keyed by
+// family/alias name; a held Family snapshot means its route may still be rebound.
+let held = [];
 try {
-  leaseFiles = fs.readdirSync(slotDir).filter((f) => /^lease.*\.json$/.test(f));
+  const cfg = JSON.parse(fs.readFileSync(path.join(wispHome, 'config.json'), 'utf8'));
+  held = Object.entries(cfg.snapshots || {});
 } catch {}
-if (leaseFiles.length) {
+if (held.length) {
   lines.push(
     '',
-    `WARNING: ${leaseFiles.length} unrecovered Slot lease(s) in ${slotDir} — a family`,
-    'route may still be rebound. Recover each (slot skill, step 2) before rebinding that family:',
+    `WARNING: ${held.length} held Snapshot(s) in the Wisp store — a family route may`,
+    'still be rebound. Recover each (slot skill, "Recovery") before rebinding that family:',
   );
-  for (const f of leaseFiles) {
-    let lease = '';
-    try {
-      lease = ' — ' + JSON.stringify(JSON.parse(fs.readFileSync(path.join(slotDir, f), 'utf8')));
-    } catch {}
-    lines.push('  ' + f + lease);
+  for (const [row, entry] of held) {
+    lines.push(`  ${row} -> ${entry ? `${entry.providerId}/${entry.model}` : 'unset'}`);
   }
 }
 

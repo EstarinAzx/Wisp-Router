@@ -4,9 +4,9 @@ Claude Code plugin for sessions bridged through the [Wisp](https://github.com/Es
 
 ## What it ships
 
-- **`slot` skill** — the safe rebind→spawn→restore procedure for running a subagent on any Wisp Target through a temporarily rebound Claude family route. Supports **parallel Slots**: one family per distinct Target, up to 4 at once (`haiku`/`sonnet`/`opus`/`fable`), each with its own lease and independent restore.
-- **SessionStart hook** — a bridged session announces it: routing awareness ("family names resolve through the Wisp Routing map"), a live family-route snapshot, the headless CLI cheat sheet (`wisp routing` / `wisp providers` / `wisp models <provider>`), and a warning listing any unrecovered per-family Slot leases (`~/.claude/slot/lease-<family>.json`). Sessions not bridged through Wisp get nothing.
-- **Statusline badge** (opt-in wiring, see below) — `[WISP fable→gpt-5.6-terra]`: what the session's model *actually* resolves to right now, refreshed live so a mid-session Slot rebind is visible. `!LEASE` appears while a Slot lease is held (`!LEASE×N` for N concurrent leases). Falls back to `[WISP]` when resolution fails; absent when not bridged.
+- **`slot` skill** — the safe rebind→spawn→restore procedure for running a subagent on any Wisp Target through a temporarily rebound Claude family route. It drives `wisp snapshot` / `wisp snapshot revert` (wisp-router 2.0.24+): snapshot the family row, bind, spawn, hold, revert. Supports **parallel Slots**: one family per distinct Target, up to 4 at once (`haiku`/`sonnet`/`opus`/`fable`), each with its own snapshot and independent revert.
+- **SessionStart hook** — a bridged session announces it: routing awareness ("family names resolve through the Wisp Routing map"), a live family-route snapshot, the headless CLI cheat sheet (`wisp routing` / `wisp providers` / `wisp models <provider>`), and a warning listing any held row Snapshots in the Wisp store (`~/.wisp/config.json`). Sessions not bridged through Wisp get nothing.
+- **Statusline badge** (opt-in wiring, see below) — `[WISP fable→gpt-5.6-terra]`: what the session's model *actually* resolves to right now, refreshed live so a mid-session Slot rebind is visible. `!SNAP` appears while a Snapshot is held (`!SNAP×N` for N concurrent snapshots). Falls back to `[WISP]` when resolution fails; absent when not bridged.
 
 Bridged detection = `ANTHROPIC_BASE_URL` set **and** the Wisp home directory exists (`WISP_HOME` env override honored, default `~/.wisp`).
 
