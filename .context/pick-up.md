@@ -9,23 +9,28 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE): #139 quota-spike fix, released as v2.0.25.**
+**Last tasks (DONE): #139 quota-spike fix (v2.0.25) + #142 hotfix (v2.0.26).**
 
-The Anthropic-door system-fold cache bust is fixed, live-verified, merged
-(PR #140) and released — npm `wisp-router@2.0.25` live, release workflow
-green. Design: split at the client's own `cache_control` marker; see
-[[2026-07-20-system-split-at-client-marker]] and the code comments it points
-at. Kill-shot proof: a changed volatile reminder now costs ~87 write tokens
-instead of re-billing the whole ~77k prefix.
+- #139: Anthropic-door system-fold cache bust fixed, live-verified (kill-shot:
+  volatile change = 87 write tokens vs old full ~77k re-bill), PR #140. See
+  [[2026-07-20-system-split-at-client-marker]].
+- #142: same-day regression — the advisor reviewer inherited `systemSplit`
+  and lost its quarantine frame; fixed via pure `buildReviewerRequest`
+  (bridgeAnthropic.ts), released v2.0.26. npm live at 2.0.26.
 
-**Next task: none queued.** Ticket queue empty. Candidates:
+**Next task: #141 (queued, needs grill).** Advisor reviewer re-bills the whole
+transcript per invocation — split the serialized review transcript into
+per-turn blocks so call 2+ reads cache (openclaude learning; same physics as
+#139). Design NOT grilled — grill marker placement + deterministic
+RESULT_CAP truncation + whether to also surface reviewer usage to the client,
+before coding. Not urgent: advisor is opt-in, a handful of calls per session.
+
+Other candidates:
 
 1. Remind the user to reinstall if they haven't: stop `wisp.exe`, then
-   `npm i -g wisp-router` (installed binary must be 2.0.25 for the fix to
-   apply).
+   `npm i -g wisp-router` (fix only applies once installed binary ≥ 2.0.26).
 2. Idle chore: bump Node-20-deprecated actions in
    `.github/workflows/release.yml` (checkout@v4, upload-artifact@v4 warnings).
-3. Otherwise: new work starts at the funnel (`/preset init` / grill).
 
 **Landmines:**
 
