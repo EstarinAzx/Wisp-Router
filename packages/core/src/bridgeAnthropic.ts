@@ -25,6 +25,18 @@ const deltaUsage = (u: BridgeUsage | null) => u
   ? { input_tokens: u.input_tokens, cache_creation_input_tokens: u.cache_creation_input_tokens, cache_read_input_tokens: u.cache_read_input_tokens, output_tokens: u.output_tokens }
   : { output_tokens: 0 };
 
+// usage.iterations (#143) — the openclaude-style advisor cost channel: Claude Code filters entries typed
+// 'advisor_message' into /cost, and reads the LAST entry as the authoritative final context window
+// (finalContextTokensFromLastResponse), so the final base-pass usage MUST close the array. Emitted only when
+// both sides are real: no advisor entries → key absent (plain turns stay byte-identical to pre-#143), no
+// base usage → key absent (an advisor entry sitting last would hijack the window math).
+type AntUsageIteration = { type: 'advisor_message' | 'message'; model: string } & BridgeUsage;
+type AdvisorUsageEntry = { usage: BridgeUsage; model: string };
+const usageIterations = (advisor: AdvisorUsageEntry[], base: BridgeUsage | null, baseModel: string): { iterations?: AntUsageIteration[] } =>
+  advisor.length && base
+    ? { iterations: [...advisor.map((a) => ({ type: 'advisor_message' as const, model: a.model, ...a.usage })), { type: 'message' as const, model: baseModel, ...base }] }
+    : {};
+
 // ----------------------------- Inbound: Anthropic Messages request -> Wisp ----------------------------- //
 
 // The Anthropic request shapes we read. Structural (no SDK import) — only the fields the translator needs.
@@ -271,6 +283,7 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
   let openIndex = 0;             // the currently-open block's index
   let sawTool = false;           // any tool call emitted → stop_reason is tool_use, not end_turn
   let usage: BridgeUsage | null = null;   // latest real token usage — start()/finish() read it; null → zeros
+  const advisorUsages: AdvisorUsageEntry[] = [];   // reviewer sub-call usage (#143) → finish()'s usage.iterations
 
   // Close whatever block is open (no-op if none), returning its content_block_stop frame.
   const closeOpen = (): string => {
@@ -301,6 +314,8 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
       // Usage carries no wire content — record it (the buffered buildAnthropicSse path routes usage here;
       // the live door uses setUsage) so the closing message_delta reports real counts. No frame emitted.
       if (ev.type === 'usage') { usage = ev.usage; return ''; }
+      // Advisor sub-call usage (#143) — same no-content rule; collected for finish()'s usage.iterations.
+      if (ev.type === 'advisor_usage') { advisorUsages.push({ usage: ev.usage, model: ev.model }); return ''; }
       // Thinking passthrough: thinking_start opens a block (the OAuth wire sends EMPTY thinking blocks —
       // start straight to signature — so the start must open on its own); thinking deltas stream into it
       // (opening one themselves if no start arrived); the signature_delta is the last delta and CLOSES the
@@ -377,7 +392,7 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
     // else end_turn) + message_stop.
     finish: (): string =>
       closeOpen() +
-      frame('message_delta', { type: 'message_delta', delta: { stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: deltaUsage(usage) }) +
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { ...deltaUsage(usage), ...usageIterations(advisorUsages, usage, meta.model) } }) +
       frame('message_stop', { type: 'message_stop' }),
   };
 };
@@ -414,7 +429,7 @@ export type AnthropicMessageResponse = {
   content: AntReplyBlock[];
   stop_reason: 'end_turn' | 'tool_use';
   stop_sequence: null;
-  usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+  usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; iterations?: AntUsageIteration[] };
 };
 
 // Reduce a whole ordered Wisp stream to one non-streaming Messages object — the buffered counterpart of
@@ -425,8 +440,10 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
   const content: AntReplyBlock[] = [];
   let sawTool = false;
   let usage: BridgeUsage | null = null;
+  const advisorUsages: AdvisorUsageEntry[] = [];   // reviewer sub-call usage (#143) → the reply's usage.iterations
   for (const ev of events) {
     if (ev.type === 'usage') { usage = ev.usage; continue; }  // real counts → the reply usage block, not content
+    if (ev.type === 'advisor_usage') { advisorUsages.push({ usage: ev.usage, model: ev.model }); continue; }
     if (ev.type === 'text') {
       const last = content[content.length - 1];
       if (last && last.type === 'text') last.text += ev.text;
@@ -468,7 +485,7 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
     // Real counts when the backend reported them (Anthropic upstream), else the numeric-zero fallback (a
     // non-Anthropic provider through this door emits no usage). The field must exist and be numeric:
     // Claude Code's /model validation reads usage.input_tokens, and a missing usage is the crash.
-    usage: usage ?? { input_tokens: 0, output_tokens: 0 },
+    usage: { ...(usage ?? { input_tokens: 0, output_tokens: 0 }), ...usageIterations(advisorUsages, usage, meta.model) },
   };
 };
 
@@ -567,10 +584,14 @@ export const buildReviewerRequest = (parsed: BridgeAnthropicRequest, turns: Norm
 // Pure: the impure edges (which backend, how the reviewer runs) are injected, so the loop control is
 // unit-tested without a live socket. maxConsults bounds a Target that calls advisor every pass.
 // ponytail: default cap 4 consults/turn — bump only if a real turn legitimately needs more review rounds.
+// The reviewer's verdict: the advice text, plus (when the sub-call's backend reported counts) its real
+// usage + the resolved Target model (#143). A bare string is the same verdict without usage — the pre-#143
+// shape, still valid so simple reviewers/fakes stay one-liners.
+export type ReviewerVerdict = { text: string; usage?: BridgeUsage; model?: string };
 export type AdvisorLoopParams = {
   turns: NormalizedTurn[];
   basePass: (turns: NormalizedTurn[]) => AsyncIterable<BridgeStreamEvent>;
-  reviewer: (turns: NormalizedTurn[], argsJson: string) => Promise<string>;
+  reviewer: (turns: NormalizedTurn[], argsJson: string) => Promise<string | ReviewerVerdict>;
   maxConsults?: number;
 };
 export const runAdvisorLoop = async function* (params: AdvisorLoopParams): AsyncGenerator<BridgeStreamEvent> {
@@ -594,11 +615,16 @@ export const runAdvisorLoop = async function* (params: AdvisorLoopParams): Async
     yield { type: 'server_tool_use', call: consult };
     let advice = '';
     let failed = false;
-    try { advice = await params.reviewer(turns, consult.argsJson); }
+    let verdict: ReviewerVerdict | undefined;
+    try { const v = await params.reviewer(turns, consult.argsJson); verdict = typeof v === 'string' ? { text: v } : v; advice = verdict.text; }
     catch (err) { failed = true; advice = err instanceof Error ? err.message : String(err); }
     yield failed
       ? { type: 'advisor_error', toolUseId: consult.id, errorCode: advice }
       : { type: 'advisor_result', toolUseId: consult.id, text: advice };
+    // The sub-call's real cost (#143) rides as its own event after the result — only when counts are real
+    // (no usage → no event, the entry is omitted rather than faked as zeros), and never via the 'usage'
+    // channel, which stays the base pass's alone.
+    if (!failed && verdict?.usage && verdict.model) yield { type: 'advisor_usage', usage: verdict.usage, model: verdict.model };
     consults++;
 
     // Feed the exchange back so the Target resumes with the advice (or the error) in context.

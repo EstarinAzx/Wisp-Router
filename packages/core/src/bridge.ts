@@ -136,7 +136,11 @@ export type BridgeStreamEvent =
   // so no door's finish/stop_reason logic may count them as one.
   | { type: 'server_tool_use'; call: AssembledToolCall }
   | { type: 'advisor_result'; toolUseId: string; text: string }
-  | { type: 'advisor_error'; toolUseId: string; errorCode: string };
+  | { type: 'advisor_error'; toolUseId: string; errorCode: string }
+  // The reviewer sub-call's real token usage + resolved Target model (#143). Carries no wire content — the
+  // Anthropic door folds it into usage.iterations on its closing frames; it never joins the 'usage' channel
+  // (top-level usage stays the base pass only, which is what the #111 cache-health guard reads).
+  | { type: 'advisor_usage'; usage: BridgeUsage; model: string };
 
 // The terminal finish_reason: 'tool_calls' when the turn emitted any tool call (the client must run them),
 // else 'stop'. Mid-stream chunks carry finish_reason null until the terminal chunk.

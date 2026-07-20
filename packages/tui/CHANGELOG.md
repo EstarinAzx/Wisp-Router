@@ -6,6 +6,23 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.28] — 2026-07-21
+
+### Added
+
+- **Advisor reviewer cost is now visible to Claude Code (#143).** The door runs
+  the advisor reviewer itself, but its token usage was discarded — `/cost` and
+  session totals under-reported every bridged session that consulted the
+  advisor. The reviewer sub-call's real usage now rides out on the closing
+  usage frame as openclaude-style `usage.iterations` entries
+  (`advisor_message` with the resolved Target model + token counts, then the
+  final base pass as the last entry — the slot Claude Code reads as the
+  authoritative context window). Live-verified: Claude Code folds the advisor
+  tokens into `modelUsage` and `total_cost_usd`. Entries are honest: a
+  reviewer Target that reports no usage is omitted rather than logged as
+  zeros, plain turns emit no `iterations` at all, and top-level usage (what
+  the #111 cache-health guard reads) stays the base pass's alone.
+
 ## [2.0.27] — 2026-07-21
 
 ### Changed
