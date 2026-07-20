@@ -1,13 +1,14 @@
 // ---------------- slash.test.ts — slash-command parsing + palette suggestion ---------------- //
 
 import { describe, it, expect } from 'vitest';
-import { parseSlash, suggestSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
+import { parseSlash, suggestSlash, completeSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
 
 // A fixed list so filter tests never churn when the real palette grows.
 const cmds: SlashCommandDef[] = [
   { name: 'providers', description: 'pick provider' },
-  { name: 'key', description: 'set key' },
-  { name: 'model', description: 'pick model' },
+  { name: 'key', args: '[provider]', description: 'set key' },
+  { name: 'model', args: '[provider]', description: 'pick model' },
+  { name: 'test', args: '<provider|alias>', description: 'fire a test' },
 ];
 
 describe('parseSlash — input string → command + args', () => {
@@ -132,5 +133,41 @@ describe('SLASH_COMMANDS — the real palette', () => {
     // /model must come FIRST: the palette's Enter fires the top row, so registry order is behavior.
     expect(suggestSlash('/mode').map((c) => c.name)).toEqual(expect.arrayContaining(['model', 'modelids']));
     expect(suggestSlash('/mode')[0]?.name).toBe('model');
+  });
+});
+
+// #128: Tab fills the highlighted suggestion into the input — never runs it. Trailing space only
+// when the command declares args (so the cursor lands in the args position). Pure beside suggestSlash.
+describe('completeSlash — Tab fill of the highlighted suggestion (#128)', () => {
+  it('fills a no-args command with no trailing space', () => {
+    expect(completeSlash('/pr', 0, cmds)).toBe('/providers');
+  });
+
+  it('fills an args command with a trailing space (optional or required)', () => {
+    expect(completeSlash('/k', 0, cmds)).toBe('/key ');
+    expect(completeSlash('/te', 0, cmds)).toBe('/test ');
+  });
+
+  it('honors the highlight index, not just the first match', () => {
+    // lone '/' yields all four; highlight 2 → model (args → trailing space)
+    expect(completeSlash('/', 2, cmds)).toBe('/model ');
+    expect(completeSlash('/', 0, cmds)).toBe('/providers');
+  });
+  it('is a no-op when the input already equals the completion', () => {
+    // already-complete prefix: '/providers' with highlight 0 → same string, still returned so the
+    // shell can set it idempotently; never undefined (undefined = "nothing to complete").
+    expect(completeSlash('/providers', 0, cmds)).toBe('/providers');
+    expect(completeSlash('/key', 0, cmds)).toBe('/key ');
+  });
+
+  it('answers undefined for an empty suggestion list (Tab is inert)', () => {
+    expect(completeSlash('hello', 0, cmds)).toBeUndefined();
+    expect(completeSlash('/zzz', 0, cmds)).toBeUndefined();
+    expect(completeSlash('/key ', 0, cmds)).toBeUndefined(); // args begun → list closed
+  });
+
+  it('clamps a stale highlight past the list end', () => {
+    // typing may have shrunk the list under a stale selIdx — same rule as the shell's highlight clamp
+    expect(completeSlash('/pr', 99, cmds)).toBe('/providers');
   });
 });

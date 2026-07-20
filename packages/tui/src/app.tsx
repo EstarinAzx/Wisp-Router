@@ -28,7 +28,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
-  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, resolveModel,
+  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
@@ -416,17 +416,29 @@ export const App = () => {
     runCommand(`/${pick.name}`);
   };
 
+  // Palette suggestion + highlight live above the keyboard handler so Tab can reuse the clamped
+  // value (selIdx can outlive a shrinking list; onInput resets it).
+  const suggestions = mode.kind === 'input' ? suggestSlash(line) : [];
+  const highlight = Math.min(selIdx, Math.max(suggestions.length - 1, 0));
+
   // ----- global keys: Esc backs out of any screen (exits from the palette); key-entry is hand-read
   // here because <input> has no masked variant — chars land in `secret`, never on screen. -----
   useKeyboard((key) => {
     // Up/Down steer the palette highlight while the suggestion list is open (wraps at the ends).
     if (mode.kind === 'input' && (key.name === 'up' || key.name === 'down')) {
-      const n = suggestSlash(line).length;
+      const n = suggestions.length;
       if (n === 0) return;
       setSelIdx((i) => {
         const cur = Math.min(i, n - 1); // typing may have shrunk the list under a stale index
         return key.name === 'up' ? (cur + n - 1) % n : (cur + 1) % n;
       });
+      return;
+    }
+    // Tab fills the highlighted suggestion into the input (#128) — never runs it. No open list → inert.
+    // The value setter re-emits onInput, so `line` follows without an extra setLine here.
+    if (mode.kind === 'input' && key.name === 'tab') {
+      const filled = completeSlash(line, highlight);
+      if (filled !== undefined && inputRef.current) inputRef.current.value = filled;
       return;
     }
     if (key.name === 'escape') {
@@ -471,10 +483,6 @@ export const App = () => {
     const text = new TextDecoder().decode(event.bytes).replace(/\s/g, '');
     if (text) setSecret((s) => s + text);
   });
-
-  const suggestions = mode.kind === 'input' ? suggestSlash(line) : [];
-  // selIdx can outlive a shrinking list (typing filters it) — clamp at read; onInput resets it
-  const highlight = Math.min(selIdx, Math.max(suggestions.length - 1, 0));
 
   return (
     <box flexDirection="column" padding={2}>
