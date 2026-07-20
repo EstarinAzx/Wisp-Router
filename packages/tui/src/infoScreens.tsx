@@ -53,11 +53,10 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
       <text wrapMode="none" fg={DIM}>{''.padEnd(16)}launches claude wired to this Bridge</text>
     </box>
 
-    {/* the plugin makes bridged sessions self-aware (badge + Slot skill) — nudge here,
-        where Claude Code gets wired, so users learn it exists. Hand-wrapped like the
-        advisor warning below. */}
+    {/* why the plugin exists: Claude only knows Claude names; the plugin bridges that gap.
+        Placement + gold nudge + install line stay; body is the why-explanation (#130). */}
     <box marginTop={1} flexDirection="column">
-      {wrapWords('Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: /plugin marketplace add EstarinAzx/Wisp-Router', cols - 2)
+      {wrapWords('Claude Code only knows Claude model names. The wisp-slot plugin bridges that gap — it makes the session aware that its family names resolve through Wisp\'s Routing map (session announcement, [WISP] statusline badge, Slot skill). Install: /plugin marketplace add EstarinAzx/Wisp-Router', cols - 2)
         .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={PLUGIN_NUDGE}>{l}</text>)}
     </box>
 
