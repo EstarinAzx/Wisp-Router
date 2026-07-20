@@ -53,3 +53,17 @@ export const suggestSlash = (input: string, commands: SlashCommandDef[] = SLASH_
   const prefix = input.slice(1).toLowerCase();
   return commands.filter((c) => c.name.startsWith(prefix));
 };
+
+// Tab fill of the highlighted suggestion (#128). Returns the string to put in the input, or
+// undefined when there is nothing to complete (empty list → Tab is inert). Trailing space only
+// when the command declares args, so the cursor lands in the args position. Never runs anything.
+export const completeSlash = (
+  input: string,
+  highlight: number,
+  commands: SlashCommandDef[] = SLASH_COMMANDS,
+): string | undefined => {
+  const open = suggestSlash(input, commands);
+  if (open.length === 0) return undefined;
+  const pick = open[Math.min(Math.max(highlight, 0), open.length - 1)];
+  return `/${pick.name}${pick.args ? ' ' : ''}`;
+};
