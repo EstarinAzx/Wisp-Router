@@ -6,6 +6,19 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.27] — 2026-07-21
+
+### Changed
+
+- **Advisor reviewer transcript is now prompt-cacheable (#141).** The reviewer
+  sub-call used to flatten the whole conversation into one text block that grew
+  every invocation — zero cache reuse, full re-bill per advisor call. The
+  transcript now rides as one text block per serialized turn (`textBlocks` on
+  the normalized turn; Anthropic body builder emits per-entry blocks, the
+  existing breakpoint walk marks them), so successive advisor calls read the
+  shared prefix from cache. Non-Anthropic advisor Targets are unaffected (they
+  read the joined text, unchanged).
+
 ## [2.0.26] — 2026-07-20
 
 ### Fixed

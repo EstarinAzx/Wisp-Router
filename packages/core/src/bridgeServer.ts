@@ -507,7 +507,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // images and documents must ride along (the Codex + keyed paths already forward images) — omitting
       // images here was the door's vision hole: inline attaches never reached the Anthropic backend.
       // rawContent is the thinking-passthrough sidecar — Anthropic-only, the other arms leave it unread.
-      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults, rawContent: t.rawContent }));
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, textBlocks: t.textBlocks, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults, rawContent: t.rawContent }));
       // #139: with a recorded split, only the STABLE side rides as the system message (it takes the cache
       // marker); the volatile tail threads separately and lands after the breakpoint, so a mid-session
       // <system-reminder> append re-bills itself, not the whole tools+system prefix. No split → full system.

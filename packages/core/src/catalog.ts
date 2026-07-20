@@ -346,6 +346,10 @@ export type NormalizedTurn = {
   // isError carries Anthropic's tool_result.is_error flag (a failed tool call) through the Anthropic door;
   // the OpenAI door has no equivalent field and leaves it unread.
   toolResults: { callId: string; content: string; isError?: boolean }[];
+  // #141: pre-split text blocks for the Anthropic body builder (one text block per entry — the advisor
+  // reviewer's per-turn transcript, cacheable prefix). text stays the full join; every other backend
+  // leaves this field unread.
+  textBlocks?: string[];
   images?: { mimeType: string; dataBase64: string }[];
   // documents carries base64 PDF blocks through the Anthropic door (the only backend that accepts them);
   // the other doors leave the field unread, so a PDF routed to Codex/xAI is still dropped.

@@ -1019,9 +1019,40 @@ describe('buildReviewerRequest', () => {
     expect(out.systemSplit).toBeUndefined();
     expect(out.tools).toEqual([]);
     expect(out.advisor).toBeUndefined();
-    expect(out.turns).toEqual([{
+    expect(out.turns).toEqual([expect.objectContaining({
       role: 'user', text: `Conversation to review:\n\n${serializeForReview(parsed.turns)}`, toolCalls: [], toolResults: [],
-    }]);
+    })]);
+  });
+
+  // #141: the reviewer transcript rides as per-turn text blocks so successive advisor calls share a
+  // byte-stable prefix — the old single grown block re-billed the whole transcript every invocation.
+  // `text` stays the full join: a non-Anthropic advisor Target reads only turn.text.
+  it('splits the review transcript into per-turn blocks with a byte-stable prefix', () => {
+    const t = (role: 'user' | 'assistant', text: string): NormalizedTurn => ({ role, text, toolCalls: [], toolResults: [] });
+    const base = { model: 'm', stream: true, system: '', turns: [], tools: [] } as any;
+    const short = buildReviewerRequest(base, [t('user', 'fix bug'), t('assistant', 'reading')]);
+    const grown = buildReviewerRequest(base, [t('user', 'fix bug'), t('assistant', 'reading'), t('user', 'and tests'), t('assistant', 'ok')]);
+    const sb = short.turns[0].textBlocks!;
+    const gb = grown.turns[0].textBlocks!;
+    expect(sb[0]).toBe('Conversation to review:');
+    expect(sb.length).toBe(3);
+    expect(gb.length).toBe(5);
+    expect(gb.slice(0, 3)).toEqual(sb); // the grown call's leading blocks are identical — the cacheable prefix
+    expect(sb.join('\n\n')).toBe(short.turns[0].text); // invariant: blocks join back to the flat text
+    expect(gb.join('\n\n')).toBe(grown.turns[0].text);
+  });
+
+  // Empty-serialization turns (e.g. a bare tool-shuffle with no text) must not create empty blocks — an
+  // empty text block is never emitted by the body builder, and a skipped turn must not shift later blocks.
+  it('drops empty per-turn serializations from textBlocks', () => {
+    const turns: NormalizedTurn[] = [
+      { role: 'user', text: 'hi', toolCalls: [], toolResults: [] },
+      { role: 'assistant', text: '', toolCalls: [], toolResults: [] },
+      { role: 'user', text: 'still there?', toolCalls: [], toolResults: [] },
+    ];
+    const out = buildReviewerRequest({ model: 'm', stream: true, system: '', turns: [], tools: [] } as any, turns);
+    expect(out.turns[0].textBlocks!.every((b) => b.length > 0)).toBe(true);
+    expect(out.turns[0].textBlocks!.length).toBe(3); // header + 2 non-empty turns
   });
 });
 

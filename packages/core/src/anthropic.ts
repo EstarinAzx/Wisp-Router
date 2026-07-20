@@ -115,6 +115,10 @@ export type AnthropicMessage = {
   toolResults?: { callId: string; content: string; isError?: boolean }[];
   images?: { mimeType: string; dataBase64: string }[];
   documents?: { mimeType: string; dataBase64: string }[];
+  // #141: pre-split text blocks (the advisor reviewer's per-turn transcript). When present on a user turn,
+  // the body builder emits one text block per entry instead of a single joined block — a byte-stable prefix
+  // the cache can reuse across reviewer calls. content stays the full join for every other consumer.
+  textBlocks?: string[];
   // The Anthropic door's byte-for-byte sidecar (see NormalizedTurn.rawContent): the original content block
   // array of a thinking-bearing assistant turn, replayed verbatim by the body builder when thinking is on.
   rawContent?: unknown[];
@@ -227,6 +231,10 @@ export const buildAnthropicMessagesBody = (args: {
     }
     const images = m.images ?? [];
     const documents = m.documents ?? [];
+    // #141: a textBlocks turn (the advisor reviewer transcript) expands to one text block per entry, so
+    // the marker walk below gives it intermediate breakpoints and a byte-stable cacheable prefix. Only the
+    // reviewer builds these turns; they carry no tool results or media.
+    if (m.textBlocks?.length) return { role: 'user' as const, content: m.textBlocks.filter(Boolean).map((text) => ({ type: 'text' as const, text })) };
     // A plain text turn (no tool results, no images, no documents) stays a bare string (the #29 shape).
     if (!m.toolResults?.length && !images.length && !documents.length) return { role: 'user' as const, content: m.content };
     const blocks: unknown[] = [];

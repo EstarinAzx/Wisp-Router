@@ -517,23 +517,23 @@ export const reviewerSystem = (): string =>
 // happened, not whole file dumps.
 // ponytail: RESULT_CAP is a readability/cost ceiling, not correctness — raise it if reviews miss detail.
 const RESULT_CAP = 2000;
+// One turn's serialization — pure and deterministic (same turn → same bytes), which is what makes the
+// per-turn blocks in buildReviewerRequest a cache-stable prefix across reviewer invocations (#141).
+const serializeTurn = (t: NormalizedTurn): string => {
+  const who = t.role === 'assistant' ? 'Assistant' : 'User';
+  const parts: string[] = [];
+  if (t.text) parts.push(t.text);
+  for (const c of t.toolCalls ?? []) parts.push(`[called ${c.name}]`);
+  for (const r of t.toolResults ?? []) {
+    const body = r.content.length > RESULT_CAP ? `${r.content.slice(0, RESULT_CAP)}… (truncated)` : r.content;
+    parts.push(`[result${r.isError ? ' (error)' : ''}: ${body}]`);
+  }
+  if (t.images?.length) parts.push(`[${t.images.length} image(s) omitted]`);
+  const text = parts.join('\n').trim();
+  return text ? `${who}: ${text}` : '';
+};
 export const serializeForReview = (turns: NormalizedTurn[]): string =>
-  turns
-    .map((t) => {
-      const who = t.role === 'assistant' ? 'Assistant' : 'User';
-      const parts: string[] = [];
-      if (t.text) parts.push(t.text);
-      for (const c of t.toolCalls ?? []) parts.push(`[called ${c.name}]`);
-      for (const r of t.toolResults ?? []) {
-        const body = r.content.length > RESULT_CAP ? `${r.content.slice(0, RESULT_CAP)}… (truncated)` : r.content;
-        parts.push(`[result${r.isError ? ' (error)' : ''}: ${body}]`);
-      }
-      if (t.images?.length) parts.push(`[${t.images.length} image(s) omitted]`);
-      const text = parts.join('\n').trim();
-      return text ? `${who}: ${text}` : '';
-    })
-    .filter(Boolean)
-    .join('\n\n');
+  turns.map(serializeTurn).filter(Boolean).join('\n\n');
 
 // Build the reviewer sub-call's request — the QUARANTINED shape, constructed explicitly rather than by
 // spreading the base request. #142 (#139 regression): a spread copied systemSplit along, and the Anthropic
@@ -541,14 +541,21 @@ export const serializeForReview = (turns: NormalizedTurn[]): string =>
 // meta-instructions included) plus the volatile reminder tail instead of the reviewerSystem() frame. Every
 // prompt-shaping field is therefore set here on purpose: quarantine system, no split, no tools, no advisor,
 // and the whole conversation flattened into ONE plain user turn (see serializeForReview).
-export const buildReviewerRequest = (parsed: BridgeAnthropicRequest, turns: NormalizedTurn[]): BridgeAnthropicRequest => ({
-  ...parsed,
-  system: reviewerSystem(),
-  systemSplit: undefined,
-  turns: [{ role: 'user', text: `Conversation to review:\n\n${serializeForReview(turns)}`, toolCalls: [], toolResults: [] }],
-  tools: [],
-  advisor: undefined,
-});
+export const buildReviewerRequest = (parsed: BridgeAnthropicRequest, turns: NormalizedTurn[]): BridgeAnthropicRequest => {
+  // #141: per-turn blocks. Each entry is one turn's deterministic serialization, so the leading entries are
+  // byte-identical across successive reviewer calls and the Anthropic body builder's marker walk turns them
+  // into a cacheable prefix — the old single joined block grew every call and never matched the cache.
+  // textBlocks.join('\n\n') === text by construction; non-Anthropic advisor Targets read only text.
+  const textBlocks = ['Conversation to review:', ...turns.map(serializeTurn).filter(Boolean)];
+  return {
+    ...parsed,
+    system: reviewerSystem(),
+    systemSplit: undefined,
+    turns: [{ role: 'user', text: textBlocks.join('\n\n'), textBlocks, toolCalls: [], toolResults: [] }],
+    tools: [],
+    advisor: undefined,
+  };
+};
 
 // The agentic loop that lets the door play the advisor server role. A base pass streams the Target's reply;
 // when the Target calls `advisor`, the door announces it (server_tool_use), runs the injected reviewer over

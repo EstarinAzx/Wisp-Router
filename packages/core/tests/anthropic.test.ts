@@ -263,6 +263,24 @@ describe('buildAnthropicMessagesBody', () => {
       expect(blocks[blocks.length - 1]).toEqual({ type: 'text', text: 'thanks', cache_control: { type: 'ephemeral' } });
     });
 
+    // #141: a turn carrying textBlocks (the advisor reviewer transcript) expands to one text block per
+    // entry — the existing marker walk then gives it intermediate breakpoints, so successive reviewer
+    // calls share a byte-stable cached prefix instead of re-billing one giant grown block.
+    it('expands a textBlocks turn to one block per entry and keeps markers within the cap', () => {
+      const entries = Array.from({ length: 40 }, (_, i) => `turn ${i}`);
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', messages: [
+        { role: 'user', content: entries.join('\n\n'), textBlocks: entries },
+      ] }) as any;
+      const blocks = body.messages[0].content as any[];
+      expect(blocks.length).toBe(40);
+      expect(blocks[0]).toEqual(expect.objectContaining({ type: 'text', text: 'turn 0' }));
+      const marked = blocks.flatMap((b, i) => (b.cache_control ? [i] : []));
+      expect(blocks[blocks.length - 1].cache_control).toBeDefined();
+      for (let i = 1; i < marked.length; i++) expect(marked[i] - marked[i - 1]).toBeLessThanOrEqual(20);
+      const systemMarks = body.system.filter((b: any) => b.cache_control).length;
+      expect(systemMarks + marked.length).toBeLessThanOrEqual(4);
+    });
+
     // A single heavy parallel-tool turn collapses into one message of many blocks. With only the final
     // block marked, the next turn's lookback overshoots the ~20-block window and re-bills the prefix.
     // Intermediate markers keep every gap ≤ the window, and total breakpoints stay within the 4/request cap.
