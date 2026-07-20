@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-07-19
+updated: 2026-07-20
 tags: [context, decisions]
 ---
 
@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-20-row-based-routing-snapshots-cli]] — 2.0.24 `wisp snapshot`/`revert`: row-based Routing-map Snapshots owned by the CLI (refuse-if-held, revert prints-what-it-overwrote); Slot skill goes CLI-native, lease files retire (spec #126)
 - [[2026-07-19-advisor-cache-control-mutation-and-reviewer-frame]] — **SHIPPED 2.0.22, live-verified:** `buildAnthropicMessagesBody` must replay a stripped *copy* of `rawContent` (never mutate the caller's array — advisor multi-build stacked markers past Anthropic's cap of 4 → "Found 5"); reviewer gets quarantined `reviewerSystem()` + flattened `serializeForReview()` (no base system, no raw turns) so it reviews instead of echoing
 - [[2026-07-19-wisp-native-advisor-via-door-server-tool]] — **SHIPPED 2.0.21, live-verified:** door plays the advisor server-tool role — forwards an `advisor` tool to the base Target, runs a separate reviewer pass when called (picker model via Routing map, any Target advises any other), streams `server_tool_use`+`advisor_tool_result` back, resumes the base turn; Stage 0 (from the real binary) = Flavor A, a wisp session is `firstParty`; launcher+snippets set `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL=1` (claude-wisp-* has no advisor_rank → tool otherwise never sent); stale "endpoint-gated" warning removed
 - [[2026-07-18-anthropic-cache-ttl-is-fixed-per-path-not-turn-count]] — cache TTL fixed per request PATH (`anthropicStream`→1h, `anthropicInquire`→5m, haiku always 5m), never from `convo.length`; supersedes the TTL half of #111, shipped 2.0.20; the turn-count proxy flipped 5m→1h mid-session and busted the prefix cache

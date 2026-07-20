@@ -1,59 +1,74 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-19
+updated: 2026-07-20
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-19 by Opus 4.8 (1M) (wrap-up)._
-_At commit: e31bcfc (release 2.0.23 tagged + pushed)._
+_Last updated: 2026-07-20 by Fable 5 (wrap-up)._
+_At commit: e31bcfc + this wrap-up commit (2.0.24 planning, no code yet)._
 
 ## Current focus
 
-**2.0.23 shipped** — TUI polish on `/show-log` + `/bridge` + drag-select copy.
-Tag `v2.0.23` is on `main` (`e31bcfc`); `release.yml` was kicked by the push.
-2.0.22 was already tagged/pushed earlier the same day (advisor fix).
+**2.0.24 planned, not started.** v2.0.23 confirmed landed (release green, npm
+at 2.0.23). The whole .24 scope went through the init funnel: grill →
+happy-path MVD → spec **#126** → six slices **#127–#132**, all published
+`ready-for-agent` on GitHub.
 
 ## State
 
-- **In flight:** watch `release.yml` for `v2.0.23` go green → npm `wisp-router@2.0.23` + GitHub assets.
+- **In flight:** nothing — implementation belongs to the ticket loop.
 - **Done this session:**
-  1. Planned + built TUI 2.0.23 (user eyeball-passed):
-     - `/show-log` hand-wraps long lines (`wrapWords`) so model ids no longer clip.
-     - `[bridge] route …` lines render in sky `LOG_ROUTE` (`#38bdf8`); other traffic stays dim.
-     - `/bridge` wisp-slot recommend blurb is gold `PLUGIN_NUDGE` (`#D59D24`).
-     - Drag-select copies via OSC 52, `clip.exe` fallback on Windows (`clipboard.ts`).
-  2. Tests: `logScreen.test.ts` (route classifier + wrapWords); tsc clean; 32-screen span baseline recaptured.
-  3. Tagged + pushed `v2.0.23` (and the commit) to origin.
+  1. Grill settled the design (see [[2026-07-20-row-based-routing-snapshots-cli]]
+     and spec #126): row-based `wisp snapshot`/`revert`, aliases included,
+     verb `revert`, refuse-if-held, CLI-only, store in `~/.wisp` config;
+     Tab-complete fills-never-runs; copied indicator = feedback-row note
+     (option a), ~1.5 s; `/bridge` blurb becomes a why-explanation
+     (wording approved, in #130 + spec).
+  2. **Snapshot** term added to `CONTEXT.md`; two MVD spines appended to
+     [[happy-path]].
+  3. Published: spec #126; slices #127 (snapshot e2e) · #128 (tab-complete) ·
+     #129 (copied indicator) · #130 (blurb) · #131 (Slot skill CLI-native,
+     blocked by #127) · #132 (release 2.0.24, blocked by all).
+  4. Seeded the relay chain state at `.claude/relay/ticket-loop.md` — one
+     issue per leg, dynamic pacing (N=1), `/preset ticket-loop` body.
 - **Blocked:** none.
 
 ## Pick up here
 
-1. Confirm `release.yml` for `v2.0.23` is green; npm `wisp-router@2.0.23` published.
-2. Optional: `npm i -g wisp-router@2.0.23` — **stop any running `wisp.exe` first** or the npm unlink fails (file locked).
-3. No code pending after the release lands. Next work is a fresh task.
+Start the chain: `/relay N=1 /preset ticket-loop` — each leg rehydrates from
+`.context/` at boot (relay step 3), works ONE frontier ticket, relays fresh.
+Frontier now: #127, #128, #129, #130 (all unblocked; #127 first — #131 waits
+on it). Or work tickets by hand in that order.
 
 ## Skills for next session
 
-- `/preset ci-babysit` if the release run is still pending when you open.
-- Otherwise drive normal.
+- `/relay N=1 /preset ticket-loop` — the intended driver for #127–#132.
+- `/preset ci-babysit` once #132's tag is pushed.
 
 ## Open questions
 
-- None for 2.0.23. Clipboard is OSC52-first + win `clip.exe`; other platforms with no OSC52 get a silent no-op until someone needs a non-Windows fallback.
+- None. Design settled in spec #126; seams follow the routing-CLI precedent
+  (pure core decision fn + thin TUI edge).
 
 ## Recent context
 
-- Screenshot that drove wrap: `/show-log` clipped mid-`model=cla…` at the panel edge — `wrapMode="none"` with no hand-wrap. Same `wrapWords` pattern BridgeScreen already used for blurbs.
-- "Model swap" colour = **route-only** (`line.startsWith('[bridge] route ')`). Not `messages` / advisor notes.
-- opentui paints selection highlights but never auto-copies — shell listens for finished `"selection"` events (`!isDragging`).
-- Version banner alone still cannot tell installed `wisp.exe` from `bun run dev` without a package bump — stop the old exe before live-testing a new binary.
+- When **#131** lands (Slot skill rewrite): sync the ecosystem-kb vault page
+  for the slot lineup in the same session (standing rule — skill behavior
+  change is an ecosystem change).
+- Snapshot has NO compare-and-set: revert writes unconditionally and prints
+  the overwritten value; the skill pre-reads `wisp routing` if it wants a
+  guard.
+- Copied-indicator trap agreed in grill: the ~1.5 s clear timer must not wipe
+  a *newer* status message.
+- Release contract unchanged: tag `v2.0.24` must equal `packages/tui/package.json`
+  version; stop any running `wisp.exe` before a global npm reinstall.
 
 ## Related
 
 - [[overview]]
 - [[pick-up]]
+- [[happy-path]]
 - [[decisions]]
-- [[gotchas]]

@@ -203,6 +203,17 @@ per-request, so an early restore silently re-routes a live agent). _Avoid_:
 treating a Slot as a new row kind — it is an ordinary Family route, used
 differently.
 
+**Snapshot** (routing snapshot):
+The **Routing map**'s remembered prior state, kept by Wisp itself so a
+temporary rebind can be undone by command rather than by hand. Taking a
+Snapshot records what a row (a **Family route** or **Alias**) points at right
+now — including "unset"; **reverting** writes that recorded state back and
+clears the entry. Row-based: each row snapshots and reverts independently, and
+a row already snapshotted refuses a second Snapshot until reverted. Rows added
+*after* a Snapshot are untouched by revert. _Avoid_: calling it a lease (the
+retired hand-written file convention it replaces), or expecting revert-all to
+delete rows the Snapshot never saw.
+
 **Target**:
 What a **Routing map** row points at: a **Provider** plus a pinned model. The
 pinned model overrides that Provider's panel-selected model for requests through

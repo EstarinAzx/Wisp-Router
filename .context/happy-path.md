@@ -1,7 +1,7 @@
 ---
 type: happy-path
 project: wisp
-updated: 2026-07-16
+updated: 2026-07-20
 tags: [happy-path, mvd]
 ---
 # Happy Paths (MVD)
@@ -98,3 +98,35 @@ fresh on every request (ADR-0002), which is what makes the flip take effect
 mid-session with zero restarts — and also why restore waits for session end:
 restoring while the agent still runs would re-route its next turn. Missing
 credentials on the new Target warn at `set` time but never block the write.
+
+## Snapshot commands — the Slot dance with no hand-written lease (2.0.24)
+- **Idea:** `wisp snapshot` / `wisp snapshot revert` move the Slot skill's remember-and-restore into Wisp itself — row-based Snapshots of Routing-map rows (families + aliases) kept in `~/.wisp`, so the skill never touches Read/Write file tools; refuse-if-snapshotted replaces the lease-exists stop rule.  **Mode:** ux+beat  **Actor:** bridged Claude Code (slot skill driving the CLI)  **Goal:** subagent runs on the chosen Target; one `revert` puts the family back exactly as it was and clears the Snapshot.
+- **Updated:** 2026-07-20
+
+```mermaid
+flowchart LR
+  ask([User: 'run a subagent on gpt-5.6-sol']) -->|wisp snapshot haiku · current target recorded in ~/.wisp| snapped[haiku Snapshot held — refuses a second until reverted]
+  snapped -->|wisp routing set haiku codex/gpt-5.6-sol| bound[haiku → Codex + pinned sol]
+  bound -->|Agent tool, model: haiku| agent[Subagent running on Sol]
+  agent -->|agent finishes — that family free| freed[haiku's agents done]
+  freed -->|wisp snapshot revert haiku · prior written back, prints what it overwrote, entry cleared| restored([Map back as snapshotted — no lease file ever existed])
+```
+
+**Note (row independence, behind the spine):** each row snapshots and reverts
+alone — parallel Slots revert family-by-family as their agents finish, and
+no-arg `wisp snapshot` / `revert` just does every row / every held entry at
+once. Rows added *after* a Snapshot are invisible to revert (row-based, the
+grill's settled trade-off).
+
+## TUI palette polish — tab-complete + copied indicator (2.0.24)
+- **Idea:** two palette-feel fixes — Tab completes the highlighted slash command into the input, and finishing a drag-select flashes a "Copied to clipboard" note in the feedback row.  **Mode:** ux+beat  **Actor:** TUI user  **Goal:** command entered without typing it out; copy confirmed without guessing.
+- **Updated:** 2026-07-20
+
+```mermaid
+flowchart LR
+  typing([Palette: '/si' typed]) -->|suggestions filter · Down steers highlight| pick[signin highlighted]
+  pick -->|Tab · input becomes '/signin ' — never runs| filled[Args position, palette closed]
+  filled -->|type codex · Enter| run([Command runs])
+  drag([Drag-select a log line]) -->|release · OSC52 copy fires| copied[Feedback row: 'Copied to clipboard']
+  copied -->|~1.5s timer| gone([Note clears itself])
+```
