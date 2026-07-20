@@ -223,6 +223,50 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parsed.turns).toEqual([{ role: 'user', text: 'hi', toolCalls: [], toolResults: [] }]);
   });
 
+  // #139: Claude Code's own cache_control marks the stable/volatile boundary in its system block array —
+  // everything up to and including the LAST marked block is the stable prefix, later blocks (mid-session
+  // appended <system-reminder>s) are volatile. The split rides ALONGSIDE the joined `system` (which keeps
+  // its full-text meaning for every other backend arm).
+  it('records a systemSplit at the last client-marked system block', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', system: [
+      { type: 'text', text: 'core prompt', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: 'tail prompt', cache_control: { type: 'ephemeral', ttl: '1h' } },
+      { type: 'text', text: '<system-reminder>new skills</system-reminder>' },
+    ], messages: [{ role: 'user', content: 'hi' }] } as any);
+    expect(parsed.system).toBe('core prompt\n\ntail prompt\n\n<system-reminder>new skills</system-reminder>');
+    expect(parsed.systemSplit).toEqual({ stable: 'core prompt\n\ntail prompt', volatile: '<system-reminder>new skills</system-reminder>' });
+  });
+
+  it('records an empty volatile side when the marker sits on the last system block', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', system: [
+      { type: 'text', text: 'a' },
+      { type: 'text', text: 'b', cache_control: { type: 'ephemeral' } },
+    ], messages: [{ role: 'user', content: 'hi' }] } as any);
+    expect(parsed.systemSplit).toEqual({ stable: 'a\n\nb', volatile: '' });
+  });
+
+  // Mid-conversation system arrives mid-session by definition — always volatile, never part of the
+  // stable prefix, whatever the top-level marker layout says.
+  it('folds mid-conversation system into the volatile side of the split', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', system: [
+      { type: 'text', text: 'top', cache_control: { type: 'ephemeral' } },
+    ], messages: [
+      { role: 'user', content: 'hi' },
+      { role: 'system', content: 'hook note' },
+    ] } as any);
+    expect(parsed.system).toBe('top\n\nhook note');
+    expect(parsed.systemSplit).toEqual({ stable: 'top', volatile: 'hook note' });
+  });
+
+  // No client marker (string system, or a non-Claude-Code client) → no split — the build side then keeps
+  // today's exact single-block behavior.
+  it('leaves systemSplit absent when the client sent no marker', () => {
+    expect(parseAnthropicMessagesRequest({ model: 'm', system: 'be terse', messages: [{ role: 'user', content: 'hi' }] }).systemSplit).toBeUndefined();
+    expect(parseAnthropicMessagesRequest({ model: 'm', system: [
+      { type: 'text', text: 'a' },
+    ], messages: [{ role: 'user', content: 'hi' }] } as any).systemSplit).toBeUndefined();
+  });
+
   // A user turn's content can be a block ARRAY — text blocks concatenate into the turn text.
   it('concatenates text blocks in a content array', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [

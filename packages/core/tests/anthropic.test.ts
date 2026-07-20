@@ -214,6 +214,37 @@ describe('buildAnthropicMessagesBody', () => {
       expect(body.tools).toEqual(tools); // no cache_control on tools — the system breakpoint caches them
     });
 
+    // #139: the volatile system tail (mid-session <system-reminder> appends) rides AFTER the breakpoint —
+    // the marker stays on the stable block, so a reminder append no longer mutates the marked block and
+    // the whole tools+system prefix keeps reading from cache.
+    it('emits systemSuffix as an unmarked block after the marked stable block', () => {
+      const body = buildAnthropicMessagesBody({
+        model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: '<system-reminder>new skills</system-reminder>',
+        messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
+      }) as any;
+      expect(body.system.length).toBe(3);
+      expect(body.system[1]).toEqual({ type: 'text', text: 'rules', cache_control: { type: 'ephemeral', ttl: '1h' } });
+      expect(body.system[2]).toEqual({ type: 'text', text: '<system-reminder>new skills</system-reminder>' });
+      expect(body.system.filter((b: any) => b.cache_control).length).toBe(1); // marker count unchanged
+    });
+
+    // No system turn at all: the suffix still lands after the marked attribution block.
+    it('marks the attribution when a suffix rides with no system turn', () => {
+      const body = buildAnthropicMessagesBody({
+        model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: 'note',
+        messages: [{ role: 'user', content: 'hi' }],
+      }) as any;
+      expect(body.system.length).toBe(2);
+      expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+      expect(body.system[1]).toEqual({ type: 'text', text: 'note' });
+    });
+
+    // An absent or empty suffix must leave the body byte-identical to today's shape.
+    it('builds an identical body when systemSuffix is absent or empty', () => {
+      const args = { model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m' as const, messages: [{ role: 'system' as const, content: 'rules' }, { role: 'user' as const, content: 'hi' }] };
+      expect(JSON.stringify(buildAnthropicMessagesBody({ ...args, systemSuffix: '' }))).toBe(JSON.stringify(buildAnthropicMessagesBody(args)));
+    });
+
     it('keeps earlier plain turns as bare strings — only the final turn converts to a block', () => {
       const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: [
         { role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'c' },
@@ -942,6 +973,24 @@ describe('anthropicStream (streaming IO)', () => {
     expect(sentBody.max_tokens).toBeGreaterThan(16_000);
   });
 
+  // #139: the Bridge threads the volatile system tail through to the body builder — the wire body must
+  // carry it as the last (unmarked) system block.
+  it('threads systemSuffix through to the request body', async () => {
+    let sentBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: any) => {
+      sentBody = JSON.parse(init.body);
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    await collect(anthropicStream({ ...args, systemSuffix: '<system-reminder>note</system-reminder>' }));
+    const last = sentBody.system[sentBody.system.length - 1];
+    expect(last).toEqual({ type: 'text', text: '<system-reminder>note</system-reminder>' });
+    expect(sentBody.system[sentBody.system.length - 2].cache_control).toBeDefined();
+  });
+
   // A clean tool_use turn (no answer text) is delivered content — must not throw or add any marker.
   it('yields a tool call on a clean tool_use turn with no text', async () => {
     stub([
@@ -1160,5 +1209,21 @@ describe('anthropicCacheOutcome', () => {
 
   it('does not flag a small uncached input as a miss (no real prefix to have cached)', () => {
     expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 0, input_tokens: 200 }), 5).kind).toBe('none');
+  });
+
+  // #139: the system-fold bust re-bills the prefix through cache_CREATION (input stays ~2), so the
+  // input-keyed guard above never fired. A multi-turn request that read nothing while re-WRITING a large
+  // prefix is the same regression shape.
+  it('flags a multi-turn request that read nothing while re-writing a large prefix as a miss', () => {
+    const out = anthropicCacheOutcome(usage({ cache_read_input_tokens: 0, cache_creation_input_tokens: 77_762, input_tokens: 2 }), 5);
+    expect(out).toEqual({ kind: 'miss', readTokens: 0, creationTokens: 77_762, uncachedInput: 2 });
+  });
+
+  it('keeps a small mid-session write fresh, not a miss', () => {
+    expect(anthropicCacheOutcome(usage({ cache_creation_input_tokens: 276, input_tokens: 2 }), 5).kind).toBe('fresh');
+  });
+
+  it('does not flag a large first-turn write as a miss', () => {
+    expect(anthropicCacheOutcome(usage({ cache_creation_input_tokens: 77_000, input_tokens: 2 }), 1).kind).toBe('fresh');
   });
 });

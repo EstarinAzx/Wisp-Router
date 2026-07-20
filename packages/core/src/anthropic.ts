@@ -188,6 +188,9 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 export const buildAnthropicMessagesBody = (args: {
   model: string; messages: AnthropicMessage[]; maxTokens: number; version: string; stream?: boolean;
   tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; cacheTtl?: '5m' | '1h';
+  // #139: volatile system tail (mid-session <system-reminder> appends) — emitted as a final UNMARKED
+  // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
+  systemSuffix?: string;
 }) => {
   const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
   const convo = args.messages.filter((m) => m.role !== 'system');
@@ -255,6 +258,9 @@ export const buildAnthropicMessagesBody = (args: {
       : { type: 'ephemeral' as const },
   };
   system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
+  // #139: the volatile tail goes AFTER the marker — appended last, never marked, so a changed reminder
+  // re-bills only itself (plus the messages behind it), exactly like native Claude Code's block layout.
+  if (args.systemSuffix) system.push({ type: 'text' as const, text: args.systemSuffix });
 
   // A bare-string final turn can't carry a marker — expand it to a single text block (earlier plain turns
   // keep the #29 bare-string shape).
@@ -361,6 +367,10 @@ export const anthropicCacheOutcome = (usage: BridgeUsage, turnCount: number): An
   // exchange, and only when the uncached input is large enough that a real prefix must have existed.
   const MISS_UNCACHED_FLOOR = 4_000;
   if (turnCount >= 3 && uncachedInput >= MISS_UNCACHED_FLOOR) return { kind: 'miss', ...base };
+  // #139: the system-fold bust re-billed the prefix through cache_CREATION (input stayed ~2), invisible
+  // to the input check above. Nothing read + a large re-WRITE past the first exchange is the same
+  // regression shape. Benign triggers (1h-TTL expiry, post-compaction) cost one advisory line.
+  if (turnCount >= 3 && creationTokens >= MISS_UNCACHED_FLOOR) return { kind: 'miss', ...base };
   if (creationTokens > 0) return { kind: 'fresh', ...base };
   return { kind: 'none', ...base };
 };
