@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// -------- index.tsx — wisp entry: serve / routing / providers / models / claude-wisp / TUI dispatch -------- //
+// -------- index.tsx — wisp entry: serve / routing / snapshot / providers / models / claude-wisp / TUI dispatch -------- //
 /*
  * Depends on:
  *   - ./serve: the headless Bridge host (#63).
  *   - ./routingCli: the renderer-free Routing snapshot/write command (#108).
+ *   - ./snapshotCli: the renderer-free `wisp snapshot` / `revert` row-Snapshot command (#127).
  *   - ./discoveryCli: the renderer-free `wisp providers` + `wisp models` commands (#123).
  *   - ./claude-wisp: the Claude Code launcher (#64) — reached via `wisp claude-wisp …` (#67).
  *   - @opentui/core + @opentui/react + ./app: the TUI face.
@@ -19,6 +20,9 @@ if (process.argv[2] === 'serve') {
 } else if (process.argv[2] === 'routing') {
   const { runRoutingCli } = await import('./routingCli');
   process.exitCode = await runRoutingCli(process.argv.slice(3));
+} else if (process.argv[2] === 'snapshot') {
+  const { runSnapshotCli } = await import('./snapshotCli');
+  process.exitCode = runSnapshotCli(process.argv.slice(3));
 } else if (process.argv[2] === 'providers') {
   const { runProvidersCli } = await import('./discoveryCli');
   process.exitCode = runProvidersCli();
