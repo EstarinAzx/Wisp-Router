@@ -535,6 +535,21 @@ export const serializeForReview = (turns: NormalizedTurn[]): string =>
     .filter(Boolean)
     .join('\n\n');
 
+// Build the reviewer sub-call's request — the QUARANTINED shape, constructed explicitly rather than by
+// spreading the base request. #142 (#139 regression): a spread copied systemSplit along, and the Anthropic
+// arm prefers systemSplit.stable over system — so the reviewer got the client's full system prompt (advisor
+// meta-instructions included) plus the volatile reminder tail instead of the reviewerSystem() frame. Every
+// prompt-shaping field is therefore set here on purpose: quarantine system, no split, no tools, no advisor,
+// and the whole conversation flattened into ONE plain user turn (see serializeForReview).
+export const buildReviewerRequest = (parsed: BridgeAnthropicRequest, turns: NormalizedTurn[]): BridgeAnthropicRequest => ({
+  ...parsed,
+  system: reviewerSystem(),
+  systemSplit: undefined,
+  turns: [{ role: 'user', text: `Conversation to review:\n\n${serializeForReview(turns)}`, toolCalls: [], toolResults: [] }],
+  tools: [],
+  advisor: undefined,
+});
+
 // The agentic loop that lets the door play the advisor server role. A base pass streams the Target's reply;
 // when the Target calls `advisor`, the door announces it (server_tool_use), runs the injected reviewer over
 // the conversation, streams the verdict (advisor_result / advisor_error), then re-runs the base pass with

@@ -14,6 +14,7 @@ import {
   runAdvisorLoop,
   reviewerSystem,
   serializeForReview,
+  buildReviewerRequest,
 } from '../src/bridgeAnthropic';
 import type { ChatModelInfo, NormalizedTurn } from '../src/catalog';
 import type { BridgeStreamEvent } from '../src/bridge';
@@ -994,6 +995,33 @@ describe('serializeForReview', () => {
     const s = serializeForReview(turns);
     expect(s).toContain('[1 image(s) omitted]');
     expect(s).not.toContain('AAAA');
+  });
+});
+
+describe('buildReviewerRequest', () => {
+  // #142 (#139 regression): the reviewer request was built as {...parsed, system: reviewerSystem()}, which
+  // copied systemSplit along — and the Anthropic arm PREFERS systemSplit.stable over system, so the reviewer
+  // got the client's full system prompt (advisor meta-instructions included) instead of the quarantine frame.
+  it('quarantines the reviewer: reviewerSystem only, systemSplit stripped, no tools, no advisor', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'claude-wisp-opus', stream: true, system: [
+      { type: 'text', text: 'client system with # Advisor Tool section', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: '<system-reminder>new skills</system-reminder>' },
+    ], messages: [
+      { role: 'user', content: 'ship it?' },
+    ], tools: [
+      { name: 'Read', description: 'd', input_schema: { type: 'object' } },
+      { type: 'advisor_20260301', name: 'advisor', model: 'claude-wisp-opus' },
+    ] } as any);
+    expect(parsed.systemSplit).toBeDefined(); // the regression precondition — the split is present
+
+    const out = buildReviewerRequest(parsed, parsed.turns);
+    expect(out.system).toBe(reviewerSystem());
+    expect(out.systemSplit).toBeUndefined();
+    expect(out.tools).toEqual([]);
+    expect(out.advisor).toBeUndefined();
+    expect(out.turns).toEqual([{
+      role: 'user', text: `Conversation to review:\n\n${serializeForReview(parsed.turns)}`, toolCalls: [], toolResults: [],
+    }]);
   });
 });
 

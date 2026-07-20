@@ -40,7 +40,7 @@ import {
 } from './bridge';
 import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
-  advisorToolSpec, runAdvisorLoop, reviewerSystem, serializeForReview,
+  advisorToolSpec, runAdvisorLoop, buildReviewerRequest,
   type AnthropicSseMeta, type BridgeAnthropicRequest,
 } from './bridgeAnthropic';
 import type { NormalizedTurn } from './catalog';
@@ -579,18 +579,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const reviewer = async (turns: NormalizedTurn[]): Promise<string> => {
       const advModel = (parsed.advisor?.model ?? '').replace(/^claude-wisp-/, '');
       const advRoute = (advModel ? routeFor(advModel) : undefined) ?? route;
-      // The reviewer request is deliberately minimal: reviewerSystem() only (never parsed.system — it carries
-      // Claude Code's `# Advisor Tool` section, which made the reviewer echo meta-instructions), and the whole
-      // conversation flattened to ONE plain-text user turn. Forwarding the raw turns tripped Anthropic's
-      // "max 4 blocks with cache_control … Found 5" 400 (a replayed thinking sidecar smuggled a 5th marker)
-      // AND let instruction-shaped turns be obeyed. One text turn = 2 cache markers, no tool/thinking blocks.
-      const reviewTurn: NormalizedTurn = {
-        role: 'user', text: `Conversation to review:\n\n${serializeForReview(turns)}`, toolCalls: [], toolResults: [],
-      };
-      const reviewParsed: BridgeAnthropicRequest = {
-        ...parsed, turns: [reviewTurn], tools: [], advisor: undefined, system: reviewerSystem(),
-      };
-      const r = await startProviderStream(reviewParsed, advRoute.provider, advRoute.pinnedModel, controller);
+      // The reviewer request is the quarantined shape built by buildReviewerRequest (reviewerSystem() only,
+      // systemSplit stripped, no tools, conversation flattened to ONE plain-text user turn) — constructed in
+      // core so the quarantine is unit-tested; see #142 for the spread-copied-systemSplit regression.
+      const r = await startProviderStream(buildReviewerRequest(parsed, turns), advRoute.provider, advRoute.pinnedModel, controller);
       if (!r.ok) throw new Error(r.message);
       let text = '';
       for await (const ev of r.events) if (ev.type === 'text') text += ev.text;

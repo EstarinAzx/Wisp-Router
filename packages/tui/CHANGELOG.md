@@ -6,6 +6,18 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.26] — 2026-07-20
+
+### Fixed
+
+- **Advisor reviewer quarantine restored (#142, a #139 regression in 2.0.25).**
+  The reviewer sub-call inherited the new `systemSplit` from the base request,
+  and the Anthropic arm preferred it over the quarantine frame — so on
+  marker-carrying sessions (every bridged Claude Code session) the reviewer
+  received the client's full system prompt instead of `reviewerSystem()`. The
+  reviewer request is now built by an explicit, unit-tested
+  `buildReviewerRequest` (quarantine system, split stripped, no tools).
+
 ## [2.0.25] — 2026-07-20
 
 ### Fixed
