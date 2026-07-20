@@ -17,7 +17,7 @@
  */
 
 import type { AnthropicCreds, CodexCreds, XaiCreds, EffortLevel } from './catalog';
-import type { RoutingMap } from './routing';
+import type { RoutingMap, SnapshotEntry, SnapshotStore } from './routing';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -28,6 +28,7 @@ export type WispConfig = {
   models?: Record<string, string>;
   effort?: EffortLevel;
   routing?: RoutingMap;
+  snapshots?: SnapshotStore;
   customBaseUrl?: string;
   bridge?: WispBridgeSettings;
 };
@@ -67,6 +68,22 @@ const stringRecord = (v: unknown): Record<string, string> | undefined => {
   return Object.fromEntries(Object.entries(v).filter(([, val]) => typeof val === 'string')) as Record<string, string>;
 };
 
+// A snapshot entry is null (row was unset) or a well-formed Target; drop any other shape so one
+// hand-edited entry can't flow garbage into revert. Non-record input drops the whole field.
+const snapshotStore = (v: unknown): SnapshotStore | undefined => {
+  if (!isRecord(v)) return undefined;
+  const entries: Array<[string, SnapshotEntry]> = [];
+  for (const [row, val] of Object.entries(v)) {
+    if (val === null) entries.push([row, null]);
+    else if (isRecord(val) && typeof val.providerId === 'string' && typeof val.model === 'string') {
+      entries.push([row, { providerId: val.providerId, model: val.model }]);
+    }
+  }
+  // Object.fromEntries writes own properties — a hand-edited '__proto__' key lands as data, not a
+  // prototype set, so it can't smuggle inherited garbage past the shallow read into revert.
+  return Object.fromEntries(entries);
+};
+
 const EFFORT_VALUES: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 // Keep only correctly-typed known creds fields — a hand-edited bundle must never flow a number into a
@@ -98,6 +115,10 @@ export const parseWispConfig = (raw: string | undefined | null): WispConfig => {
   if ('routing' in cfg) {
     const r = cfg.routing;
     if (!(isRecord(r) && isRecord(r.families) && Array.isArray(r.aliases))) delete cfg.routing;
+  }
+  if ('snapshots' in cfg) {
+    const cleaned = snapshotStore(cfg.snapshots);
+    if (cleaned) cfg.snapshots = cleaned; else delete cfg.snapshots;
   }
   if ('customBaseUrl' in cfg && typeof cfg.customBaseUrl !== 'string') delete cfg.customBaseUrl;
   if ('bridge' in cfg) {

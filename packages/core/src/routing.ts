@@ -40,6 +40,13 @@ export type RouteMatch = {
 // The default map: nothing routed, everything falls back to the Active Provider (today's behavior).
 export const EMPTY_ROUTING_MAP: RoutingMap = { families: {}, aliases: [] };
 
+// Snapshot store (#127): what each held row pointed at when it was snapshotted — a Target, or null
+// for a Family route that was unset. Keyed by row name (Family key or Alias name). Presence = held.
+// Bookkeeping only: the Bridge resolver never reads it, it just lets `wisp snapshot`/`revert` remember
+// and restore rows. Lives in config.json beside the map; the schema layer (home.ts) round-trips it.
+export type SnapshotEntry = Target | null;
+export type SnapshotStore = { [row: string]: SnapshotEntry };
+
 // ----------------------------- Resolver ----------------------------- //
 
 // Fixed probe order for the family fuzzy match (a claude-* id names at most one family in practice).
