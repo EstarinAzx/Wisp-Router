@@ -8,67 +8,61 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-20 by Fable 5 (wrap-up)._
-_At commit: e31bcfc + this wrap-up commit (2.0.24 planning, no code yet)._
+_At commit: db722a6 (v2.0.25 released) + this wrap-up commit._
 
 ## Current focus
 
-**2.0.24 planned, not started.** v2.0.23 confirmed landed (release green, npm
-at 2.0.23). The whole .24 scope went through the init funnel: grill →
-happy-path MVD → spec **#126** → six slices **#127–#132**, all published
-`ready-for-agent` on GitHub.
+**Nothing in flight.** v2.0.25 shipped and live on npm: the #139
+Anthropic-door system-fold cache bust (the subscription-quota-spike bug) is
+fixed and live-verified. The v2.0.24 chain (#127–#132) landed earlier the
+same day; the relay chain at `.claude/relay/ticket-loop.md` is finished.
 
 ## State
 
-- **In flight:** nothing — implementation belongs to the ticket loop.
+- **In flight:** nothing. Ticket queue empty — no open `ready-for-agent` issues.
 - **Done this session:**
-  1. Grill settled the design (see [[2026-07-20-row-based-routing-snapshots-cli]]
-     and spec #126): row-based `wisp snapshot`/`revert`, aliases included,
-     verb `revert`, refuse-if-held, CLI-only, store in `~/.wisp` config;
-     Tab-complete fills-never-runs; copied indicator = feedback-row note
-     (option a), ~1.5 s; `/bridge` blurb becomes a why-explanation
-     (wording approved, in #130 + spec).
-  2. **Snapshot** term added to `CONTEXT.md`; two MVD spines appended to
-     [[happy-path]].
-  3. Published: spec #126; slices #127 (snapshot e2e) · #128 (tab-complete) ·
-     #129 (copied indicator) · #130 (blurb) · #131 (Slot skill CLI-native,
-     blocked by #127) · #132 (release 2.0.24, blocked by all).
-  4. Seeded the relay chain state at `.claude/relay/ticket-loop.md` — one
-     issue per leg, dynamic pacing (N=1), `/preset ticket-loop` body.
+  1. **#139 fixed** (issue → grilled design → TDD → PR #140 squash-merged →
+     `v2.0.25` tagged, release green, npm live). Design recorded in
+     [[2026-07-20-system-split-at-client-marker]]; mechanics live in code
+     comments (bridgeAnthropic.ts parse, anthropic.ts build, bridgeServer.ts
+     Anthropic arm, anthropicClient.ts threading). 575/575 tests (11 new).
+  2. **Live-verified twice:** real `claude-wisp -p` run (3-block system,
+     stable block byte-identical across requests, reads 55k+) and a synthetic
+     kill-shot (volatile reminder changed between requests → read 9,385 /
+     write 87; the old shape was read 0 / write 77k).
 - **Blocked:** none.
 
 ## Pick up here
 
-Start the chain: `/relay N=1 /preset ticket-loop` — each leg rehydrates from
-`.context/` at boot (relay step 3), works ONE frontier ticket, relays fresh.
-Frontier now: #127, #128, #129, #130 (all unblocked; #127 first — #131 waits
-on it). Or work tickets by hand in that order.
+No queued task. Candidates, in rough value order:
+
+1. **User-side:** stop `wisp.exe`, `npm i -g wisp-router` — the fix only
+   protects sessions once the installed binary is 2.0.25.
+2. **Small chore:** release workflow prints Node 20 deprecation warnings for
+   `actions/checkout@v4` / `upload-artifact@v4` — bump action versions in
+   `.github/workflows/release.yml` some idle moment.
+3. New feature work → start at the funnel (`/preset init` or grill).
 
 ## Skills for next session
 
-- `/relay N=1 /preset ticket-loop` — the intended driver for #127–#132.
-- `/preset ci-babysit` once #132's tag is pushed.
+- `/preset catch-up` if the pick-up note is gone; otherwise the note is enough.
 
 ## Open questions
 
-- None. Design settled in spec #126; seams follow the routing-CLI precedent
-  (pure core decision fn + thin TUI edge).
+- None.
 
 ## Recent context
 
-- When **#131** lands (Slot skill rewrite): sync the ecosystem-kb vault page
-  for the slot lineup in the same session (standing rule — skill behavior
-  change is an ecosystem change).
-- Snapshot has NO compare-and-set: revert writes unconditionally and prints
-  the overwritten value; the skill pre-reads `wisp routing` if it wants a
-  guard.
-- Copied-indicator trap agreed in grill: the ~1.5 s clear timer must not wipe
-  a *newer* status message.
-- Release contract unchanged: tag `v2.0.24` must equal `packages/tui/package.json`
-  version; stop any running `wisp.exe` before a global npm reinstall.
+- Quota after the fix behaves like native Claude Code: advisor sub-calls
+  still bill the whole transcript fresh per invocation (by design), and
+  pinning cheap families to opus/fable-tier Targets still burns at the heavy
+  model's rate — user-visible costs, not bugs.
+- The new MISS guard logs `prompt-cache MISS … creation=…` in serve output if
+  the bust shape ever returns; silence = healthy. Benign one-off triggers:
+  1h-TTL expiry after idle, post-compaction.
 
 ## Related
 
 - [[overview]]
 - [[pick-up]]
-- [[happy-path]]
 - [[decisions]]
