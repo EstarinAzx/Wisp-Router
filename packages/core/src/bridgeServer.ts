@@ -41,7 +41,7 @@ import {
 import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
   advisorToolSpec, runAdvisorLoop, buildReviewerRequest,
-  type AnthropicSseMeta, type BridgeAnthropicRequest,
+  type AnthropicSseMeta, type BridgeAnthropicRequest, type ReviewerVerdict,
 } from './bridgeAnthropic';
 import type { NormalizedTurn } from './catalog';
 import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
@@ -484,7 +484,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
   const startProviderStream = async (
     parsed: BridgeAnthropicRequest, provider: Provider, pinnedModel: string | undefined, controller: AbortController,
-  ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent> }> => {
+  ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent>; model: string }> => {
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
     const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
@@ -499,7 +499,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
       // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
       const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(effort), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
-      return { ok: true, events: mapOAuthStream(upstream) };
+      return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     if (isAnthropicProvider(provider)) {
       const creds = await deps.anthropicCreds();
@@ -514,7 +514,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const sys = parsed.systemSplit?.stable ?? parsed.system;
       const messages = sys ? [{ role: 'system' as const, content: sys }, ...turns] : turns;
       const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, signal: controller.signal });
-      return { ok: true, events: mapOAuthStream(upstream) };
+      return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     if (isXaiProvider(provider)) {
       const creds = await deps.xaiCreds?.();
@@ -523,7 +523,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       // Non-strict tools: the door forwards an external client's toolset (same reason as the Codex arm above).
       const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
-      return { ok: true, events: mapOAuthStream(upstream) };
+      return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     const client = await deps.clientFor(provider);
     if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
@@ -534,7 +534,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       { model: modelId, messages, stream: true, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
       { signal: controller.signal },
     );
-    return { ok: true, events: mapKeyedStream(upstream) };
+    return { ok: true, events: mapKeyedStream(upstream), model: modelId };
   };
 
   // POST /v1/messages — the Anthropic door. Parse the Messages body → route (a Provider-id model to that
@@ -576,7 +576,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // The reviewer: hand the advisor Target the conversation + the review instruction, no tools, drain its
     // text as the advice. Its own model route is the picker's choice (claude-wisp- stripped like body.model),
     // falling back to the base route so the Target advises itself when no separate advisor model resolves.
-    const reviewer = async (turns: NormalizedTurn[]): Promise<string> => {
+    const reviewer = async (turns: NormalizedTurn[]): Promise<ReviewerVerdict> => {
       const advModel = (parsed.advisor?.model ?? '').replace(/^claude-wisp-/, '');
       const advRoute = (advModel ? routeFor(advModel) : undefined) ?? route;
       // The reviewer request is the quarantined shape built by buildReviewerRequest (reviewerSystem() only,
@@ -584,9 +584,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // core so the quarantine is unit-tested; see #142 for the spread-copied-systemSplit regression.
       const r = await startProviderStream(buildReviewerRequest(parsed, turns), advRoute.provider, advRoute.pinnedModel, controller);
       if (!r.ok) throw new Error(r.message);
+      // Drain text as the advice and keep the sub-call's own usage aside (#143): it reports the RESOLVED
+      // Target model (honest even when routing pinned the reviewer off-catalog), and it must never touch
+      // this request's lastUsage — top-level usage / the #111 cache guard read the base pass only.
       let text = '';
-      for await (const ev of r.events) if (ev.type === 'text') text += ev.text;
-      return text.trim();
+      let usage: BridgeUsage | undefined;
+      for await (const ev of r.events) {
+        if (ev.type === 'text') text += ev.text;
+        else if (ev.type === 'usage') usage = ev.usage;
+      }
+      return { text: text.trim(), usage, model: r.model };
     };
 
     try {

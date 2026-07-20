@@ -1147,3 +1147,103 @@ describe('runAdvisorLoop', () => {
     expect(calls).toHaveLength(2);
   });
 });
+
+// ----------------------------- Advisor usage surfacing (#143) ----------------------------- //
+
+describe('advisor usage iterations (#143)', () => {
+  const initial: NormalizedTurn[] = [{ role: 'user', text: 'ship it?', toolCalls: [], toolResults: [] }];
+  const advUsage = { input_tokens: 1200, cache_creation_input_tokens: 30, cache_read_input_tokens: 900, output_tokens: 250 };
+  const baseUsage = { input_tokens: 5000, cache_creation_input_tokens: 100, cache_read_input_tokens: 4000, output_tokens: 700 };
+
+  // The reviewer verdict may carry the sub-call's real usage + the resolved Target model; the loop then
+  // yields an advisor_usage event right after the advisor_result so the door can surface it in
+  // usage.iterations. String verdicts (the pre-#143 shape) stay valid — no usage, no event.
+  it('yields advisor_usage after the result when the reviewer reports usage', async () => {
+    const { basePass } = scriptedBase([
+      [{ type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'done' }],
+    ]);
+    const reviewer = async () => ({ text: 'advice', usage: advUsage, model: 'gpt-5.6' });
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer }));
+    expect(events).toEqual([
+      { type: 'server_tool_use', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } },
+      { type: 'advisor_result', toolUseId: 'srv1', text: 'advice' },
+      { type: 'advisor_usage', usage: advUsage, model: 'gpt-5.6' },
+      { type: 'text', text: 'done' },
+    ]);
+  });
+
+  // A verdict without usage (the reviewer Target reported no counts) yields no advisor_usage — the entry
+  // is omitted rather than emitted with fake zeros.
+  it('yields no advisor_usage when the verdict has no usage', async () => {
+    const { basePass } = scriptedBase([
+      [{ type: 'tool_call', call: { id: 'srv1', name: 'advisor', argsJson: '{}' } }],
+      [{ type: 'text', text: 'done' }],
+    ]);
+    const events = await drain(runAdvisorLoop({ turns: initial, basePass, reviewer: async () => ({ text: 'advice' }) }));
+    expect(events.some((e) => e.type === 'advisor_usage')).toBe(false);
+    expect(events).toContainEqual({ type: 'advisor_result', toolUseId: 'srv1', text: 'advice' });
+  });
+
+  // Streaming: captured advisor usage rides out as usage.iterations on the closing message_delta — advisor
+  // entries in consult order, then the final base pass as the LAST entry. Claude Code reads iterations[-1]
+  // as the authoritative final context window (openclaude tokens.ts finalContextTokensFromLastResponse), so
+  // an advisor entry sitting last would corrupt its window math. Top-level usage stays the base pass only.
+  it('message_delta carries usage.iterations: advisor entries then the base entry last', () => {
+    const firstPass = { input_tokens: 4000, cache_creation_input_tokens: 100, cache_read_input_tokens: 3000, output_tokens: 40 };
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    enc.setUsage(firstPass);
+    expect(enc.push({ type: 'advisor_usage', usage: advUsage, model: 'gpt-5.6' })).toBe(''); // no wire frame
+    enc.setUsage(baseUsage); // continuation pass — the final cumulative counts
+    const delta = frames(enc.finish()).find((x) => x.event === 'message_delta')!;
+    expect(delta.data.usage.iterations).toEqual([
+      { type: 'advisor_message', model: 'gpt-5.6', ...advUsage },
+      { type: 'message', model: meta.model, ...baseUsage },
+    ]);
+    expect(delta.data.usage.input_tokens).toBe(baseUsage.input_tokens); // #111 guard reads these — unchanged
+  });
+
+  // No advisor consult → no iterations key at all: a plain turn's wire stays byte-identical to pre-#143.
+  it('omits iterations when no advisor usage was captured', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    enc.setUsage(baseUsage);
+    const delta = frames(enc.finish()).find((x) => x.event === 'message_delta')!;
+    expect('iterations' in delta.data.usage).toBe(false);
+  });
+
+  // No base usage (non-Anthropic base Target emits none) → no safe last entry, so iterations is dropped
+  // entirely rather than letting an advisor entry sit last and hijack the window math.
+  it('omits iterations when the base pass reported no usage', () => {
+    const enc = createAnthropicSseEncoder(meta);
+    enc.start();
+    enc.push({ type: 'advisor_usage', usage: advUsage, model: 'gpt-5.6' });
+    const delta = frames(enc.finish()).find((x) => x.event === 'message_delta')!;
+    expect('iterations' in delta.data.usage).toBe(false);
+  });
+
+  // The buffered (non-streaming) reply mirrors the encoder: advisor_usage events fold into usage.iterations
+  // in order (no content block), the last usage event supplies the closing base entry.
+  it('buildAnthropicMessageResponse folds advisor usage into usage.iterations', () => {
+    const adv2 = { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 5 };
+    const events: BridgeStreamEvent[] = [
+      { type: 'usage', usage: baseUsage },
+      { type: 'text', text: 'hi' },
+      { type: 'advisor_usage', usage: advUsage, model: 'gpt-5.6' },
+      { type: 'advisor_usage', usage: adv2, model: 'sol' },
+    ];
+    const out = buildAnthropicMessageResponse(events, meta);
+    expect(out.usage.iterations).toEqual([
+      { type: 'advisor_message', model: 'gpt-5.6', ...advUsage },
+      { type: 'advisor_message', model: 'sol', ...adv2 },
+      { type: 'message', model: meta.model, ...baseUsage },
+    ]);
+    expect(out.content).toEqual([{ type: 'text', text: 'hi' }]);
+  });
+
+  it('buildAnthropicMessageResponse omits iterations without advisor usage', () => {
+    const out = buildAnthropicMessageResponse([{ type: 'text', text: 'hi' }, { type: 'usage', usage: baseUsage }], meta);
+    expect('iterations' in out.usage).toBe(false);
+  });
+});
