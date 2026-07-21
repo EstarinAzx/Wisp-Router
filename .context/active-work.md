@@ -24,8 +24,8 @@ turns both accepted, no 400/429. **The `ready-for-agent` queue is now EMPTY.**
 - **In flight:** nothing (#151 merged + closed, breadcrumb posted).
 - **Queue:** no `ready-for-agent` tickets. **#152** (cache-diagnosis probe) is
   `ready-for-human` — needs the user to probe first. Umbrella **#148** closes when
-  #152 resolves (#149/#150/#151 all done). **#126** (2.0.24 spec umbrella) probably
-  closable as fully shipped. **#69** backlog.
+  #152 resolves (#149/#150/#151 all done). **#126** closed by the user 2026-07-21.
+  **#69** backlog.
 - **Done this session (#151, PR #155):** `selectAnthropicBetas(model)` — model-gated
   selection mirroring openclaude `utils/betas.ts`; context-1m as an EXCLUSION gate
   (haiku/claude-3/opus<4-6 out) so sonnet-5/fable-5 inherit it; advisor-tool off
@@ -37,11 +37,10 @@ turns both accepted, no 400/429. **The `ready-for-agent` queue is now EMPTY.**
 
 No code ticket queued. Options, cheapest first:
 
-1. **Housekeeping:** close #126 if the user confirms it's fully shipped; #148
-   auto-review after #152.
-2. **#152 (cache-diagnosis probe, `ready-for-human`):** the user drives the probe;
-   agent assists with the capture harness / transcript forensics when asked.
-3. Otherwise ask the user what's next (new spec, #69 backlog, or release).
+1. **#152 (cache-diagnosis probe, `ready-for-human`):** the user drives the probe;
+   agent assists with the capture harness / transcript forensics when asked. #148
+   umbrella closes once #152 resolves.
+2. Otherwise ask the user what's next (new spec, #69 backlog, or release).
 
 ## Skills for next session
 
@@ -51,7 +50,7 @@ No code ticket queued. Options, cheapest first:
 
 ## Open questions
 
-- Is #126 fully shipped → closable? (User call.)
+- None for the wisp codebase.
 
 ## Recent context
 

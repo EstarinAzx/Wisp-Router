@@ -23,9 +23,8 @@ Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the 
 **Next task: NONE queued — the `ready-for-agent` queue is empty.**
 
 - **#152** (cache-diagnosis probe) is `ready-for-human`: the USER drives the probe;
-  assist with the capture harness / transcript forensics when asked.
-- Housekeeping available now: ask the user whether **#126** (2.0.24 spec umbrella) is
-  fully shipped → close; **#148** umbrella closes once #152 resolves.
+  assist with the capture harness / transcript forensics when asked. **#148** umbrella
+  closes once #152 resolves (#126 closed by the user 2026-07-21).
 - Otherwise ask what's next (new spec, #69 backlog, or a release).
 
 **Landmines:**
