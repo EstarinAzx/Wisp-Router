@@ -6,6 +6,32 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.29] — 2026-07-21
+
+### Fixed
+
+- **Anthropic-door cache re-bill amplifier (#145).** Claude Code sends hook
+  reminders as mid-conversation `role:"system"` turns; the door hoisted them
+  into the top-level system slot, rendering them ahead of the entire message
+  history — every new/changed reminder diverged the prompt right after the
+  stable prefix and re-billed the whole history at the 2× cache-write rate
+  (measured: a whole-history re-bill every ~7 bridged requests vs ~71 native;
+  0.6–1.2M wasted write-tokens per heavy session). Reminders now stay
+  positioned in `messages` as `role:"system"` text-block turns (the
+  `mid-conversation-system-2026-04-07` beta claude CLI itself advertises), so
+  reminder churn re-bills only the tail behind it. Non-Anthropic Targets are
+  content-equivalent: OpenAI-compatible backends get the system message in
+  place, Codex/xAI fold it into `instructions`.
+
+### Added
+
+- **`partial` cache outcome + advisory log line (#146).** The cache-health
+  guard called any frame with a cache read a healthy `hit`, so the #145
+  re-bills (8–11 per session, 34k–57k tokens each) never logged a line. A
+  read with a ≥4k re-write behind it past the first exchange now logs one
+  advisory `[bridge] prompt-cache PARTIAL … (#145)` line next to the existing
+  MISS line; healthy sessions still log nothing.
+
 ## [2.0.28] — 2026-07-21
 
 ### Added
