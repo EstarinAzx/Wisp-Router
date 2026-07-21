@@ -6,6 +6,16 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.31] — 2026-07-21
+
+### Fixed
+
+- **False `prompt-cache MISS (server)` line on undiagnosable turns (#156).** Live
+  capture: the backend can answer `cache_miss_reason: {type: 'unavailable'}`
+  (missed=0) on a healthy-usage turn — "couldn't diagnose", not a break verdict.
+  The diagnosis reader now folds `unavailable` into the no-diagnosis shape (the
+  chain id is kept), so the usage heuristic stays the judge on undiagnosed turns.
+
 ## [2.0.30] — 2026-07-21
 
 ### Added
