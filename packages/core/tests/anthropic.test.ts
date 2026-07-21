@@ -716,6 +716,40 @@ describe('anthropicMessagesHeaders', () => {
     expect(anthropicMessagesHeaders('tok', true)['Accept']).toBe('text/event-stream');
     expect('Accept' in anthropicMessagesHeaders('tok')).toBe(false);
   });
+
+  // #149: fingerprint parity with real claude-cli 2.1.216 — the UA advertises the captured version
+  // (the cc_version hash is unvalidated, see #148, so the bump cannot break an accepted request).
+  it('advertises the claude-cli 2.1.216 User-Agent', () => {
+    expect(anthropicMessagesHeaders('tok')['User-Agent']).toBe('claude-cli/2.1.216 (external, cli)');
+  });
+
+  // #149: the Stainless SDK header set real claude emits (its bundled @anthropic-ai/sdk is a Stainless
+  // build) — fixed values match the 2.1.216 capture; arch/os/runtime-version derive from the host.
+  it('emits the Stainless SDK header set', () => {
+    const h = anthropicMessagesHeaders('tok');
+    expect(h['x-stainless-lang']).toBe('js');
+    expect(h['x-stainless-package-version']).toBe('0.94.0');
+    expect(h['x-stainless-runtime']).toBe('node');
+    expect(h['x-stainless-retry-count']).toBe('0');
+    expect(h['x-stainless-timeout']).toBe('600');
+    expect(h['x-stainless-arch']).toBeTruthy();
+    expect(['Windows', 'MacOS', 'Linux']).toContain(h['x-stainless-os']);
+    expect(h['x-stainless-runtime-version']).toMatch(/^v\d/);
+  });
+
+  // #149: real claude generates one session UUID at startup and repeats it on every request; #150 must
+  // reuse the SAME value inside metadata.user_id.session_id, so it is stable across calls.
+  it('carries one stable per-session claude-code session id', () => {
+    const a = anthropicMessagesHeaders('tok')['x-claude-code-session-id'];
+    const b = anthropicMessagesHeaders('other')['x-claude-code-session-id'];
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(b).toBe(a);
+  });
+
+  // #149: real claude sends the direct-browser-access flag on every Messages request.
+  it('flags anthropic-dangerous-direct-browser-access', () => {
+    expect(anthropicMessagesHeaders('tok')['anthropic-dangerous-direct-browser-access']).toBe('true');
+  });
 });
 
 describe('toAnthropicTools', () => {
@@ -1058,6 +1092,21 @@ describe('anthropicStream (streaming IO)', () => {
     await collect(anthropicStream({ ...args, model: 'claude-opus-4-8' }));
     expect(sentBody.max_tokens).toBe(anthropicModelCaps('claude-opus-4-8').maxOutput);
     expect(sentBody.max_tokens).toBeGreaterThan(16_000);
+  });
+
+  // #149: real claude posts to /v1/messages?beta=true — the query flag rides every Messages request.
+  it('posts to /v1/messages?beta=true', async () => {
+    let sentUrl = '';
+    vi.stubGlobal('fetch', async (url: string, _init: any) => {
+      sentUrl = String(url);
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    await collect(anthropicStream(args));
+    expect(sentUrl).toBe('https://x/v1/messages?beta=true');
   });
 
   // #139: the Bridge threads the volatile system tail through to the body builder — the wire body must

@@ -16,6 +16,7 @@
  *     fragments as they arrive so the native chat picker renders tokens live.
  */
 
+import { randomUUID } from 'node:crypto';
 import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
@@ -62,9 +63,30 @@ const INQUIRE_MAX_TOKENS = 16_000;
 // CLI advertises the same token natively (header capture 2026-07-21).
 const ANTHROPIC_BETA = 'claude-code-20250219,oauth-2025-04-20,effort-2025-11-24,mid-conversation-system-2026-04-07';
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
-// match (the backend ties the cc_version to the claude-cli UA). This exact string is accepted today.
-const CLAUDE_CODE_VERSION = '0.19.0';
+// match (the backend ties the cc_version to the claude-cli UA). Captured live from real claude-cli 2.1.216
+// (2026-07-21); the cc_version hash is UNVALIDATED (#148), so the bump can't break an accepted request.
+const CLAUDE_CODE_VERSION = '2.1.216';
 const ANTHROPIC_USER_AGENT = `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`;
+
+// The Stainless SDK headers real claude emits — its bundled @anthropic-ai/sdk is a Stainless build that
+// tags every request with these. Fixed values are copied from the 2.1.216 capture; arch/os/runtime-version
+// derive from the host (a Node process, matching the claude-cli runtime). #149.
+const STAINLESS_ARCH: Record<string, string> = { x64: 'x64', arm64: 'arm64', ia32: 'x32' };
+const STAINLESS_OS: Record<string, string> = { win32: 'Windows', darwin: 'MacOS', linux: 'Linux' };
+const stainlessHeaders = (): Record<string, string> => ({
+  'x-stainless-lang': 'js',
+  'x-stainless-package-version': '0.94.0',
+  'x-stainless-os': STAINLESS_OS[process.platform] ?? 'Unknown',
+  'x-stainless-arch': STAINLESS_ARCH[process.arch] ?? 'unknown',
+  'x-stainless-runtime': 'node',
+  'x-stainless-runtime-version': process.version,
+  'x-stainless-retry-count': '0',
+  'x-stainless-timeout': '600',
+});
+
+// Real claude mints one session UUID at startup and repeats it on every request (header +
+// metadata.user_id.session_id, #150). Generated once per process so it's stable across calls this session.
+const CLAUDE_CODE_SESSION_ID = randomUUID();
 
 // The Messages request headers. Pure (no IO) so the recognition contract is unit-testable: the streaming
 // path adds the event-stream Accept; everything else is identical between Inquire and chat.
@@ -76,6 +98,9 @@ export const anthropicMessagesHeaders = (bearer: string, stream?: boolean): Reco
   'anthropic-beta': ANTHROPIC_BETA,
   'User-Agent': ANTHROPIC_USER_AGENT,
   'x-app': 'cli',
+  'x-claude-code-session-id': CLAUDE_CODE_SESSION_ID,
+  'anthropic-dangerous-direct-browser-access': 'true',
+  ...stainlessHeaders(),
 });
 
 // POST one conversation to the Messages endpoint and return the raw Response. Bearer = the OAuth access
@@ -85,7 +110,8 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   const bearer = args.creds.accessToken;
   if (!bearer) throw new Error('Not signed in to Claude.');
 
-  const res = await fetch(`${args.baseUrl}/v1/messages`, {
+  // #149: real claude posts to /v1/messages?beta=true (the query flag rides every Messages request).
+  const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream),
     body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix })),
