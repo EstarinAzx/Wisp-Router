@@ -126,6 +126,16 @@ describe('parseWispAuth', () => {
     });
   });
 
+  test('the anthropic identity fields (#150) survive the round-trip; wrong-typed ones drop', () => {
+    const anthropic = {
+      accessToken: 'at', deviceId: 'ab'.repeat(32), accountUuid: 'u-1',
+      accountEmail: 'you@x.com', organizationName: 'Org', rateLimitTier: 'default_claude_max_20x',
+    };
+    expect(parseWispAuth(JSON.stringify({ anthropic }))).toEqual({ anthropic });
+    expect(parseWispAuth(JSON.stringify({ anthropic: { accessToken: 'at', deviceId: 7, accountUuid: null } })))
+      .toEqual({ anthropic: { accessToken: 'at' } });
+  });
+
   test('the xai slot sanitizes like its twins — string bearer/endpoint, numeric expiry, tombstone kept (#92)', () => {
     // A number in a Bearer field or a string in the expiry compare must be dropped; the endpoint stays a string.
     const raw = JSON.stringify({ xai: { accessToken: 'at', refreshToken: 42, expiresAt: 'later', tokenEndpoint: 'https://auth.x.ai/token' } });

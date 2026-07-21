@@ -23,7 +23,7 @@
 import {
   PROVIDERS, resolveKeyId, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isCodexSignedIn, isAnthropicSignedIn,
-  isXaiSignedIn, DEFAULT_EFFORT,
+  isXaiSignedIn, anthropicAccountLabel, DEFAULT_EFFORT,
   type Provider, type EffortLevel,
 } from '@wisp/core';
 import { home, activeProvider } from './store';
@@ -45,7 +45,8 @@ export const oauthProviders = (): Provider[] => PROVIDERS.filter(isOAuthProvider
 // CLI-import probe, so a never-used importable ~/.codex login reads signed out until first use).
 const oauthStatus = (p: Provider): string =>
   isCodexProvider(p) ? (isCodexSignedIn(home.readAuth().codex) ? 'signed in' : 'signed out')
-  : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? 'signed in' : 'signed out')
+  // #150: the bootstrap identity upgrades the bare status to "you@email · Max" when it was captured.
+  : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? (anthropicAccountLabel(home.readAuth().anthropic) ?? 'signed in') : 'signed out')
   : isXaiProvider(p) ? (isXaiSignedIn(home.readAuth().xai) ? 'signed in' : 'signed out')
   : '';
 

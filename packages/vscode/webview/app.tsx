@@ -34,6 +34,7 @@ type State = {
   isCustom: boolean;
   kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth';
   signedIn?: boolean;
+  account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   effortOptions?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]; // host-computed; 'max' only for max-capable Claude (#32)
@@ -288,7 +289,7 @@ export const App = () => {
               {state.signedIn ? (
                 <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
                   <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
-                  Signed in
+                  {state.account ?? 'Signed in'}
                 </span>
               ) : (
                 <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-descriptionForeground)]">

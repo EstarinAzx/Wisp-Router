@@ -4,6 +4,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isAnthropicProvider, isAnthropicSignedIn,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, parseAnthropicCreds,
+  parseAnthropicBootstrap, anthropicUserId, anthropicAccountLabel, mintAnthropicDeviceId,
   base64url, codeVerifier, codeChallenge, oauthState,
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
@@ -114,6 +115,78 @@ describe('parseAnthropicCreds', () => {
     expect(parseAnthropicCreds('{}')).toEqual({});
     expect(parseAnthropicCreds('{"accessToken":"at","refreshToken":"rt"}'))
       .toEqual({ accessToken: 'at', refreshToken: 'rt' });
+  });
+});
+
+describe('parseAnthropicBootstrap', () => {
+  // The bootstrap endpoint's oauth_account block, mapped to the creds identity fields (#150).
+  it('maps a full oauth_account to the identity fields', () => {
+    expect(parseAnthropicBootstrap({
+      oauth_account: {
+        account_uuid: 'u-1', account_email: 'you@x.com',
+        organization_name: 'Org', organization_rate_limit_tier: 'default_claude_max_20x',
+      },
+    })).toEqual({ accountUuid: 'u-1', accountEmail: 'you@x.com', organizationName: 'Org', rateLimitTier: 'default_claude_max_20x' });
+  });
+
+  // account_uuid is the field metadata.user_id needs — without it the payload is useless.
+  it('returns undefined without a string account_uuid', () => {
+    expect(parseAnthropicBootstrap(undefined)).toBeUndefined();
+    expect(parseAnthropicBootstrap({})).toBeUndefined();
+    expect(parseAnthropicBootstrap({ oauth_account: {} })).toBeUndefined();
+    expect(parseAnthropicBootstrap({ oauth_account: { account_uuid: 5 } })).toBeUndefined();
+  });
+
+  // Wrong-typed optional fields drop entry-by-entry — one bad field must not sink the uuid.
+  it('drops wrong-typed optional fields', () => {
+    expect(parseAnthropicBootstrap({ oauth_account: { account_uuid: 'u-1', account_email: 5, organization_name: null } }))
+      .toEqual({ accountUuid: 'u-1' });
+  });
+});
+
+describe('mintAnthropicDeviceId', () => {
+  // OmniRoute's cliUserID shape: 64 hex chars (32 random bytes), minted once and persisted.
+  it('mints a unique 64-hex id', () => {
+    const a = mintAnthropicDeviceId();
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(mintAnthropicDeviceId()).not.toBe(a);
+  });
+});
+
+describe('anthropicUserId', () => {
+  const deviceId = 'ab'.repeat(32);
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  // The real client's metadata.user_id blob — a JSON string with exactly these keys in this order.
+  it('serializes device_id/account_uuid/session_id in the real client order', () => {
+    expect(anthropicUserId({ deviceId, accountUuid: 'u-1', sessionId: 's-1' }))
+      .toBe(`{"device_id":"${deviceId}","account_uuid":"u-1","session_id":"s-1"}`);
+  });
+
+  // Bootstrap unavailable → a shape-correct uuid DERIVED from the device id (OmniRoute's fallback), so
+  // the same install always claims the same account_uuid rather than churning per request.
+  it('derives a deterministic shape-correct account uuid from the device id when none is stored', () => {
+    const a = JSON.parse(anthropicUserId({ deviceId, sessionId: 's' }));
+    expect(a.account_uuid).toMatch(UUID_RE);
+    expect(JSON.parse(anthropicUserId({ deviceId, sessionId: 's' })).account_uuid).toBe(a.account_uuid);
+    expect(JSON.parse(anthropicUserId({ deviceId: 'cd'.repeat(32), sessionId: 's' })).account_uuid).not.toBe(a.account_uuid);
+  });
+});
+
+describe('anthropicAccountLabel', () => {
+  // The "signed in as …" line (#150): email + a plan name read off the rate-limit tier.
+  it('joins email and the plan from the tier', () => {
+    expect(anthropicAccountLabel({ accountEmail: 'you@x.com', rateLimitTier: 'default_claude_max_20x' })).toBe('you@x.com · Max 20x');
+    expect(anthropicAccountLabel({ accountEmail: 'you@x.com', rateLimitTier: 'default_claude_max_5x' })).toBe('you@x.com · Max 5x');
+    expect(anthropicAccountLabel({ accountEmail: 'you@x.com', rateLimitTier: 'claude_pro' })).toBe('you@x.com · Pro');
+  });
+
+  // Unknown tier → just the email; no email → no label (the caller falls back to bare "signed in").
+  it('degrades to the bare email on an unknown tier and to undefined without an email', () => {
+    expect(anthropicAccountLabel({ accountEmail: 'you@x.com' })).toBe('you@x.com');
+    expect(anthropicAccountLabel({ accountEmail: 'you@x.com', rateLimitTier: 'mystery_tier' })).toBe('you@x.com');
+    expect(anthropicAccountLabel({ rateLimitTier: 'default_claude_max_20x' })).toBeUndefined();
+    expect(anthropicAccountLabel(undefined)).toBeUndefined();
   });
 });
 
@@ -752,6 +825,20 @@ describe('anthropicMessagesHeaders', () => {
   });
 });
 
+describe('buildAnthropicMessagesBody — metadata.user_id (#150)', () => {
+  const base = { model: 'm', maxTokens: 1, version: 'v', messages: [{ role: 'user' as const, content: 'hi' }] };
+
+  // The real client sends metadata.user_id on every Messages request; the caller passes the blob whole.
+  it('carries metadata.user_id when userId is passed', () => {
+    expect(buildAnthropicMessagesBody({ ...base, userId: 'blob' }).metadata).toEqual({ user_id: 'blob' });
+  });
+
+  // No userId → no metadata key at all (never an empty object on the wire).
+  it('omits metadata when no userId is passed', () => {
+    expect('metadata' in buildAnthropicMessagesBody(base)).toBe(false);
+  });
+});
+
 describe('toAnthropicTools', () => {
   // VS Code tool defs → Anthropic Messages tools: name/description/input_schema, the schema passed
   // through verbatim. Unlike Codex's strict Responses tools, Anthropic does NOT require closed objects —
@@ -1141,6 +1228,43 @@ describe('anthropicStream (streaming IO)', () => {
     const last = sentBody.system[sentBody.system.length - 1];
     expect(last).toEqual({ type: 'text', text: '<system-reminder>note</system-reminder>' });
     expect(sentBody.system[sentBody.system.length - 2].cache_control).toBeDefined();
+  });
+
+  // #150: the wire body carries the real client's metadata.user_id blob — session_id MUST repeat the
+  // x-claude-code-session-id header value, device/account ride from the stored creds.
+  it('sends metadata.user_id with the header session id, the creds device id, and the account uuid (#150)', async () => {
+    let sentBody: any; let sentHeaders: any;
+    vi.stubGlobal('fetch', async (_url: string, init: any) => {
+      sentBody = JSON.parse(init.body); sentHeaders = init.headers;
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    const deviceId = 'ab'.repeat(32);
+    await collect(anthropicStream({ ...args, creds: { accessToken: 'at', deviceId, accountUuid: 'acc-uuid' } }));
+    const blob = JSON.parse(sentBody.metadata.user_id);
+    expect(blob).toEqual({ device_id: deviceId, account_uuid: 'acc-uuid', session_id: sentHeaders['x-claude-code-session-id'] });
+  });
+
+  // #150: creds minted before this feature carry no identity — the wire still sends a shape-correct blob
+  // (per-process device id, derived account uuid) rather than omitting metadata.
+  it('falls back to a shape-correct device id + derived account uuid when creds carry none (#150)', async () => {
+    let sentBody: any; let sentHeaders: any;
+    vi.stubGlobal('fetch', async (_url: string, init: any) => {
+      sentBody = JSON.parse(init.body); sentHeaders = init.headers;
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    await collect(anthropicStream(args));
+    const blob = JSON.parse(sentBody.metadata.user_id);
+    expect(blob.device_id).toMatch(/^[0-9a-f]{64}$/);
+    expect(blob.account_uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(blob.session_id).toBe(sentHeaders['x-claude-code-session-id']);
   });
 
   // A clean tool_use turn (no answer text) is delivered content — must not throw or add any marker.
