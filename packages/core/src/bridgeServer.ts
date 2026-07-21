@@ -647,10 +647,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       res.write(enc.finish());
       res.end();
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
-      // and only a probable MISS is worth a line — a healthy hit/fresh turn stays silent so the log isn't noise.
+      // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
+      // log isn't noise.
       if (lastUsage && isAnthropicProvider(provider)) {
         const outcome = anthropicCacheOutcome(lastUsage, parsed.turns.length);
         if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${parsed.turns.length} — prefix re-billed uncached, check cache breakpoints (#111)`);
+        else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} turns=${parsed.turns.length} — probable history re-bill behind a stable prefix (#145)`);
       }
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure

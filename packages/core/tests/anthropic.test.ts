@@ -1300,4 +1300,25 @@ describe('anthropicCacheOutcome', () => {
   it('does not flag a large first-turn write as a miss', () => {
     expect(anthropicCacheOutcome(usage({ cache_creation_input_tokens: 77_000, input_tokens: 2 }), 1).kind).toBe('fresh');
   });
+
+  // #146 (#145's signature): something WAS read (the stable prefix) but a large re-write happened behind
+  // it — the whole-history re-bill hoisted reminders caused. Classifying it as a plain hit kept the log
+  // silent through 8-11 such events per session.
+  it('flags a read with a large re-write behind it as partial', () => {
+    const out = anthropicCacheOutcome(usage({ cache_read_input_tokens: 58_171, cache_creation_input_tokens: 34_000, input_tokens: 4 }), 9);
+    expect(out).toEqual({ kind: 'partial', readTokens: 58_171, creationTokens: 34_000, uncachedInput: 4 });
+  });
+
+  it('keeps a read with a small write behind it a healthy hit', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 58_171, cache_creation_input_tokens: 3_999, input_tokens: 4 }), 9).kind).toBe('hit');
+  });
+
+  it('flags partial exactly at the creation floor', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 10_000, cache_creation_input_tokens: 4_000 }), 3).kind).toBe('partial');
+  });
+
+  // The first exchange legitimately writes the whole history behind whatever prefix a warm server had.
+  it('exempts the first exchange from partial', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 10_000, cache_creation_input_tokens: 30_000 }), 1).kind).toBe('hit');
+  });
 });
