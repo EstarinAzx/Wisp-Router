@@ -68,6 +68,23 @@ describe('buildCodexResponsesBody', () => {
     });
   });
 
+  // #145: the Anthropic door now forwards positioned mid-conversation system turns; on the Responses
+  // shape they fold into instructions (content preserved) and never crash or leak into input.
+  it('folds a mid-conversation system message into instructions', () => {
+    const messages: EditMessage[] = [
+      { role: 'system', content: 'rules' },
+      { role: 'user', content: 'hi' },
+      { role: 'system', content: 'hook note' },
+      { role: 'user', content: 'go' },
+    ];
+    const body = buildCodexResponsesBody({ model: 'gpt-5-codex', messages });
+    expect(body.instructions).toBe('rules\n\nhook note');
+    expect(body.input).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] },
+    ]);
+  });
+
   // The Codex backend REQUIRES instructions (400 "Instructions are required" otherwise). The native-chat
   // path carries no system turn (VS Code's chat API has no System role), so default it rather than omit.
   it('defaults instructions when there is no system message', () => {

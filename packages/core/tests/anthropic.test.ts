@@ -239,6 +239,69 @@ describe('buildAnthropicMessagesBody', () => {
       expect(body.system[1]).toEqual({ type: 'text', text: 'note' });
     });
 
+    // #145: a mid-conversation system message (after the leading run) stays POSITIONED in messages as a
+    // single text block — role:"system" passthrough on the wire (mid-conversation-system beta). Only the
+    // LEADING system run lifts into the top-level system array; the attribution still samples the first
+    // user turn.
+    it('keeps a mid-conversation system message positioned as a role:system text block', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', messages: [
+        { role: 'system', content: 'rules' },
+        { role: 'user', content: 'hi' },
+        { role: 'system', content: 'hook note' },
+        { role: 'user', content: 'go' },
+      ] }) as any;
+      expect(body.system.map((b: any) => b.text)).toEqual([anthropicAttribution('hi', 'v'), 'rules']);
+      expect(body.messages[0]).toEqual({ role: 'user', content: 'hi' });
+      expect(body.messages[1]).toEqual({ role: 'system', content: [{ type: 'text', text: 'hook note' }] });
+      expect(body.messages[2].role).toBe('user');
+    });
+
+    // A SECOND leading system message is a positioned turn ahead of the first user turn (only the
+    // Anthropic door produces it) — hoisting it into the marked stable block would put its churn back in
+    // front of the whole history. The attribution still samples the first USER turn.
+    it('hoists at most one leading system message — a second stays positioned', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', messages: [
+        { role: 'system', content: 'rules' },
+        { role: 'system', content: 'early note' },
+        { role: 'user', content: 'hi' },
+      ] }) as any;
+      expect(body.system.map((b: any) => b.text)).toEqual([anthropicAttribution('hi', 'v'), 'rules']);
+      expect(body.messages[0]).toEqual({ role: 'system', content: [{ type: 'text', text: 'early note' }] });
+    });
+
+    // A positioned system turn's text block is markable (native Claude Code marks these too) — as the
+    // final message it takes the end-of-history breakpoint.
+    it('marks the final block when the last message is a positioned system turn', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'system', content: 'hook note' },
+      ] }) as any;
+      expect(body.messages[1].content[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    });
+
+    // #145 churn regression: appending a new reminder near the tail must leave the top-level system array
+    // and every message before the previous final turn byte-identical — the old hoisting rendered
+    // reminders ahead of the whole history, re-billing everything behind them on each change. (The
+    // previous final turn itself legitimately re-renders: it carried the end marker.)
+    it('keeps the prefix byte-stable when a new positioned system turn is appended', () => {
+      const before = [
+        { role: 'system' as const, content: 'rules' },
+        { role: 'user' as const, content: 'hi' },
+        { role: 'assistant' as const, content: 'yo' },
+        { role: 'system' as const, content: 'reminder-1' },
+        { role: 'user' as const, content: 'go' },
+      ];
+      const after = [...before,
+        { role: 'assistant' as const, content: 'done' },
+        { role: 'system' as const, content: 'reminder-2' },
+        { role: 'user' as const, content: 'next' },
+      ];
+      const b1 = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: before }) as any;
+      const b2 = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', messages: after }) as any;
+      expect(JSON.stringify(b2.system)).toBe(JSON.stringify(b1.system));
+      expect(JSON.stringify(b2.messages.slice(0, 3))).toBe(JSON.stringify(b1.messages.slice(0, 3)));
+    });
+
     // An absent or empty suffix must leave the body byte-identical to today's shape.
     it('builds an identical body when systemSuffix is absent or empty', () => {
       const args = { model: 'm', maxTokens: 1, version: 'v', cacheTtl: '5m' as const, messages: [{ role: 'system' as const, content: 'rules' }, { role: 'user' as const, content: 'hi' }] };
@@ -640,6 +703,12 @@ describe('anthropicMessagesHeaders', () => {
   // silently dropped. Advertised on every request (harmless when the body omits output_config).
   it('advertises the effort beta so output_config.effort is honored', () => {
     expect(anthropicMessagesHeaders('tok')['anthropic-beta']).toContain('effort-2025-11-24');
+  });
+
+  // #145 rides the mid-conversation-system beta: positioned role:"system" turns in messages[] are gated
+  // on it (claude CLI advertises the same token natively).
+  it('advertises the mid-conversation-system beta so positioned system turns are accepted', () => {
+    expect(anthropicMessagesHeaders('tok')['anthropic-beta']).toContain('mid-conversation-system-2026-04-07');
   });
 
   // The streaming request must accept an event stream; the non-streaming (Inquire) request must not.
@@ -1243,5 +1312,26 @@ describe('anthropicCacheOutcome', () => {
 
   it('does not flag a large first-turn write as a miss', () => {
     expect(anthropicCacheOutcome(usage({ cache_creation_input_tokens: 77_000, input_tokens: 2 }), 1).kind).toBe('fresh');
+  });
+
+  // #146 (#145's signature): something WAS read (the stable prefix) but a large re-write happened behind
+  // it — the whole-history re-bill hoisted reminders caused. Classifying it as a plain hit kept the log
+  // silent through 8-11 such events per session.
+  it('flags a read with a large re-write behind it as partial', () => {
+    const out = anthropicCacheOutcome(usage({ cache_read_input_tokens: 58_171, cache_creation_input_tokens: 34_000, input_tokens: 4 }), 9);
+    expect(out).toEqual({ kind: 'partial', readTokens: 58_171, creationTokens: 34_000, uncachedInput: 4 });
+  });
+
+  it('keeps a read with a small write behind it a healthy hit', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 58_171, cache_creation_input_tokens: 3_999, input_tokens: 4 }), 9).kind).toBe('hit');
+  });
+
+  it('flags partial exactly at the creation floor', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 10_000, cache_creation_input_tokens: 4_000 }), 3).kind).toBe('partial');
+  });
+
+  // The first exchange legitimately writes the whole history behind whatever prefix a warm server had.
+  it('exempts the first exchange from partial', () => {
+    expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 10_000, cache_creation_input_tokens: 30_000 }), 1).kind).toBe('hit');
   });
 });
