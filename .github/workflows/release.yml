@@ -30,7 +30,7 @@ jobs:
             binary: wisp
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
 
       # The tag is the single version source — a binary whose baked-in package.json version
@@ -71,7 +71,7 @@ jobs:
           curl -s http://127.0.0.1:41184/v1/models | grep -q "access secret"
           kill $SERVE_PID
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wisp-${{ matrix.target }}
           path: packages/tui/dist/${{ matrix.binary }}
@@ -83,13 +83,13 @@ jobs:
     permissions:
       contents: write # create the GitHub release + upload assets
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
 
