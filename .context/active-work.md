@@ -8,63 +8,72 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: cca576c (v2.0.28 released) + this wrap-up commit._
+_At commit: e931080 (CI action bumps) + this wrap-up commit._
 
 ## Current focus
 
-**Nothing in flight.** v2.0.28 shipped and live on npm: #143 advisor reviewer
-token usage now surfaces to Claude Code as `usage.iterations`
-(`advisor_message` entries + final base pass last), so `/cost` and session
-totals include advisor consults. The advisor saga is closed: quarantine
-(2.0.26) → cacheable transcript (2.0.27) → visible cost (2.0.28).
+**Next up: #145 — Anthropic door cache re-bill amplifier.** Diagnosed this
+session from transcript usage frames: bridged sessions re-bill the whole
+conversation history at the stable-prefix boundary every ~7 requests (vs ~71
+native) because the parse hoists mid-conversation `role:system` turns into the
+#139 volatile suffix, which renders ahead of the entire message history. Cost:
+0.6–1.2M wasted write-tokens per heavy session. Decision recorded in
+[[2026-07-21-positioned-mid-conversation-system-matters]].
 
 ## State
 
-- **In flight:** nothing. Ticket queue empty — no open `ready-for-agent` issues.
+- **In flight:** nothing — diagnosis done, tickets filed, no code started.
+- **Queue:** two `ready-for-agent` issues:
+  1. **#145** — preserve mid-conversation system turn position (parse keeps
+     positioned turns; body builder emits at position — `role:system`
+     passthrough if the OAuth wire takes the mid-conversation-system beta,
+     else user-turn text block). FIRST STEP: capture one bridged request and
+     confirm the churny blocks really arrive as `role:system` turns.
+  2. **#146** — `anthropicCacheOutcome` gains a `partial` kind (read stalled
+     at stable prefix + creation ≥ 4k floor) + advisory bridge log line; the
+     current guard calls every fallback a `hit` and stays silent.
 - **Done this session:**
-  1. **#143 shipped** (grilled design → TDD → PR #144 squash-merged →
-     `v2.0.28` tagged, release green, npm live). Design recorded in
-     [[2026-07-21-advisor-usage-iterations-shape]]; mechanics in code comments
-     (bridgeAnthropic.ts `usageIterations` + `runAdvisorLoop`, bridgeServer.ts
-     reviewer). 586/586 tests (7 new).
-  2. **Live-verified:** headless source serve + real `claude-wisp -p` forcing
-     one advisor consult — Claude Code folded advisor tokens into `modelUsage`
-     (450 output = 445 advisor + 5 base) and `total_cost_usd`; serve log clean,
-     no cache-MISS line.
+  1. Chore: release.yml actions off Node 20 (checkout/setup-node v5,
+     upload-artifact v6, download-artifact v7) — e931080, pushed.
+  2. Cache forensics: per-session usage-frame analysis across 4 transcripts
+     (2 wisp, 1 native, 1 mixed); wisp fallback rate 10× native; evidence
+     tables live in #145.
+  3. Confirmed user's installed binary is 2.0.28 (usage.iterations flowing,
+     advisor consult visible in /cost).
 - **Blocked:** none.
 
 ## Pick up here
 
-No queued task. Candidates, in rough value order:
-
-1. **User-side:** stop `wisp.exe` (already stopped as of this session's end),
-   `npm i -g wisp-router` → 2.0.28. Advisor cost visibility only applies once
-   the installed binary is current.
-2. **Small chore:** bump Node-20-deprecated actions in
-   `.github/workflows/release.yml` (`actions/checkout@v4`,
-   `upload-artifact@v4` — warnings on every release run).
-3. New feature work → start at the funnel (`/preset init` or grill).
+Start #145 via the normal ticket flow (branch → TDD → PR). The verify-first
+step is cheap: log one bridged request body (or add a temp dump in
+`parseAnthropicMessagesRequest`) and check whether Claude Code's mid-session
+reminders arrive as `role:"system"` turns vs top-level system churn. If they
+turn out to be top-level only, #145's fix shape changes — re-read the issue
+before coding. #146 is independent and small; good same-branch or follow-up.
 
 ## Skills for next session
 
-- `/preset catch-up` if the pick-up note is gone; otherwise the note is enough.
+- `/preset pick-up` — note points here.
+- Ticket flow: `/preset ticket-loop` works (queue has 2 ready-for-agent).
 
 ## Open questions
 
-- None.
+- Does the Anthropic OAuth wire accept the mid-conversation-system beta
+  (positioned `role:system` in `messages`)? Determines #145's emit shape.
 
 ## Recent context
 
-- openclaude parse facts pinned during #143 (worth remembering for any future
-  usage-shaping work): `getAdvisorUsage` filters `iterations` by
-  `type === 'advisor_message'`; `iterations[-1]` is the authoritative final
-  context window; streaming merge keeps the most recent frame's `iterations`;
-  unknown model ids price at `DEFAULT_UNKNOWN_MODEL_COST` + flag.
-- Advisor billing that is BY DESIGN (not bugs): each consult bills the
-  conversation fresh (cached where possible); cheap families pinned to heavy
-  Targets burn at the heavy rate.
-- The #111 MISS guard still logs `prompt-cache MISS … creation=…` in serve
-  output if the bust shape returns; silence = healthy.
+- Analysis technique worth reusing: Claude Code transcript jsonl
+  (`~/.claude/projects/<proj>/<session>.jsonl`) records per-request
+  `cache_read/creation_input_tokens` — client-side cache forensics without
+  touching serve logs. Dedup frames by `requestId`.
+- Session fixed tax measured: 54–88k tokens cold-written per session start
+  (system + tools + MCP instructions + skills); user-side ecosystem prune is
+  a separate, non-wisp lever.
+- Landmines (unchanged from #143): `usage.iterations` last entry = final base
+  pass; reviewer usage never enters the `usage` event channel;
+  `anthropicAttribution` samples the FIRST user message; max 4 cache_control
+  markers, thinking blocks unmarkable (mark() slide).
 
 ## Related
 
