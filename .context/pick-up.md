@@ -9,16 +9,19 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE, PR open): #149 — Tier-1 fingerprint parity.**
+**Last task (DONE + CLOSED): #149 — Tier-1 fingerprint parity.**
 
-- Branch `149-fingerprint-parity` (`63276bf`, off main), PR open. 605 tests green,
-  compile clean. All changes in `packages/core/src/anthropicClient.ts` + tests.
+- Merged to `main` via #153 (merge `eece31d`). 605 tests green, compile clean.
+  All changes in `packages/core/src/anthropicClient.ts` + tests.
 - Shipped: `CLAUDE_CODE_VERSION` 0.19.0 → 2.1.216 (feeds UA + `cc_version` block),
   8 `x-stainless-*` headers, per-process `x-claude-code-session-id`,
   `anthropic-dangerous-direct-browser-access`, POST `/v1/messages?beta=true`.
-- **#149 stays OPEN** — acceptance is a live `ANTHROPIC_BASE_URL` re-capture vs real
-  2.1.216 (interactive bridged session, NOT `-p`), diffing all outbound headers.
-  Unit-green is not wire-verified. Breadcrumb posted on the issue.
+- **Live-verified + closed:** dev build (`bun src/index.tsx serve`) served a real
+  bridged Fable-5 session via the Anthropic OAuth path — `hello`→reply, tokens
+  flowing, no 429. Fingerprint accepted by the live backend. Optional byte-exact
+  header-diff harness (listener + temp base redirect) was written + smoke-tested
+  but is unused — see scratchpad `capture-149.mjs` if a literal wire match is ever
+  wanted.
 
 **Next task: #150 — bootstrap account identity + `metadata.user_id` (`ready-for-agent`).**
 

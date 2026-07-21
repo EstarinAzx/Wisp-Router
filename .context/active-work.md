@@ -8,20 +8,19 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: c385c04 (v2.0.29 release) + later wrap-ups; #149 on branch
-`149-fingerprint-parity` (63276bf), PR open._
+_At commit: eece31d (#153 merge — #149 fingerprint parity on main)._
 
 ## Current focus
 
-**#149 implemented + PR open — awaiting live wire-capture before close.** Tier-1
-fingerprint parity coded on branch `149-fingerprint-parity` (605 tests green,
-compile clean), pushed, PR opened. Issue kept OPEN: the unit tests restate the
-ticket, not its acceptance — acceptance is a live `ANTHROPIC_BASE_URL` re-capture
-against an interactive bridged session. Next code ticket: **#150**.
+**#149 DONE + CLOSED + live-verified.** Tier-1 fingerprint parity merged to `main`
+via #153 (605 tests green, compile clean). Live-verified: the dev bridge served a
+real bridged Fable-5 session via the Anthropic OAuth path — turns flowed, no 429,
+so the 2.1.216 fingerprint is accepted by the live backend. Next code ticket:
+**#150**.
 
 ## State
 
-- **In flight:** #149 PR open (branch `149-fingerprint-parity`, off main).
+- **In flight:** nothing (#149 merged + closed).
 - **Queue (`ready-for-agent`):** **#150** (bootstrap account identity +
   `metadata.user_id`), **#151** (shape-aware `anthropic-beta` 4→12). **#152**
   (cache-diagnosis probe) is `ready-for-human`. Umbrella **#148** tracks all.
@@ -68,6 +67,13 @@ shipped; the user-side session-start cold-write prune (`/preset health`, non-wis
 
 ## Recent context
 
+- **Live cache MISS seen during #149 verification (feeds #152):** a bridged
+  Fable-5 session logged `prompt-cache MISS anthropic claude-fable-5: read=0
+  creation=77566 uncached_input=2 turns=19 — prefix re-billed uncached`. NOT a
+  #149 side effect (the version bump / `?beta=true` / stainless headers don't key
+  the cache); it's the pre-existing breakpoint-diagnosis concern (#111/#146) that
+  #152 exists to probe. One mid-session miss ≠ the ~1/7 amplifier #145 fixed —
+  likely a TTL lapse or breakpoint shift. Datapoint for the #152 probe, not a regression.
 - **Capture technique worth reusing:** point `ANTHROPIC_BASE_URL` at a tiny
   local listener that dumps request bodies (never headers — bearer rides
   there) and answers canned SSE; run `claude -p` / `claude -p -c` for
