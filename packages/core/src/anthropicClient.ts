@@ -70,7 +70,7 @@ const ANTHROPIC_USER_AGENT = `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`
 
 // The Stainless SDK headers real claude emits — its bundled @anthropic-ai/sdk is a Stainless build that
 // tags every request with these. Fixed values are copied from the 2.1.216 capture; arch/os/runtime-version
-// derive from the host (a Node process, matching the claude-cli runtime). #149.
+// derive from the host runtime (the bridge may run under Bun, whose Node-compat process.* answers here). #149.
 const STAINLESS_ARCH: Record<string, string> = { x64: 'x64', arm64: 'arm64', ia32: 'x32' };
 const STAINLESS_OS: Record<string, string> = { win32: 'Windows', darwin: 'MacOS', linux: 'Linux' };
 const stainlessHeaders = (): Record<string, string> => ({

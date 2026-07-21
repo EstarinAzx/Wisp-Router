@@ -1109,6 +1109,22 @@ describe('anthropicStream (streaming IO)', () => {
     expect(sentUrl).toBe('https://x/v1/messages?beta=true');
   });
 
+  // #149: the version bump must reach the WIRE BODY's cc_version billing block, not only the UA — the
+  // client feeds CLAUDE_CODE_VERSION into the attribution fingerprint the backend ties to the UA.
+  it('embeds cc_version=2.1.216 in the request body attribution block', async () => {
+    let sentBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: any) => {
+      sentBody = JSON.parse(init.body);
+      return sseResponse([
+        'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"hi"}}',
+        'event: message_delta\ndata: {"delta":{"stop_reason":"end_turn"}}',
+        'event: message_stop\ndata: {"type":"message_stop"}',
+      ]);
+    });
+    await collect(anthropicStream(args));
+    expect(sentBody.system[0].text).toContain('cc_version=2.1.216.');
+  });
+
   // #139: the Bridge threads the volatile system tail through to the body builder — the wire body must
   // carry it as the last (unmarked) system block.
   it('threads systemSuffix through to the request body', async () => {
