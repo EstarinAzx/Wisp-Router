@@ -6,6 +6,21 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.30] — 2026-07-21
+
+### Added
+
+- **Server-side cache diagnostics on the Anthropic OAuth path (#156).** Every
+  OAuth Messages request now rides the `cache-diagnosis-2026-04-07` beta and
+  names its previous response id (`diagnostics.previous_message_id`, chained
+  per conversation by the Bridge). When the backend diagnoses a broken cache
+  prefix, the prompt-cache MISS line reports the server's authoritative
+  reason and re-billed magnitude — e.g. `reason=system_changed
+  missed_input=6594` — instead of only the usage-number inference. The
+  existing heuristic stays as fallback (the server reports nothing on
+  PARTIAL-shaped turns and unchained requests). Probe on #152 confirmed the
+  subscription backend honors the beta; healthy turns still log nothing.
+
 ## [2.0.29] — 2026-07-21
 
 ### Fixed
