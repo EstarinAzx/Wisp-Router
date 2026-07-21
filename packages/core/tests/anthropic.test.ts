@@ -12,7 +12,7 @@ import {
   anthropicUsage, anthropicCacheOutcome,
   type Provider, type SseEvent, type BridgeUsage,
 } from '../src/catalog';
-import { anthropicMessagesHeaders, anthropicStream } from '../src/anthropicClient';
+import { anthropicMessagesHeaders, anthropicStream, selectAnthropicBetas } from '../src/anthropicClient';
 
 const provider = (over: Partial<Provider> = {}): Provider => ({
   id: 'anthropic', label: 'Claude', baseUrl: 'https://api.anthropic.com',
@@ -822,6 +822,59 @@ describe('anthropicMessagesHeaders', () => {
   // #149: real claude sends the direct-browser-access flag on every Messages request.
   it('flags anthropic-dangerous-direct-browser-access', () => {
     expect(anthropicMessagesHeaders('tok')['anthropic-dangerous-direct-browser-access']).toBe('true');
+  });
+
+  // #151: the model threads through to beta selection — a Haiku request must not carry the
+  // model-gated tokens (context-1m, advisor-tool).
+  it('threads the model into anthropic-beta selection', () => {
+    const beta = anthropicMessagesHeaders('tok', false, 'claude-haiku-4-5')['anthropic-beta'];
+    expect(beta).not.toContain('context-1m-2025-08-07');
+    expect(beta).not.toContain('advisor-tool-2026-03-01');
+    expect(beta).toContain('claude-code-20250219');
+  });
+});
+
+describe('selectAnthropicBetas (#151)', () => {
+  // Parity target: real claude-cli 2.1.216 sent these 12 on a plain agentic probe (capture 2026-07-21).
+  it('matches the 12-token 2.1.216 capture for a 1M-capable model', () => {
+    expect(selectAnthropicBetas('claude-opus-4-8').split(',')).toEqual([
+      'claude-code-20250219',
+      'oauth-2025-04-20',
+      'effort-2025-11-24',
+      'mid-conversation-system-2026-04-07',
+      'context-1m-2025-08-07',
+      'interleaved-thinking-2025-05-14',
+      'thinking-token-count-2026-05-13',
+      'context-management-2025-06-27',
+      'prompt-caching-scope-2026-01-05',
+      'advisor-tool-2026-03-01',
+      'fallback-credit-2026-06-01',
+      'extended-cache-ttl-2025-04-11',
+    ]);
+    expect(selectAnthropicBetas('claude-sonnet-4-6')).toContain('context-1m-2025-08-07');
+    // Exclusion gate, not an allowlist: new families inherit 1M the way real claude's latch pushes it.
+    expect(selectAnthropicBetas('claude-sonnet-5')).toContain('context-1m-2025-08-07');
+    expect(selectAnthropicBetas('claude-fable-5')).toContain('context-1m-2025-08-07');
+  });
+
+  // Haiku is never an advisor base and has no 1M variant; everything else (incl. the thinking betas —
+  // haiku-4-5 is a claude-4+ model — and the claude-code 429 gate) stays on.
+  it('drops the model-gated tokens on Haiku, keeps the recognition gate', () => {
+    const betas = selectAnthropicBetas('claude-haiku-4-5').split(',');
+    expect(betas).not.toContain('context-1m-2025-08-07');
+    expect(betas).not.toContain('advisor-tool-2026-03-01');
+    expect(betas).toContain('claude-code-20250219');
+    expect(betas).toContain('interleaved-thinking-2025-05-14');
+    expect(betas).toContain('thinking-token-count-2026-05-13');
+    expect(betas).toHaveLength(10);
+  });
+
+  // 1M context excludes the known non-1M models (haiku, claude-3, opus before 4-6).
+  it('gates context-1m off the known non-1M models', () => {
+    const betas = selectAnthropicBetas('claude-opus-4-1').split(',');
+    expect(betas).not.toContain('context-1m-2025-08-07');
+    expect(betas).toContain('advisor-tool-2026-03-01');
+    expect(betas).toHaveLength(11);
   });
 });
 
