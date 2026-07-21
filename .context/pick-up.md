@@ -9,37 +9,33 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE): #143 (v2.0.28) — advisor cost visible to Claude Code.**
+**Last task (DONE): cache-burn forensics → #145 + #146 filed.**
 
-- Advisor reviewer usage now rides as `usage.iterations` on the door's closing
-  usage frame: `advisor_message` entries (resolved Target model + tokens),
-  final base pass last. Grilled design in
-  [[2026-07-21-advisor-usage-iterations-shape]]; PR #144, live-verified
-  (Claude Code folded advisor tokens into `modelUsage` + `total_cost_usd`).
-- Advisor saga now fully closed: 2.0.26 quarantine → 2.0.27 cacheable
-  transcript → 2.0.28 visible cost.
+- Found the wisp quota eater: bridged sessions re-bill the WHOLE conversation
+  history every ~7 requests (native: ~71) — the parse hoists mid-conversation
+  `role:system` turns into the #139 volatile suffix, ahead of all messages.
+  0.6–1.2M wasted write-tokens per heavy session. Decision:
+  [[2026-07-21-positioned-mid-conversation-system-matters]].
+- Also shipped: release.yml action bumps off Node 20 (e931080, pushed).
 
-**Next task: none urgent.** Candidates:
+**Next task: #145 (preserve mid-conversation system position).**
 
-1. Remind the user to reinstall if they haven't: `wisp.exe` was left STOPPED
-   this session; `npm i -g wisp-router` → 2.0.28, then restart serve.
-2. Idle chore: bump Node-20-deprecated actions in
-   `.github/workflows/release.yml` (checkout@v4, upload-artifact@v4 warnings
-   on every release).
-3. New feature work → funnel (`/preset init` or grill).
+- FIRST: verify the churn shape — capture one bridged request and confirm
+  reminders arrive as `role:"system"` turns (issue lists the fix shape for
+  both outcomes). Then branch → TDD → PR per ticket flow.
+- #146 (guard `partial` outcome + log line) is small and independent —
+  same branch or follow-up.
 
 **Landmines:**
 
-- `usage.iterations` last entry MUST stay the final base pass — Claude Code
-  reads `iterations[-1]` as the authoritative context window; an advisor entry
-  there corrupts window math. Encoded in `usageIterations()` +
-  bridgeAnthropic tests; don't "simplify" it away.
-- Reviewer usage must never enter the `usage` event channel — top-level usage
-  + the #111 `anthropicCacheOutcome` guard read the base pass only.
-- `anthropicAttribution` fingerprint samples the FIRST user message —
-  server-validated; don't change what text feeds it.
-- Max 4 `cache_control` markers per request; thinking blocks unmarkable; the
-  mark() slide logic in anthropic.ts handles both — don't break.
+- `anthropicAttribution` samples the FIRST user message — #145 must not
+  change what text feeds it.
+- Max 4 `cache_control` markers per request; thinking blocks unmarkable —
+  mark() slide in anthropic.ts handles both; positioned system turns must
+  stay markable text blocks or anchor null cleanly.
+- #139's top-level stable/volatile split is CORRECT — #145 only moves
+  mid-conversation turns, don't touch the systemSplit layer.
+- `usage.iterations` last entry must stay the final base pass.
 
 ## Related
 

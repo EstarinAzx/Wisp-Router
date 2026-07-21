@@ -462,6 +462,18 @@ describe('buildOpenAiChatMessages', () => {
       .toEqual([{ role: 'assistant', content: 'sure' }]);
   });
 
+  // #145: a positioned system turn (Anthropic-door hook reminder) rides through as a system message at
+  // its place in the sequence — OpenAI-compatible backends accept mid-conversation system messages.
+  it('keeps a positioned system turn as a system message in place', () => {
+    expect(buildOpenAiChatMessages([
+      { role: 'user', text: 'hi', toolCalls: [], toolResults: [] },
+      { role: 'system', text: 'hook note', toolCalls: [], toolResults: [] },
+    ])).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'system', content: 'hook note' },
+    ]);
+  });
+
   // An assistant turn that called tools carries them as OpenAI tool_calls (arguments already a JSON string).
   it('carries assistant tool calls as OpenAI tool_calls', () => {
     const turn = {

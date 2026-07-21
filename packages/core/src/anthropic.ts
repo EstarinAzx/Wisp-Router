@@ -105,9 +105,10 @@ export const anthropicTruncationReason = (stopReason: string | undefined): strin
   stopReason === 'max_tokens' || stopReason === 'content_filter' || stopReason === 'refusal' ? stopReason : undefined;
 
 // One conversation message for the Messages backend. Inquire sends system+user; native chat sends
-// user/assistant. The Messages API carries the system prompt top-level (not as a role), so a 'system'
-// entry here is lifted out by the body builder. Agent mode also carries a turn's tool round-trip:
-// toolCalls on an assistant turn, toolResults on a user turn — expanded to content blocks below.
+// user/assistant. The Messages API carries the system prompt top-level (not as a role), so a LEADING
+// 'system' entry here is lifted out by the body builder; a system entry after any non-system stays
+// positioned in messages (#145 — the mid-conversation-system beta). Agent mode also carries a turn's tool
+// round-trip: toolCalls on an assistant turn, toolResults on a user turn — expanded to content blocks below.
 export type AnthropicMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -183,9 +184,10 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 
 // ----------------------------- Anthropic Messages body + reply reducers ----------------------------- //
 
-// Translate a conversation into an Anthropic Messages request body. The system text moves to the top-level
-// `system` block array, led by the Claude Code attribution block (its fingerprint derived from the first
-// user turn's TEXT — so it MUST stay sourced from `content`). A turn with tool calls/results expands to a
+// Translate a conversation into an Anthropic Messages request body. The LEADING system text moves to the
+// top-level `system` block array, led by the Claude Code attribution block (its fingerprint derived from
+// the first user turn's TEXT — so it MUST stay sourced from `content`); mid-conversation system stays
+// positioned (#145). A turn with tool calls/results expands to a
 // content BLOCK array (assistant: text then tool_use; user: tool_result FIRST then text); a plain turn
 // stays a bare string — EXCEPT the final turn, which converts to one text block so it can carry the cache
 // breakpoint (#111). An empty text block is never emitted. tools ride only when non-empty.
@@ -196,19 +198,31 @@ export const buildAnthropicMessagesBody = (args: {
   // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
   systemSuffix?: string;
 }) => {
-  const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
-  const convo = args.messages.filter((m) => m.role !== 'system');
-  const firstUserMessage = convo[0]?.content ?? '';
+  // #145: at most ONE leading system message lifts into the top-level system array — every caller
+  // (Inquire, native chat, the bridge arms, the reviewer) prepends exactly one. Any other system message
+  // stays POSITIONED in `messages` as a role:"system" turn (the mid-conversation-system beta — Claude
+  // Code's hook reminders), so its churn re-bills only the tail behind it instead of the whole history.
+  // That includes a SECOND leading one: only the Anthropic door produces it (a positioned turn ahead of
+  // the first user turn), and hoisting it into the marked stable block would resurrect the amplifier.
+  const lead = args.messages[0]?.role === 'system' ? 1 : 0;
+  const wispSystem = args.messages.slice(0, lead).map((m) => m.content).join('\n\n');
+  const convo = args.messages.slice(lead).filter((m) => m.role !== 'system' || m.content);
+  // First USER turn, not convo[0]: a positioned system turn can now sit ahead of it, and the server
+  // validates the fingerprint against the first user message's text.
+  const firstUserMessage = convo.find((m) => m.role === 'user')?.content ?? '';
   const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '1h' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
-  type BuiltTurn = { role: 'user' | 'assistant'; content: string | unknown[] };
+  type BuiltTurn = { role: 'user' | 'assistant' | 'system'; content: string | unknown[] };
   // Computed once, up front: the replay decision below and the body spread at the bottom must agree —
   // replaying thinking blocks into a thinking-off request is a 400, same as dropping them from a
   // thinking-on tool continuation.
   const thinkingEffort = anthropicThinkingEffort(args.model, args.effort);
   const messages: BuiltTurn[] = convo.map((m) => {
+    // #145: a positioned system turn is a single text block — a markable anchor for the walk below
+    // (native Claude Code marks these blocks too), never a bare string.
+    if (m.role === 'system') return { role: 'system' as const, content: [{ type: 'text', text: m.content }] };
     if (m.role === 'assistant') {
       // Thinking passthrough: a turn with the door's byte-for-byte sidecar replays it VERBATIM when this
       // body enables thinking — signatures + interleaved order intact. Thinking off → sidecar skipped,
@@ -357,23 +371,29 @@ export const anthropicUsage = (ev: SseEvent): BridgeUsage | undefined => {
 // whole value on the OAuth path is NOT re-billing the conversation prefix as uncached input every turn
 // (#111) — this is the signal that prompt caching is working, or that it silently regressed. Pure, so it's
 // testable without a live backend; the Bridge calls it to surface a probable miss in its log.
-//   - hit:   the request read a cached prefix (cache_read > 0) — the healthy steady state.
+//   - hit:   the request read a cached prefix (cache_read > 0) with only a small write behind it — the
+//            healthy steady state.
+//   - partial: something was read but a LARGE re-write happened behind it (#146) — the #145 amplifier's
+//            signature: the read stalled at the stable prefix and the history re-billed behind it.
+//            Advisory, not an error: post-compaction rebuilds, mid-session TTL expiry, and a genuinely
+//            long new turn all look the same.
 //   - fresh: nothing read but something written (a first turn, or a legitimately changed prefix) — normal.
 //   - miss:  a multi-turn request read NOTHING from cache while billing a large uncached input — the stable
-//            prefix was not reused. This is the #111 regression shape; the only kind worth alerting on.
+//            prefix was not reused. This is the #111 regression shape.
 //   - none:  no cache activity at all (tiny prompt, or a provider that doesn't cache) — nothing to say.
 // Turn count is this request's conversation turns (system stripped): turn 1 legitimately has no prior write
-// to read, so a miss is only inferred once the body is past the first exchange (≥3 turns).
-export type AnthropicCacheOutcome = { kind: 'hit' | 'fresh' | 'miss' | 'none'; readTokens: number; creationTokens: number; uncachedInput: number };
+// to read, so a miss/partial is only inferred once the body is past the first exchange (≥3 turns).
+export type AnthropicCacheOutcome = { kind: 'hit' | 'partial' | 'fresh' | 'miss' | 'none'; readTokens: number; creationTokens: number; uncachedInput: number };
 export const anthropicCacheOutcome = (usage: BridgeUsage, turnCount: number): AnthropicCacheOutcome => {
   const readTokens = usage.cache_read_input_tokens;
   const creationTokens = usage.cache_creation_input_tokens;
   const uncachedInput = usage.input_tokens;
   const base = { readTokens, creationTokens, uncachedInput };
+  const MISS_UNCACHED_FLOOR = 4_000;
+  if (readTokens > 0 && turnCount >= 3 && creationTokens >= MISS_UNCACHED_FLOOR) return { kind: 'partial', ...base };
   if (readTokens > 0) return { kind: 'hit', ...base };
   // A big uncached input on a request that should have had a cached prefix — but only past the first
   // exchange, and only when the uncached input is large enough that a real prefix must have existed.
-  const MISS_UNCACHED_FLOOR = 4_000;
   if (turnCount >= 3 && uncachedInput >= MISS_UNCACHED_FLOOR) return { kind: 'miss', ...base };
   // #139: the system-fold bust re-billed the prefix through cache_CREATION (input stayed ~2), invisible
   // to the input check above. Nothing read + a large re-WRITE past the first exchange is the same
