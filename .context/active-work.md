@@ -67,14 +67,17 @@ shipped; the user-side session-start cold-write prune (`/preset health`, non-wis
 
 ## Recent context
 
-- **Cache health re-confirmed during #149 verification (feeds #152):** forensic
-  over 7 bridged transcripts today (~352 requests): 3 misses total — 2 cold starts
-  (pos-1, expected) + **1 genuine mid-session re-bill** (session `19ab73ad`, req 18,
-  ~106k). That's ~1/352, right on the post-#145 baseline (~1/392); three sessions
-  (122/56/88 reqs) had ZERO misses. NOT a #149 side effect (version/`?beta=true`/
-  stainless headers don't key the cache) and NOT the ~1/7 amplifier #145 fixed —
-  the cache is healthy. #152 (chase whether even the ~1/352 residual is removable)
-  stays a nice-to-have probe, not a bug. Forensic script: scratchpad `scanall.mjs`.
+- **Cache spot-check during #149 verification (feeds #152):** the ONLY
+  confirmed-bridged session this pass (`4b331378`, the live `[WISP]` "hello" test)
+  was healthy — 9 reqs, 8 HIT, 1 cold-start miss, 0 mid-session misses. A wider
+  transcript scan is NOT valid wisp evidence: bridged vs direct can't be told apart
+  from the client jsonl (this direct/unwisped session looks identical), so any
+  cross-session miss rate mixes real-claude-direct with wisp-bridged. The authoritative
+  wisp cache-health number stays last session's ~1/392 over 392 confirmed-bridged
+  requests (post-#145). The MISS the user saw = a cold start or that ~1/392 residual,
+  NOT a #149 side effect and NOT a leak. #152 stays a nice-to-have probe. Caveat for
+  next forensic: to attribute cache stats to wisp, capture from the BRIDGE side (serve
+  stdout / a door-level log), not the claude-cli transcript.
 - **Capture technique worth reusing:** point `ANTHROPIC_BASE_URL` at a tiny
   local listener that dumps request bodies (never headers — bearer rides
   there) and answers canned SSE; run `claude -p` / `claude -p -c` for
