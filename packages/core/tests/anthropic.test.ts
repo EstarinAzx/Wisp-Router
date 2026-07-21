@@ -256,6 +256,19 @@ describe('buildAnthropicMessagesBody', () => {
       expect(body.messages[2].role).toBe('user');
     });
 
+    // A SECOND leading system message is a positioned turn ahead of the first user turn (only the
+    // Anthropic door produces it) — hoisting it into the marked stable block would put its churn back in
+    // front of the whole history. The attribution still samples the first USER turn.
+    it('hoists at most one leading system message — a second stays positioned', () => {
+      const body = buildAnthropicMessagesBody({ model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', messages: [
+        { role: 'system', content: 'rules' },
+        { role: 'system', content: 'early note' },
+        { role: 'user', content: 'hi' },
+      ] }) as any;
+      expect(body.system.map((b: any) => b.text)).toEqual([anthropicAttribution('hi', 'v'), 'rules']);
+      expect(body.messages[0]).toEqual({ role: 'system', content: [{ type: 'text', text: 'early note' }] });
+    });
+
     // A positioned system turn's text block is markable (native Claude Code marks these too) — as the
     // final message it takes the end-of-history breakpoint.
     it('marks the final block when the last message is a positioned system turn', () => {

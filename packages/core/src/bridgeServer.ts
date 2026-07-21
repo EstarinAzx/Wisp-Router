@@ -546,7 +546,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
 
     const parsed = parseAnthropicMessagesRequest(body as Parameters<typeof parseAnthropicMessagesRequest>[0]);
-    if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
+    // #145: system turns ride in `turns` now — a body with ONLY those still has no conversation to send
+    // (the build would hoist them and ship an empty messages array upstream; fail loud here instead).
+    if (!parsed.turns.some((t) => t.role !== 'system')) return sendError(res, 400, 'no messages to send');
 
     // The Routing map (#51) picks the answering Provider: Provider id → Alias → Family fuzzy (the
     // background tier's raw claude-* ids land here when their family row is set) → Active fallback.
@@ -650,9 +652,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.
       if (lastUsage && isAnthropicProvider(provider)) {
-        const outcome = anthropicCacheOutcome(lastUsage, parsed.turns.length);
-        if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${parsed.turns.length} — prefix re-billed uncached, check cache breakpoints (#111)`);
-        else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} turns=${parsed.turns.length} — probable history re-bill behind a stable prefix (#145)`);
+        // #145: system turns don't count toward the ≥3-turn gate — a first exchange carrying two hook
+        // reminders is not "past the first exchange".
+        const convoTurns = parsed.turns.filter((t) => t.role !== 'system').length;
+        const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
+        if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);
+        else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
       }
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure

@@ -198,16 +198,18 @@ export const buildAnthropicMessagesBody = (args: {
   // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
   systemSuffix?: string;
 }) => {
-  // #145: only the LEADING run of system messages lifts into the top-level system array; a system message
-  // after any non-system stays POSITIONED in `messages` as a role:"system" turn (the
-  // mid-conversation-system beta — Claude Code's hook reminders), so its churn re-bills only the tail
-  // behind it instead of the whole history. convo[0] is the first non-system message either way, so the
-  // attribution fingerprint samples the same text as before.
-  let lead = 0;
-  while (lead < args.messages.length && args.messages[lead].role === 'system') lead++;
+  // #145: at most ONE leading system message lifts into the top-level system array — every caller
+  // (Inquire, native chat, the bridge arms, the reviewer) prepends exactly one. Any other system message
+  // stays POSITIONED in `messages` as a role:"system" turn (the mid-conversation-system beta — Claude
+  // Code's hook reminders), so its churn re-bills only the tail behind it instead of the whole history.
+  // That includes a SECOND leading one: only the Anthropic door produces it (a positioned turn ahead of
+  // the first user turn), and hoisting it into the marked stable block would resurrect the amplifier.
+  const lead = args.messages[0]?.role === 'system' ? 1 : 0;
   const wispSystem = args.messages.slice(0, lead).map((m) => m.content).join('\n\n');
   const convo = args.messages.slice(lead).filter((m) => m.role !== 'system' || m.content);
-  const firstUserMessage = convo[0]?.content ?? '';
+  // First USER turn, not convo[0]: a positioned system turn can now sit ahead of it, and the server
+  // validates the fingerprint against the first user message's text.
+  const firstUserMessage = convo.find((m) => m.role === 'user')?.content ?? '';
   const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '1h' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
