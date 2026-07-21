@@ -8,72 +8,80 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: e931080 (CI action bumps) + this wrap-up commit._
+_At commit: c385c04 (v2.0.29 release) + this wrap-up commit._
 
 ## Current focus
 
-**Next up: #145 — Anthropic door cache re-bill amplifier.** Diagnosed this
-session from transcript usage frames: bridged sessions re-bill the whole
-conversation history at the stable-prefix boundary every ~7 requests (vs ~71
-native) because the parse hoists mid-conversation `role:system` turns into the
-#139 volatile suffix, which renders ahead of the entire message history. Cost:
-0.6–1.2M wasted write-tokens per heavy session. Decision recorded in
-[[2026-07-21-positioned-mid-conversation-system-matters]].
+**Nothing in flight — v2.0.29 shipped and installed.** The cache re-bill
+amplifier (#145) and the silent cache guard (#146) are fixed, merged via PR
+#147 (squash `fbcfd96`), released as **wisp-router 2.0.29** (workflow green —
+first run on the bumped action versions, all fine), and the dev machine's
+global install is updated + smoke-tested.
 
 ## State
 
-- **In flight:** nothing — diagnosis done, tickets filed, no code started.
-- **Queue:** two `ready-for-agent` issues:
-  1. **#145** — preserve mid-conversation system turn position (parse keeps
-     positioned turns; body builder emits at position — `role:system`
-     passthrough if the OAuth wire takes the mid-conversation-system beta,
-     else user-turn text block). FIRST STEP: capture one bridged request and
-     confirm the churny blocks really arrive as `role:system` turns.
-  2. **#146** — `anthropicCacheOutcome` gains a `partial` kind (read stalled
-     at stable prefix + creation ≥ 4k floor) + advisory bridge log line; the
-     current guard calls every fallback a `hit` and stays silent.
+- **In flight:** nothing.
+- **Queue:** no `ready-for-agent` tickets. Open issues: #126 (2.0.24 spec
+  umbrella — content long shipped, probably closable) and #69 (backlog:
+  copilot-wisp launcher).
 - **Done this session:**
-  1. Chore: release.yml actions off Node 20 (checkout/setup-node v5,
-     upload-artifact v6, download-artifact v7) — e931080, pushed.
-  2. Cache forensics: per-session usage-frame analysis across 4 transcripts
-     (2 wisp, 1 native, 1 mixed); wisp fallback rate 10× native; evidence
-     tables live in #145.
-  3. Confirmed user's installed binary is 2.0.28 (usage.iterations flowing,
-     advisor consult visible in /cost).
+  1. **#145 verified then fixed.** Live capture (dummy `ANTHROPIC_BASE_URL`
+     listener + nested `claude -p` two-turn) confirmed Claude Code sends hook
+     reminders as mid-conversation `role:"system"` turns and that claude CLI
+     natively advertises `mid-conversation-system-2026-04-07` and marks
+     `cache_control` on text blocks INSIDE system turns. Fix: parse keeps
+     positioned `role:'system'` turns; builder lifts at most ONE leading
+     system message and emits positioned turns as single-text-block system
+     messages; client advertises the beta. Evidence + emit decision posted as
+     a comment on #145.
+  2. **#146 fixed.** `anthropicCacheOutcome` gains `partial` (read>0 ∧
+     creation≥4k ∧ ≥3 non-system turns) + advisory `PARTIAL` bridge log line.
+  3. **Review pass caught 4 regressions pre-merge** (cavecrew-reviewer):
+     second-leading-system hoist would resurrect the amplifier; attribution
+     had to sample the first USER turn; all-system body now 400s; cache-gate
+     turn count excludes system turns.
+  4. **Released v2.0.29** (tag → release.yml → npm) and updated the global
+     install; sandboxed `wisp routing` smoke passed.
 - **Blocked:** none.
 
 ## Pick up here
 
-Start #145 via the normal ticket flow (branch → TDD → PR). The verify-first
-step is cheap: log one bridged request body (or add a temp dump in
-`parseAnthropicMessagesRequest`) and check whether Claude Code's mid-session
-reminders arrive as `role:"system"` turns vs top-level system churn. If they
-turn out to be top-level only, #145's fix shape changes — re-read the issue
-before coding. #146 is independent and small; good same-branch or follow-up.
+No queued task. Candidates, in rough order of value:
+
+1. **Verification spot check (5 min, after the user's next heavy bridged
+   session):** transcript-forensics the session jsonl — expect the
+   whole-history fallback rate near native (~1/70 requests, was ~1/7), and
+   serve-log `PARTIAL` lines only as rare singletons (bursts = something's
+   wrong).
+2. Close #126 if the user agrees it's fully shipped.
+3. User-side (non-wisp) lever: 54–88k token session-start cold write from
+   the hook/skill/MCP roster — an ecosystem prune, route via `/preset health`.
 
 ## Skills for next session
 
 - `/preset pick-up` — note points here.
-- Ticket flow: `/preset ticket-loop` works (queue has 2 ready-for-agent).
+- `packages/tui:verify` — project skill for sandboxed CLI verification
+  (discovered this session; use for any TUI command-surface change).
 
 ## Open questions
 
-- Does the Anthropic OAuth wire accept the mid-conversation-system beta
-  (positioned `role:system` in `messages`)? Determines #145's emit shape.
+- None for the wisp codebase. (The mid-conversation-system beta question is
+  answered: the OAuth wire takes positioned `role:system` — claude CLI sends
+  it natively.)
 
 ## Recent context
 
-- Analysis technique worth reusing: Claude Code transcript jsonl
-  (`~/.claude/projects/<proj>/<session>.jsonl`) records per-request
-  `cache_read/creation_input_tokens` — client-side cache forensics without
-  touching serve logs. Dedup frames by `requestId`.
-- Session fixed tax measured: 54–88k tokens cold-written per session start
-  (system + tools + MCP instructions + skills); user-side ecosystem prune is
-  a separate, non-wisp lever.
-- Landmines (unchanged from #143): `usage.iterations` last entry = final base
-  pass; reviewer usage never enters the `usage` event channel;
-  `anthropicAttribution` samples the FIRST user message; max 4 cache_control
-  markers, thinking blocks unmarkable (mark() slide).
+- **Capture technique worth reusing:** point `ANTHROPIC_BASE_URL` at a tiny
+  local listener that dumps request bodies (never headers — bearer rides
+  there) and answers canned SSE; run `claude -p` / `claude -p -c` for
+  one/two-turn wire captures. Zero API cost, exact wire shapes.
+- Transcript jsonl forensics (per-request `cache_read/creation_input_tokens`,
+  dedup by `requestId`) remains the client-side cache audit tool.
+- Landmines (still true): `anthropicAttribution` samples the FIRST user
+  message; max 4 `cache_control` markers, thinking blocks unmarkable (mark()
+  slide); `usage.iterations` last entry = final base pass; builder hoists at
+  most ONE leading system message (a second leading one is positioned — see
+  #145 review fix).
 
 ## Related
 

@@ -9,32 +9,30 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE): cache-burn forensics → #145 + #146 filed.**
+**Last task (DONE): #145 + #146 shipped as v2.0.29, installed.**
 
-- Found the wisp quota eater: bridged sessions re-bill the WHOLE conversation
-  history every ~7 requests (native: ~71) — the parse hoists mid-conversation
-  `role:system` turns into the #139 volatile suffix, ahead of all messages.
-  0.6–1.2M wasted write-tokens per heavy session. Decision:
-  [[2026-07-21-positioned-mid-conversation-system-matters]].
-- Also shipped: release.yml action bumps off Node 20 (e931080, pushed).
+- Cache amplifier verified by live wire capture (reminders ARE positioned
+  `role:"system"` turns; OAuth wire takes the mid-conversation-system beta),
+  fixed, review-hardened (4 pre-merge regression catches), merged (PR #147),
+  released, and the dev machine's global `wisp-router` is on 2.0.29.
 
-**Next task: #145 (preserve mid-conversation system position).**
+**Next task: none queued — pick from candidates in `active-work.md`.**
 
-- FIRST: verify the churn shape — capture one bridged request and confirm
-  reminders arrive as `role:"system"` turns (issue lists the fix shape for
-  both outcomes). Then branch → TDD → PR per ticket flow.
-- #146 (guard `partial` outcome + log line) is small and independent —
-  same branch or follow-up.
+- Best first move: 5-min transcript forensics after the user's next heavy
+  bridged session — fallback rate should be ~native (~1/70, was ~1/7);
+  serve-log `PARTIAL` lines should be rare singletons, never bursts.
+- Otherwise: offer to close #126 (shipped spec umbrella), or the user-side
+  session-start token prune (`/preset health` route, not a wisp change).
 
 **Landmines:**
 
-- `anthropicAttribution` samples the FIRST user message — #145 must not
-  change what text feeds it.
-- Max 4 `cache_control` markers per request; thinking blocks unmarkable —
-  mark() slide in anthropic.ts handles both; positioned system turns must
-  stay markable text blocks or anchor null cleanly.
-- #139's top-level stable/volatile split is CORRECT — #145 only moves
-  mid-conversation turns, don't touch the systemSplit layer.
+- Builder hoists at most ONE leading system message — a second leading one
+  stays positioned (hoisting it re-creates the amplifier). Don't "simplify"
+  the `lead` logic in `buildAnthropicMessagesBody`.
+- `anthropicAttribution` samples the first USER turn (`convo.find`), not
+  `convo[0]` — server-validated fingerprint, do not touch.
+- Max 4 `cache_control` markers; thinking blocks unmarkable; positioned
+  system turns are markable single-text-block messages.
 - `usage.iterations` last entry must stay the final base pass.
 
 ## Related
