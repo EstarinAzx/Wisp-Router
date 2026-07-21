@@ -17,10 +17,10 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason } from './catalog';
 import { sseBlocks } from './codexClient';
 
-type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; signal?: AbortSignal };
+type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal };
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
@@ -37,7 +37,11 @@ export type AnthropicStreamEvent =
   | { type: 'redactedThinking'; data: string }
   // Real token usage off message_start (initial input/cache) and message_delta (final counts) — the door
   // forwards it to the client's meter. The other doors that consume this stream ignore it.
-  | { type: 'usage'; usage: BridgeUsage };
+  | { type: 'usage'; usage: BridgeUsage }
+  // #156: server cache diagnosis off message_start — the response's message id (the next request's
+  // previous_message_id) plus the server-reported cache_miss_reason when the diagnosed compare found a
+  // broken prefix. Non-Anthropic consumers ignore it.
+  | { type: 'diagnosis'; messageId: string; missReason?: AnthropicCacheMissReason };
 
 // Inquire is non-streaming (spinner → diff): a bounded 16K output keeps the single request under the fetch
 // timeout ceiling while leaving ample room for the edit blocks. The STREAMING path deliberately does NOT
@@ -72,8 +76,11 @@ const INQUIRE_MAX_TOKENS = 16_000;
 // billing/TTL parity flags.
 // Deliberate deviation: real claude drops claude-code-20250219 for NON-agentic Haiku utility calls; wisp
 // keeps it — every wisp Haiku turn is a real user conversation (agentic), and it's the primary 429 gate.
-// Heavier-shape betas (advanced-tool-use, structured-outputs, cache-diagnosis) stay off: the door
-// normalizes inbound traffic to wisp turns, so those request shapes never leave wisp.
+// Heavier-shape betas (advanced-tool-use, structured-outputs) stay off: the door normalizes inbound
+// traffic to wisp turns, so those request shapes never leave wisp. cache-diagnosis-2026-04-07 left that
+// list in #156 — it changes the RESPONSE (message_start.message.diagnostics), not the request shape, and
+// the #152 probe confirmed the subscription backend honors it. Appended after the capture set: that
+// trailing position is the probe-validated one.
 export const selectAnthropicBetas = (model: string): string => {
   const haiku = model.includes('haiku');
   const has1m = !haiku && !/claude-3|opus-4-[0-5]/.test(model);
@@ -90,6 +97,7 @@ export const selectAnthropicBetas = (model: string): string => {
     ...(haiku ? [] : ['advisor-tool-2026-03-01']),
     'fallback-credit-2026-06-01',
     'extended-cache-ttl-2025-04-11',
+    'cache-diagnosis-2026-04-07',
   ].join(',');
 };
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
@@ -153,7 +161,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream, args.model),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, previousMessageId: args.previousMessageId, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -219,6 +227,10 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     // don't consume the event — message_delta still needs its stop_reason read below.
     const usage = anthropicUsage(ev);
     if (usage) yield { type: 'usage', usage };
+    // #156: the same message_start carries the message id + server cache diagnosis — yielded alongside
+    // usage so the Bridge can chain previous_message_id and log the authoritative miss reason.
+    const diag = anthropicDiagnosis(ev);
+    if (diag) yield { type: 'diagnosis', messageId: diag.messageId, missReason: diag.missReason };
     const text = anthropicTextDelta(ev);
     if (text) { sawDelta = true; yield { type: 'text', value: text }; continue; }
     // Thinking passthrough: the block start, thinking deltas, the closing signature, and whole redacted

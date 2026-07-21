@@ -9,7 +9,7 @@ import {
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
-  anthropicUsage, anthropicCacheOutcome,
+  anthropicUsage, anthropicCacheOutcome, anthropicDiagnosis, createAnthropicDiagnosisChain,
   type Provider, type SseEvent, type BridgeUsage,
 } from '../src/catalog';
 import { anthropicMessagesHeaders, anthropicStream, selectAnthropicBetas } from '../src/anthropicClient';
@@ -253,6 +253,7 @@ describe('buildAnthropicMessagesBody', () => {
         { type: 'text', text: 'rules', cache_control: { type: 'ephemeral' } },
       ],
       messages: [{ role: 'user', content: [{ type: 'text', text: 'edit this', cache_control: { type: 'ephemeral' } }] }],
+      diagnostics: { previous_message_id: null }, // #156: rides every request; null = no chained turn
     });
   });
 
@@ -835,8 +836,9 @@ describe('anthropicMessagesHeaders', () => {
 });
 
 describe('selectAnthropicBetas (#151)', () => {
-  // Parity target: real claude-cli 2.1.216 sent these 12 on a plain agentic probe (capture 2026-07-21).
-  it('matches the 12-token 2.1.216 capture for a 1M-capable model', () => {
+  // Parity target: real claude-cli 2.1.216 sent the first 12 on a plain agentic probe (capture 2026-07-21).
+  // #156 appends cache-diagnosis after the capture set — trailing position is the probe-validated one (#152).
+  it('matches the 12-token 2.1.216 capture plus the trailing cache-diagnosis token for a 1M-capable model', () => {
     expect(selectAnthropicBetas('claude-opus-4-8').split(',')).toEqual([
       'claude-code-20250219',
       'oauth-2025-04-20',
@@ -850,6 +852,7 @@ describe('selectAnthropicBetas (#151)', () => {
       'advisor-tool-2026-03-01',
       'fallback-credit-2026-06-01',
       'extended-cache-ttl-2025-04-11',
+      'cache-diagnosis-2026-04-07',
     ]);
     expect(selectAnthropicBetas('claude-sonnet-4-6')).toContain('context-1m-2025-08-07');
     // Exclusion gate, not an allowlist: new families inherit 1M the way real claude's latch pushes it.
@@ -866,7 +869,8 @@ describe('selectAnthropicBetas (#151)', () => {
     expect(betas).toContain('claude-code-20250219');
     expect(betas).toContain('interleaved-thinking-2025-05-14');
     expect(betas).toContain('thinking-token-count-2026-05-13');
-    expect(betas).toHaveLength(10);
+    expect(betas).toContain('cache-diagnosis-2026-04-07'); // #156: response-side, rides every model shape
+    expect(betas).toHaveLength(11);
   });
 
   // 1M context excludes the known non-1M models (haiku, claude-3, opus before 4-6).
@@ -874,7 +878,59 @@ describe('selectAnthropicBetas (#151)', () => {
     const betas = selectAnthropicBetas('claude-opus-4-1').split(',');
     expect(betas).not.toContain('context-1m-2025-08-07');
     expect(betas).toContain('advisor-tool-2026-03-01');
-    expect(betas).toHaveLength(11);
+    expect(betas).toHaveLength(12);
+  });
+});
+
+describe('cache diagnosis (#156)', () => {
+  // The request half of the beta contract: the header opts in (selectAnthropicBetas above), the body names
+  // the compare target. Absent a chained id the field still rides as null — probe-validated on #152.
+  it('body carries diagnostics.previous_message_id — null unchained, the id when chained', () => {
+    const base = { model: 'claude-opus-4-8', messages: [{ role: 'user' as const, content: 'hi' }], maxTokens: 10, version: '2.1.216' };
+    expect(buildAnthropicMessagesBody(base).diagnostics).toEqual({ previous_message_id: null });
+    expect(buildAnthropicMessagesBody({ ...base, previousMessageId: 'msg_prev' }).diagnostics).toEqual({ previous_message_id: 'msg_prev' });
+  });
+
+  // The response half, shapes as captured live in the #152 probe: message_start always carries the message
+  // id; cache_miss_reason only when the server diagnosed a break against the chained previous message.
+  it('anthropicDiagnosis reads the message id + miss reason off message_start', () => {
+    const healthy: SseEvent = { event: 'message_start', data: { message: { id: 'msg_a', usage: { input_tokens: 3 }, diagnostics: null } } };
+    expect(anthropicDiagnosis(healthy)).toEqual({ messageId: 'msg_a' });
+    const missed: SseEvent = { event: 'message_start', data: { message: { id: 'msg_b', diagnostics: { cache_miss_reason: { type: 'system_changed', cache_missed_input_tokens: 6594 } } } } };
+    expect(anthropicDiagnosis(missed)).toEqual({ messageId: 'msg_b', missReason: { type: 'system_changed', cacheMissedInputTokens: 6594 } });
+  });
+
+  it('anthropicDiagnosis ignores non-start events and id-less starts', () => {
+    expect(anthropicDiagnosis({ event: 'message_delta', data: { usage: { input_tokens: 3 } } })).toBeUndefined();
+    expect(anthropicDiagnosis({ event: 'message_start', data: { message: {} } })).toBeUndefined();
+    expect(anthropicDiagnosis({ event: 'content_block_delta', data: {} })).toBeUndefined();
+  });
+
+  // The chain keys a conversation by model + FIRST user turn — stable across the conversation's life, so
+  // later turns keep chaining; a different model or first turn is a different conversation. Eviction is
+  // recency-ordered: recording refreshes an entry's position, so the cap drops the stalest conversation.
+  it('chains per conversation, isolates by model + first turn, evicts the stalest at cap', () => {
+    const chain = createAnthropicDiagnosisChain(2);
+    const convA = [{ role: 'user', content: 'first A' }];
+    const convB = [{ role: 'user', content: 'first B' }];
+    expect(chain.previousIdFor('m', convA)).toBeUndefined();
+    chain.record('m', convA, 'msg_1');
+    expect(chain.previousIdFor('m', convA)).toBe('msg_1');
+    expect(chain.previousIdFor('m', [...convA, { role: 'assistant', content: 'r' }, { role: 'user', content: 'next' }])).toBe('msg_1');
+    expect(chain.previousIdFor('other-model', convA)).toBeUndefined();
+    chain.record('m', convB, 'msg_2');
+    chain.record('m', convA, 'msg_3');                                  // refresh A — B is now the stalest
+    chain.record('m', [{ role: 'user', content: 'first C' }], 'msg_4'); // cap 2 → B evicted
+    expect(chain.previousIdFor('m', convB)).toBeUndefined();
+    expect(chain.previousIdFor('m', convA)).toBe('msg_3');
+  });
+
+  // A leading system message doesn't shift the key — the fingerprint reads the first USER turn, which is
+  // what stays byte-stable when the volatile system tail churns (#139).
+  it('keys off the first user turn, not the leading system message', () => {
+    const chain = createAnthropicDiagnosisChain();
+    chain.record('m', [{ role: 'system', content: 'sys v1' }, { role: 'user', content: 'ask' }], 'msg_1');
+    expect(chain.previousIdFor('m', [{ role: 'system', content: 'sys v2 — reminder appended' }, { role: 'user', content: 'ask' }])).toBe('msg_1');
   });
 });
 

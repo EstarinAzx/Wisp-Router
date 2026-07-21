@@ -252,6 +252,10 @@ export const buildAnthropicMessagesBody = (args: {
   systemSuffix?: string;
   // #150: the metadata.user_id blob (anthropicUserId), passed whole by the client.
   userId?: string;
+  // #156: the previous response's message id — the server compares this request against that message to
+  // explain a cache break (diagnostics.cache_miss_reason). Absent (a first turn, or an unchained caller
+  // like Inquire/native chat) the field still rides as null: the cache-diagnosis beta needs it present.
+  previousMessageId?: string;
 }) => {
   // #145: at most ONE leading system message lifts into the top-level system array — every caller
   // (Inquire, native chat, the bridge arms, the reviewer) prepends exactly one. Any other system message
@@ -393,6 +397,9 @@ export const buildAnthropicMessagesBody = (args: {
     ...(args.stream ? { stream: true as const } : {}),
     ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: { type: args.toolChoice ?? 'auto' } } : {}),
     ...(args.userId ? { metadata: { user_id: args.userId } } : {}),
+    // #156: rides on every request — the beta header opts in, this field names the compare target. Probe
+    // on #152 confirmed the OAuth backend accepts it (null included) and answers on message_start.
+    diagnostics: { previous_message_id: args.previousMessageId ?? null },
     ...thinkingEffort,
   };
 };
@@ -457,6 +464,55 @@ export const anthropicCacheOutcome = (usage: BridgeUsage, turnCount: number): An
   if (turnCount >= 3 && creationTokens >= MISS_UNCACHED_FLOOR) return { kind: 'miss', ...base };
   if (creationTokens > 0) return { kind: 'fresh', ...base };
   return { kind: 'none', ...base };
+};
+
+// #156: the server's own cache diagnosis, read off message_start (cache-diagnosis-2026-04-07 beta; probe
+// on #152 confirmed the OAuth backend honors it). message.diagnostics is null on a healthy turn and carries
+// cache_miss_reason when the prefix broke against the chained previous message — the authoritative version
+// of what anthropicCacheOutcome infers from usage numbers. The message id rides along because the NEXT
+// request must echo it as previous_message_id for the diagnosis to have a compare target. Any other event
+// (message_delta included) carries neither.
+export type AnthropicCacheMissReason = { type: string; cacheMissedInputTokens: number };
+export type AnthropicDiagnosis = { messageId: string; missReason?: AnthropicCacheMissReason };
+export const anthropicDiagnosis = (ev: SseEvent): AnthropicDiagnosis | undefined => {
+  if (ev.event !== 'message_start') return undefined;
+  const msg = ev.data?.message;
+  if (!msg || typeof msg.id !== 'string') return undefined;
+  const reason = msg.diagnostics?.cache_miss_reason;
+  if (!reason || typeof reason.type !== 'string') return { messageId: msg.id };
+  return {
+    messageId: msg.id,
+    missReason: { type: reason.type, cacheMissedInputTokens: typeof reason.cache_missed_input_tokens === 'number' ? reason.cache_missed_input_tokens : 0 },
+  };
+};
+
+// #156: the previous_message_id chain. Diagnosis is only meaningful when the request names the conversation's
+// previous response, but the Bridge is stateless per request — so this map remembers the last message id per
+// conversation, keyed by model + the FIRST user turn's text (stable for a conversation's whole life; the
+// last turn changes every request). Interleaved conversations (main + subagents + utility turns) each get
+// their own key. Capped FIFO (Map insertion order) — log-only feature, an evicted entry costs one null-chain
+// turn, never correctness.
+// ponytail: identical first turns (repeated one-shot utility calls) share a key and chain across invocations;
+// same-shaped requests SHOULD hit the same cache, so the diagnosis stays meaningful. Split per-request if not.
+export type AnthropicDiagnosisChain = {
+  previousIdFor: (model: string, messages: { role: string; content: string }[]) => string | undefined;
+  record: (model: string, messages: { role: string; content: string }[], messageId: string) => void;
+};
+export const createAnthropicDiagnosisChain = (cap = 256): AnthropicDiagnosisChain => {
+  const last = new Map<string, string>();
+  const keyFor = (model: string, messages: { role: string; content: string }[]): string => {
+    const first = messages.find((m) => m.role === 'user')?.content ?? '';
+    return createHash('sha256').update(`${model}\0${first}`).digest('hex').slice(0, 16);
+  };
+  return {
+    previousIdFor: (model, messages) => last.get(keyFor(model, messages)),
+    record: (model, messages, messageId) => {
+      const key = keyFor(model, messages);
+      last.delete(key); // re-insert so eviction order tracks recency, not first sighting
+      last.set(key, messageId);
+      if (last.size > cap) last.delete(last.keys().next().value as string);
+    },
+  };
 };
 
 // Reduce a whole Messages SSE run to its answer text — concatenate the text_delta fragments in order. An
