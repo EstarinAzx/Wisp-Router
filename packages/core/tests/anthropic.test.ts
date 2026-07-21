@@ -900,6 +900,14 @@ describe('cache diagnosis (#156)', () => {
     expect(anthropicDiagnosis(missed)).toEqual({ messageId: 'msg_b', missReason: { type: 'system_changed', cacheMissedInputTokens: 6594 } });
   });
 
+  // Live capture 2026-07-21: the server can answer `cache_miss_reason: {type: 'unavailable'}` on a turn whose
+  // usage is perfectly healthy (read 77k, creation 585) — "couldn't diagnose", not "cache broke". Treating it
+  // as a miss printed a false MISS (server) line; it must read as no-diagnosis so the heuristic stays the judge.
+  it('anthropicDiagnosis treats an unavailable reason as no diagnosis, keeping the chain id', () => {
+    const unavailable: SseEvent = { event: 'message_start', data: { message: { id: 'msg_c', diagnostics: { cache_miss_reason: { type: 'unavailable', cache_missed_input_tokens: 0 } } } } };
+    expect(anthropicDiagnosis(unavailable)).toEqual({ messageId: 'msg_c' });
+  });
+
   it('anthropicDiagnosis ignores non-start events and id-less starts', () => {
     expect(anthropicDiagnosis({ event: 'message_delta', data: { usage: { input_tokens: 3 } } })).toBeUndefined();
     expect(anthropicDiagnosis({ event: 'message_start', data: { message: {} } })).toBeUndefined();

@@ -479,7 +479,9 @@ export const anthropicDiagnosis = (ev: SseEvent): AnthropicDiagnosis | undefined
   const msg = ev.data?.message;
   if (!msg || typeof msg.id !== 'string') return undefined;
   const reason = msg.diagnostics?.cache_miss_reason;
-  if (!reason || typeof reason.type !== 'string') return { messageId: msg.id };
+  // 'unavailable' (live capture 2026-07-21) means the server COULDN'T diagnose — seen with missed=0 on a
+  // healthy-usage turn. Not a break verdict, so it reads as no-diagnosis: the heuristic stays the judge.
+  if (!reason || typeof reason.type !== 'string' || reason.type === 'unavailable') return { messageId: msg.id };
   return {
     messageId: msg.id,
     missReason: { type: reason.type, cacheMissedInputTokens: typeof reason.cache_missed_input_tokens === 'number' ? reason.cache_missed_input_tokens : 0 },
