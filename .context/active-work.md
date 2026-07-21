@@ -67,13 +67,14 @@ shipped; the user-side session-start cold-write prune (`/preset health`, non-wis
 
 ## Recent context
 
-- **Live cache MISS seen during #149 verification (feeds #152):** a bridged
-  Fable-5 session logged `prompt-cache MISS anthropic claude-fable-5: read=0
-  creation=77566 uncached_input=2 turns=19 — prefix re-billed uncached`. NOT a
-  #149 side effect (the version bump / `?beta=true` / stainless headers don't key
-  the cache); it's the pre-existing breakpoint-diagnosis concern (#111/#146) that
-  #152 exists to probe. One mid-session miss ≠ the ~1/7 amplifier #145 fixed —
-  likely a TTL lapse or breakpoint shift. Datapoint for the #152 probe, not a regression.
+- **Cache health re-confirmed during #149 verification (feeds #152):** forensic
+  over 7 bridged transcripts today (~352 requests): 3 misses total — 2 cold starts
+  (pos-1, expected) + **1 genuine mid-session re-bill** (session `19ab73ad`, req 18,
+  ~106k). That's ~1/352, right on the post-#145 baseline (~1/392); three sessions
+  (122/56/88 reqs) had ZERO misses. NOT a #149 side effect (version/`?beta=true`/
+  stainless headers don't key the cache) and NOT the ~1/7 amplifier #145 fixed —
+  the cache is healthy. #152 (chase whether even the ~1/352 residual is removable)
+  stays a nice-to-have probe, not a bug. Forensic script: scratchpad `scanall.mjs`.
 - **Capture technique worth reusing:** point `ANTHROPIC_BASE_URL` at a tiny
   local listener that dumps request bodies (never headers — bearer rides
   there) and answers canned SSE; run `claude -p` / `claude -p -c` for
