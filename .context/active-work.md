@@ -8,54 +8,47 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: c385c04 (v2.0.29 release) + this wrap-up commit._
+_At commit: c385c04 (v2.0.29 release) + later wrap-ups + this one._
 
 ## Current focus
 
-**Nothing in flight — v2.0.29 shipped and installed.** The cache re-bill
-amplifier (#145) and the silent cache guard (#146) are fixed, merged via PR
-#147 (squash `fbcfd96`), released as **wisp-router 2.0.29** (workflow green —
-first run on the bumped action versions, all fine), and the dev machine's
-global install is updated + smoke-tested.
+**Nothing in flight — a wire-parity backlog just got filed.** v2.0.29 is shipped
++ installed and verified live (post-release forensics: whole-history fallback
+~1/392, better than ~1/70 native — posted on #145). This session compared wisp's
+Anthropic-OAuth path against OmniRoute + a live `claude-cli 2.1.216` capture and
+filed umbrella **#148** + children **#149–#152**. Nothing implemented yet.
 
 ## State
 
 - **In flight:** nothing.
-- **Queue:** no `ready-for-agent` tickets. Open issues: #126 (2.0.24 spec
-  umbrella — content long shipped, probably closable) and #69 (backlog:
-  copilot-wisp launcher).
+- **Queue (`ready-for-agent`):** **#149** (Tier-1 fingerprint parity — version
+  bump + Stainless headers + session-id), **#150** (bootstrap account identity +
+  `metadata.user_id`), **#151** (shape-aware `anthropic-beta` 4→12). **#152**
+  (cache-diagnosis probe) is `ready-for-human`. Umbrella **#148** tracks all four.
+  Older open: #126 (2.0.24 spec umbrella, probably closable) and #69 (backlog).
 - **Done this session:**
-  1. **#145 verified then fixed.** Live capture (dummy `ANTHROPIC_BASE_URL`
-     listener + nested `claude -p` two-turn) confirmed Claude Code sends hook
-     reminders as mid-conversation `role:"system"` turns and that claude CLI
-     natively advertises `mid-conversation-system-2026-04-07` and marks
-     `cache_control` on text blocks INSIDE system turns. Fix: parse keeps
-     positioned `role:'system'` turns; builder lifts at most ONE leading
-     system message and emits positioned turns as single-text-block system
-     messages; client advertises the beta. Evidence + emit decision posted as
-     a comment on #145.
-  2. **#146 fixed.** `anthropicCacheOutcome` gains `partial` (read>0 ∧
-     creation≥4k ∧ ≥3 non-system turns) + advisory `PARTIAL` bridge log line.
-  3. **Review pass caught 4 regressions pre-merge** (cavecrew-reviewer):
-     second-leading-system hoist would resurrect the amplifier; attribution
-     had to sample the first USER turn; all-system body now 400s; cache-gate
-     turn count excludes system turns.
-  4. **Released v2.0.29** (tag → release.yml → npm) and updated the global
-     install; sandboxed `wisp routing` smoke passed.
+  1. **Post-release verification of #145.** Forensics over 5 bridged sessions
+     (392 requests): 1 cold, ~1/392 fallback (was ~1/7 pre-fix). Posted on #145.
+  2. **OmniRoute comparison + live 2.1.216 capture.** Settled that the
+     `cc_version` fingerprint is UNVALIDATED (real `c5e` vs wisp recipe `2b0`,
+     accepted anyway → version bump is safe). Diffed the full wire; wisp is
+     missing `x-stainless-*` (8), `x-claude-code-session-id`, `metadata.user_id`,
+     and 8 of 12 `anthropic-beta` flags. Decision file:
+     [[2026-07-21-anthropic-oauth-fingerprint-unvalidated]].
+  3. **Filed #148–#152** (umbrella + 4 children) with file:line touch points.
 - **Blocked:** none.
 
 ## Pick up here
 
-No queued task. Candidates, in rough order of value:
+**Next: #149 (Tier-1 fingerprint parity, `ready-for-agent`).** Self-contained PR:
+bump `CLAUDE_CODE_VERSION` 0.19.0→2.1.216 (`anthropicClient.ts:66`), emit the 8
+`x-stainless-*` headers + `x-claude-code-session-id` in `anthropicMessagesHeaders`
+(`anthropicClient.ts:71`). Then #150 (bootstrap → account_uuid → metadata),
+#151 (beta widen), #152 (probe cache-diagnosis first). Verify with the same
+`ANTHROPIC_BASE_URL` capture harness.
 
-1. **Verification spot check (5 min, after the user's next heavy bridged
-   session):** transcript-forensics the session jsonl — expect the
-   whole-history fallback rate near native (~1/70 requests, was ~1/7), and
-   serve-log `PARTIAL` lines only as rare singletons (bursts = something's
-   wrong).
-2. Close #126 if the user agrees it's fully shipped.
-3. User-side (non-wisp) lever: 54–88k token session-start cold write from
-   the hook/skill/MCP roster — an ecosystem prune, route via `/preset health`.
+Also still open: close #126 if fully shipped; the user-side session-start
+cold-write prune (`/preset health`, non-wisp).
 
 ## Skills for next session
 
