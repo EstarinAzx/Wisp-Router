@@ -28,8 +28,8 @@ import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  anthropicCacheOutcome,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage,
+  anthropicCacheOutcome, createAnthropicDiagnosisChain,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
@@ -447,8 +447,14 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to stream). The
   // thinking passthrough events only the Anthropic upstream produces map to their bridge twins — the
   // Anthropic door's encoder renders them; no other consumer of this map ever receives them.
+  // #156: previous_message_id chain — remembers each Anthropic response's message id per conversation so
+  // the next request can name it and the server's cache diagnosis has a compare target. One instance per
+  // Bridge host; only the Anthropic arm below reads/writes it.
+  const diagnosisChain = createAnthropicDiagnosisChain();
+
   const mapOAuthStream = async function* (
     upstream: AsyncIterable<AnthropicStreamEvent>,
+    onDiagnosis?: (messageId: string) => void,
   ): AsyncGenerator<BridgeStreamEvent> {
     for await (const ev of upstream) {
       if (ev.type === 'text') { if (ev.value) yield { type: 'text', text: ev.value }; }
@@ -458,6 +464,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       else if (ev.type === 'thinkingSignature') yield { type: 'thinking_signature', signature: ev.value };
       else if (ev.type === 'redactedThinking') yield { type: 'redacted_thinking', data: ev.data };
       else if (ev.type === 'usage') yield { type: 'usage', usage: ev.usage };
+      // #156: record the message id the moment it arrives (an aborted stream must still advance the chain
+      // — the server DID mint this message), then forward the diagnosis for the door's cache-health log.
+      else if (ev.type === 'diagnosis') { onDiagnosis?.(ev.messageId); yield { type: 'diagnosis', messageId: ev.messageId, missReason: ev.missReason }; }
     }
   };
 
@@ -513,8 +522,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // <system-reminder> append re-bills itself, not the whole tools+system prefix. No split → full system.
       const sys = parsed.systemSplit?.stable ?? parsed.system;
       const messages = sys ? [{ role: 'system' as const, content: sys }, ...turns] : turns;
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, signal: controller.signal });
-      return { ok: true, events: mapOAuthStream(upstream), model: modelId };
+      // #156: name the conversation's previous response so the server's cache diagnosis has a compare
+      // target, and record this response's id for the next turn. Keyed off the same messages the request
+      // ships (model + first user turn) — advisor continuation passes chain through here too.
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, previousMessageId: diagnosisChain.previousIdFor(modelId, messages), signal: controller.signal });
+      return { ok: true, events: mapOAuthStream(upstream, (id) => diagnosisChain.record(modelId, messages, id)), model: modelId };
     }
     if (isXaiProvider(provider)) {
       const creds = await deps.xaiCreds?.();
@@ -639,9 +651,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // A provider that emits no usage (non-Anthropic through this door) starts on its first content instead.
       let started = false;
       let lastUsage: BridgeUsage | undefined;               // message_delta carries the final cumulative counts
+      let lastDiagnosis: { messageId: string; missReason?: AnthropicCacheMissReason } | undefined; // #156: message_start's server diagnosis
       const ensureStarted = (): void => { if (!started) { res.write(enc.start()); started = true; } };
       for await (const ev of eventsSource) {
         if (ev.type === 'usage') { lastUsage = ev.usage; enc.setUsage(ev.usage); ensureStarted(); continue; }
+        // #156: door-internal like usage — never a wire frame (the door's synthesized message_start doesn't
+        // carry diagnostics; inbound passthrough is deliberately not built, same call as the betas).
+        if (ev.type === 'diagnosis') { lastDiagnosis = ev; continue; }
         ensureStarted();
         res.write(enc.push(ev));
       }
@@ -651,13 +667,21 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.
-      if (lastUsage && isAnthropicProvider(provider)) {
+      if (isAnthropicProvider(provider)) {
         // #145: system turns don't count toward the ≥3-turn gate — a first exchange carrying two hook
         // reminders is not "past the first exchange".
         const convoTurns = parsed.turns.filter((t) => t.role !== 'system').length;
-        const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
-        if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);
-        else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
+        // #156: the server's own diagnosis is authoritative when it reports a break — reason + magnitude,
+        // no inference. A null diagnosis does NOT silence the heuristic below: it also means "no compare
+        // target" (first bridged turn, evicted chain entry), and the heuristic's known false-positive rate
+        // is already low (~1/392 post-#145).
+        if (lastDiagnosis?.missReason) {
+          deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
+        } else if (lastUsage) {
+          const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
+          if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);
+          else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
+        }
       }
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure

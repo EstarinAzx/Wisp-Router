@@ -377,6 +377,8 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
         s += frame('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content } });
         return s + frame('content_block_stop', { type: 'content_block_stop', index: idx });
       }
+      // diagnosis (#156) is door-internal (the door consumes it before pushing) — never a wire frame.
+      if (ev.type === 'diagnosis') return '';
       sawTool = true;
       let s = closeOpen();
       openIndex = nextIndex++;
@@ -471,12 +473,14 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
       content.push({ type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content: { type: 'advisor_result', text: ev.text } });
     } else if (ev.type === 'advisor_error') {
       content.push({ type: 'advisor_tool_result', tool_use_id: ev.toolUseId, content: { type: 'advisor_tool_result_error', error_code: ev.errorCode } });
-    } else {
+    } else if (ev.type === 'tool_call') {
       sawTool = true;
       let input: unknown = {};
       try { input = ev.call.argsJson ? JSON.parse(ev.call.argsJson) : {}; } catch { input = {}; }
       content.push({ type: 'tool_use', id: ev.call.id, name: ev.call.name, input });
     }
+    // diagnosis (#156) carries no wire content — the streaming door reads it for the cache-health log; this
+    // buffered reply (Claude Code's /model probe) has nothing to render for it.
   }
   return {
     id: meta.id, type: 'message', role: 'assistant', model: meta.model,

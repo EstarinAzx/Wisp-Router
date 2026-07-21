@@ -11,7 +11,7 @@
  * buildAnthropicMessagesBody without a second mapping.
  */
 
-import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage } from './catalog';
+import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage, AnthropicCacheMissReason } from './catalog';
 
 // ----------------------------- Inbound: OpenAI request -> Wisp ----------------------------- //
 
@@ -130,6 +130,10 @@ export type BridgeStreamEvent =
   // Real token usage from the backend (Anthropic upstream only). Carries no wire content — the Anthropic
   // door's encoder folds it into message_start/message_delta usage; other doors/reducers ignore it.
   | { type: 'usage'; usage: BridgeUsage }
+  // #156: server cache diagnosis (Anthropic upstream only). Carries no wire content — the Anthropic door
+  // reads the miss reason for its cache-health log; reducers and other doors ignore it. The message id is
+  // recorded upstream (the diagnosis chain) before this event is ever yielded.
+  | { type: 'diagnosis'; messageId: string; missReason?: AnthropicCacheMissReason }
   // Advisor (server tool, Anthropic door only): the door itself PRODUCES these while playing the server
   // role — the backend never emits them. server_tool_use announces the advisor call to Claude Code;
   // advisor_result/advisor_error carry the reviewer's verdict back. None of them are client tool calls,
