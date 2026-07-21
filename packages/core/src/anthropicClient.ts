@@ -61,7 +61,37 @@ const INQUIRE_MAX_TOKENS = 16_000;
 // silently dropped. Advertised on every request; harmless when the body omits output_config (e.g. Haiku).
 // mid-conversation-system-2026-04-07 gates positioned role:"system" turns inside messages (#145) — claude
 // CLI advertises the same token natively (header capture 2026-07-21).
-const ANTHROPIC_BETA = 'claude-code-20250219,oauth-2025-04-20,effort-2025-11-24,mid-conversation-system-2026-04-07';
+//
+// #151 widened the header toward the 12 tokens real claude-cli 2.1.216 sends on a plain agentic probe
+// (header capture 2026-07-21). Selection is MODEL-aware, mirroring claude's own gating (openclaude
+// utils/betas.ts): context-1m rides everything except the known non-1M models (haiku, claude-3, opus
+// before 4-6) — exclusion, not an allowlist, so new families (sonnet-5, fable-5) inherit it the way real
+// claude's experiment latch pushes it broadly; advisor-tool only off Haiku (Haiku is never an advisor
+// base). The rest ride every request — thinking betas cover all claude-4+ models incl. haiku-4-5,
+// prompt-caching-scope is a no-op without a scope field, fallback-credit/extended-cache-ttl are
+// billing/TTL parity flags.
+// Deliberate deviation: real claude drops claude-code-20250219 for NON-agentic Haiku utility calls; wisp
+// keeps it — every wisp Haiku turn is a real user conversation (agentic), and it's the primary 429 gate.
+// Heavier-shape betas (advanced-tool-use, structured-outputs, cache-diagnosis) stay off: the door
+// normalizes inbound traffic to wisp turns, so those request shapes never leave wisp.
+export const selectAnthropicBetas = (model: string): string => {
+  const haiku = model.includes('haiku');
+  const has1m = !haiku && !/claude-3|opus-4-[0-5]/.test(model);
+  return [
+    'claude-code-20250219',
+    'oauth-2025-04-20',
+    'effort-2025-11-24',
+    'mid-conversation-system-2026-04-07',
+    ...(has1m ? ['context-1m-2025-08-07'] : []),
+    'interleaved-thinking-2025-05-14',
+    'thinking-token-count-2026-05-13',
+    'context-management-2025-06-27',
+    'prompt-caching-scope-2026-01-05',
+    ...(haiku ? [] : ['advisor-tool-2026-03-01']),
+    'fallback-credit-2026-06-01',
+    'extended-cache-ttl-2025-04-11',
+  ].join(',');
+};
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
 // match (the backend ties the cc_version to the claude-cli UA). Captured live from real claude-cli 2.1.216
 // (2026-07-21); the cc_version hash is UNVALIDATED (#148), so the bump can't break an accepted request.
@@ -97,13 +127,14 @@ const CLAUDE_CODE_SESSION_ID = randomUUID();
 const FALLBACK_DEVICE_ID = mintAnthropicDeviceId();
 
 // The Messages request headers. Pure (no IO) so the recognition contract is unit-testable: the streaming
-// path adds the event-stream Accept; everything else is identical between Inquire and chat.
-export const anthropicMessagesHeaders = (bearer: string, stream?: boolean): Record<string, string> => ({
+// path adds the event-stream Accept; everything else is identical between Inquire and chat. The model
+// drives beta selection (#151); omitted (older callers/tests) it falls back to the non-haiku set.
+export const anthropicMessagesHeaders = (bearer: string, stream?: boolean, model = ''): Record<string, string> => ({
   'Content-Type': 'application/json',
   ...(stream ? { 'Accept': 'text/event-stream' } : {}),
   'Authorization': `Bearer ${bearer}`,
   'anthropic-version': '2023-06-01',
-  'anthropic-beta': ANTHROPIC_BETA,
+  'anthropic-beta': selectAnthropicBetas(model),
   'User-Agent': ANTHROPIC_USER_AGENT,
   'x-app': 'cli',
   'x-claude-code-session-id': CLAUDE_CODE_SESSION_ID,
@@ -121,7 +152,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   // #149: real claude posts to /v1/messages?beta=true (the query flag rides every Messages request).
   const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
-    headers: anthropicMessagesHeaders(bearer, args.stream),
+    headers: anthropicMessagesHeaders(bearer, args.stream, args.model),
     body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
     signal: args.signal,
   });
