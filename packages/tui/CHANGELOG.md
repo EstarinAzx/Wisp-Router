@@ -6,6 +6,19 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.32] — 2026-07-21
+
+### Fixed
+
+- **Stale server miss verdicts now log as advisory, not MISS (#156).** Two concurrent
+  sends can carry the same `previous_message_id` (the second fires before the first
+  response's id lands in the chain), so the server diagnoses both against the pre-change
+  message — live-captured as back-to-back identical verdicts, the second on a perfectly
+  healthy turn. A real miss always surfaces in the bill (missed tokens re-write as
+  `cache_creation` or bill as uncached input); a claimed `missed_input` more than double
+  the billed total now logs as `prompt-cache diagnosis STALE … not a real miss` instead
+  of a false `MISS (server)` line.
+
 ## [2.0.31] — 2026-07-21
 
 ### Fixed
