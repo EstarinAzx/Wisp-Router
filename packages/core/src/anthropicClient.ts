@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel } from './catalog';
 import { sseBlocks } from './codexClient';
 
 type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; signal?: AbortSignal };
@@ -86,7 +86,15 @@ const stainlessHeaders = (): Record<string, string> => ({
 
 // Real claude mints one session UUID at startup and repeats it on every request (header +
 // metadata.user_id.session_id, #150). Generated once per process so it's stable across calls this session.
+// ponytail: per-PROCESS, so one `wisp serve` shares an id across every conversation it bridges — like one
+// long claude session. Per-conversation parity would mean threading the inbound x-claude-code-session-id
+// through door → bridge → here; do that if the shared id ever draws server-side attention.
 const CLAUDE_CODE_SESSION_ID = randomUUID();
+
+// #150 fallback for creds minted before the identity fields existed (signed in pre-#150, never re-signed):
+// a per-process device id keeps metadata.user_id shape-correct + stable within the process; the derived
+// account_uuid (anthropicUserId) hangs off whichever device id is in play.
+const FALLBACK_DEVICE_ID = mintAnthropicDeviceId();
 
 // The Messages request headers. Pure (no IO) so the recognition contract is unit-testable: the streaming
 // path adds the event-stream Accept; everything else is identical between Inquire and chat.
@@ -114,7 +122,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
     signal: args.signal,
   });
   if (!res.ok) {

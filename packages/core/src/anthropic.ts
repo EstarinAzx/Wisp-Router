@@ -13,7 +13,7 @@
  *   - AnthropicMessage / AnthropicTool: the Messages-API request conversation + tool defs.
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import type { Provider } from './catalog';
 import {
   sortByReleaseDesc,
@@ -30,6 +30,59 @@ export type AnthropicCreds = {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: number; // epoch ms; absent when the token response carried no expires_in
+  // #150 — account identity, alongside the tokens in the same slice. deviceId is minted once per install
+  // (survives sign-out); the rest come from the claude_cli bootstrap endpoint at sign-in (best-effort,
+  // so all optional) and feed metadata.user_id + the "signed in as …" display.
+  deviceId?: string;        // 64-hex, OmniRoute's cliUserID shape
+  accountUuid?: string;
+  accountEmail?: string;
+  organizationName?: string;
+  rateLimitTier?: string;   // organization_rate_limit_tier, e.g. default_claude_max_20x
+};
+
+// The identity slice of a creds bundle (#150) — what the bootstrap fetch fills and what a token refresh
+// must carry over when it rebuilds the bundle from a token payload.
+export type AnthropicAccount = Pick<AnthropicCreds, 'accountUuid' | 'accountEmail' | 'organizationName' | 'rateLimitTier'>;
+
+// Map the claude_cli bootstrap payload's oauth_account block to the creds identity fields. account_uuid
+// is the field metadata.user_id needs — without it the payload is useless, so it gates the whole result;
+// the display-only fields drop entry-by-entry when wrong-typed (hand-edited or drifted payloads).
+export const parseAnthropicBootstrap = (payload: unknown): AnthropicAccount | undefined => {
+  const acct = (payload as { oauth_account?: Record<string, unknown> } | undefined)?.oauth_account;
+  if (!acct || typeof acct.account_uuid !== 'string') return undefined;
+  return {
+    accountUuid: acct.account_uuid,
+    ...(typeof acct.account_email === 'string' ? { accountEmail: acct.account_email } : {}),
+    ...(typeof acct.organization_name === 'string' ? { organizationName: acct.organization_name } : {}),
+    ...(typeof acct.organization_rate_limit_tier === 'string' ? { rateLimitTier: acct.organization_rate_limit_tier } : {}),
+  };
+};
+
+// Mint the per-install device id — 32 random bytes as 64 hex chars (OmniRoute's cliUserID shape).
+export const mintAnthropicDeviceId = (): string => randomBytes(32).toString('hex');
+
+// The metadata.user_id blob the real client sends on every Messages request — a JSON string with exactly
+// these keys in this order. No stored account_uuid (bootstrap failed or never ran) → a shape-correct uuid
+// DERIVED from the device id, so the same install always claims the same account rather than churning.
+export const anthropicUserId = (args: { deviceId: string; accountUuid?: string; sessionId: string }): string => {
+  const derived = (): string => {
+    const h = createHash('sha256').update(args.deviceId).digest('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  };
+  return JSON.stringify({ device_id: args.deviceId, account_uuid: args.accountUuid ?? derived(), session_id: args.sessionId });
+};
+
+// The "signed in as …" line: email + a plan name read off the rate-limit tier. Unknown tier → bare
+// email; no email → undefined (the caller falls back to its bare "signed in" state).
+const ANTHROPIC_PLAN_NAMES: [RegExp, string][] = [
+  [/max_20x/, 'Max 20x'], [/max_5x/, 'Max 5x'], [/max/, 'Max'],
+  [/enterprise/, 'Enterprise'], [/team/, 'Team'], [/pro/, 'Pro'], [/free/, 'Free'],
+];
+export const anthropicAccountLabel = (creds: AnthropicCreds | undefined): string | undefined => {
+  if (!creds?.accountEmail) return undefined;
+  const tier = creds.rateLimitTier?.toLowerCase() ?? '';
+  const plan = ANTHROPIC_PLAN_NAMES.find(([re]) => re.test(tier))?.[1];
+  return plan ? `${creds.accountEmail} · ${plan}` : creds.accountEmail;
 };
 
 // Whether a catalog row is the Anthropic backend. Absent kind == 'openai-chat'.
@@ -197,6 +250,8 @@ export const buildAnthropicMessagesBody = (args: {
   // #139: volatile system tail (mid-session <system-reminder> appends) — emitted as a final UNMARKED
   // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
   systemSuffix?: string;
+  // #150: the metadata.user_id blob (anthropicUserId), passed whole by the client.
+  userId?: string;
 }) => {
   // #145: at most ONE leading system message lifts into the top-level system array — every caller
   // (Inquire, native chat, the bridge arms, the reviewer) prepends exactly one. Any other system message
@@ -337,6 +392,7 @@ export const buildAnthropicMessagesBody = (args: {
     messages,
     ...(args.stream ? { stream: true as const } : {}),
     ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: { type: args.toolChoice ?? 'auto' } } : {}),
+    ...(args.userId ? { metadata: { user_id: args.userId } } : {}),
     ...thinkingEffort,
   };
 };

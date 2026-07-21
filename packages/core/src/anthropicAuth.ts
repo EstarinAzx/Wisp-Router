@@ -26,8 +26,9 @@
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
 import {
-  AnthropicCreds, codeVerifier, codeChallenge, oauthState,
+  AnthropicCreds, AnthropicAccount, codeVerifier, codeChallenge, oauthState,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn,
+  parseAnthropicBootstrap, mintAnthropicDeviceId,
 } from './catalog';
 
 // ----------------------------- Constants ----------------------------- //
@@ -144,6 +145,25 @@ const runAnthropicOAuth = async (openExternal: (url: string) => PromiseLike<bool
   }
 };
 
+// ----------------------------- Bootstrap — signed-in account (#150) ----------------------------- //
+
+// Fetch the signed-in account from the claude_cli bootstrap endpoint. BEST-EFFORT by contract: the access
+// token is valid whether or not this answers, so every failure path (bad status, junk JSON, network,
+// 10s timeout) resolves undefined rather than throwing — sign-in must never block on it.
+const ANTHROPIC_BOOTSTRAP_URL = 'https://api.anthropic.com/api/claude_cli/bootstrap';
+export const fetchAnthropicBootstrap = async (accessToken: string): Promise<AnthropicAccount | undefined> => {
+  try {
+    const res = await fetch(ANTHROPIC_BOOTSTRAP_URL, {
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return undefined;
+    return parseAnthropicBootstrap(await res.json());
+  } catch {
+    return undefined;
+  }
+};
+
 // ----------------------------- AnthropicAuth — store + refresh ----------------------------- //
 
 // The anthropic slice of ~/.wisp/auth.json, as the host face exposes it.
@@ -181,7 +201,10 @@ export class AnthropicAuth {
       });
       if (!res.ok) { this.log(`[anthropic] token refresh failed (${res.status})`); return fresh; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
-      next = tokensToAnthropicCreds(payload, Date.now());
+      // #150: carry the non-token fields (device id + bootstrap identity) over the rebuild — a refresh
+      // must not silently strip the account display and metadata.user_id an hour after sign-in.
+      const { accessToken: _at, refreshToken: _rt, expiresAt: _ea, ...identity } = fresh;
+      next = { ...identity, ...tokensToAnthropicCreds(payload, Date.now()) };
       // The refresh response may omit a fresh refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
@@ -194,16 +217,24 @@ export class AnthropicAuth {
     return next;
   };
 
-  // Sign in via the browser OAuth flow and persist the result.
+  // Sign in via the browser OAuth flow and persist the result. #150: reuse the install's device id (or
+  // mint the first one) and best-effort fetch the signed-in account — a bootstrap failure still signs in.
   signIn = async (): Promise<AnthropicCreds> => {
     const creds = await runAnthropicOAuth(this.openExternal);
-    this.store.write(creds);
-    return creds;
+    const deviceId = this.store.read()?.deviceId ?? mintAnthropicDeviceId();
+    const account = creds.accessToken ? await fetchAnthropicBootstrap(creds.accessToken) : undefined;
+    const next = { ...account, deviceId, ...creds };
+    this.store.write(next);
+    return next;
   };
 
-  // Sign out by writing an empty TOMBSTONE rather than deleting the field — mirrors Codex so a present-
-  // but-bearer-less blob reads as "signed out" (isAnthropicSignedIn === false).
-  signOut = (): void => this.store.write({});
+  // Sign out by writing a TOMBSTONE rather than deleting the field — mirrors Codex so a present-
+  // but-bearer-less blob reads as "signed out" (isAnthropicSignedIn === false). The device id survives
+  // (#150): it identifies the install, not the sign-in, so a later sign-in reuses it.
+  signOut = (): void => {
+    const deviceId = this.store.read()?.deviceId;
+    this.store.write(deviceId ? { deviceId } : {});
+  };
 
   // The credentials to use right now: the stored bundle, refreshed if near expiry. undefined = not signed in.
   current = async (): Promise<AnthropicCreds | undefined> => {

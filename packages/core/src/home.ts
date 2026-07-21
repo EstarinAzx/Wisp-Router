@@ -94,7 +94,7 @@ const sanitizeCreds = (v: unknown, fields: Record<string, 'string' | 'number'>):
 };
 
 const CODEX_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', idToken: 'string', accountId: 'string', apiKey: 'string' } as const;
-const ANTHROPIC_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number' } as const;
+const ANTHROPIC_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', deviceId: 'string', accountUuid: 'string', accountEmail: 'string', organizationName: 'string', rateLimitTier: 'string' } as const;
 const XAI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', tokenEndpoint: 'string' } as const;
 
 // ----------------------------- parseWispConfig ----------------------------- //

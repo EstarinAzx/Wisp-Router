@@ -40,6 +40,7 @@ export type PanelState = {
   isCustom: boolean; // active Provider is Custom → the panel reveals the editable base-URL field (Issue 7)
   kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth'; // the OAuth kinds swap the API-key field for sign-in/out (Grok wiring lands in #97)
   signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
+  account?: string; // #150: "you@email · Max" from the bootstrap identity (Anthropic only)
   modelOptions?: string[]; // OAuth kinds only: models.dev-sourced ids for the dropdown (curated fallback; no live /models route)
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // Codex + Anthropic: the reasoning-effort knob (governs every call)
   effortOptions?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]; // per-model option list — host-computed so 'max' only shows for max-capable Claude (#32)

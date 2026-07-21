@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, isXaiProvider, isXaiSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -373,6 +373,8 @@ const getState = async (): Promise<PanelState> => {
     isCustom: p.id === CUSTOM_ID,
     kind: p.kind ?? 'openai-chat',
     signedIn,
+    // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
+    account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
     // The OAuth Providers have no /models route — their dropdown comes from models.dev (curated fallback).
     modelOptions: oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
