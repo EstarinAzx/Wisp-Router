@@ -488,6 +488,15 @@ export const anthropicDiagnosis = (ev: SseEvent): AnthropicDiagnosis | undefined
   };
 };
 
+// #156: a server miss verdict the bill contradicts is a STALE compare, not a real miss. Two concurrent
+// sends can carry the same previous_message_id (the second fires before the first response's id lands in
+// the chain), so the server diagnoses both against the pre-change message — live-captured 2026-07-21 as
+// back-to-back identical reasons where the second turn's usage was healthy. A real miss always surfaces in
+// the bill: the missed tokens re-write as cache_creation or bill as uncached input. Claimed missed_input
+// more than double what was actually billed outside cache reads = the compare target was stale.
+export const anthropicDiagnosisStale = (missedInput: number, usage: BridgeUsage): boolean =>
+  missedInput > 2 * (usage.cache_creation_input_tokens + usage.input_tokens);
+
 // #156: the previous_message_id chain. Diagnosis is only meaningful when the request names the conversation's
 // previous response, but the Bridge is stateless per request — so this map remembers the last message id per
 // conversation, keyed by model + the FIRST user turn's text (stable for a conversation's whole life; the

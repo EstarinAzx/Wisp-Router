@@ -28,7 +28,7 @@ import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  anthropicCacheOutcome, createAnthropicDiagnosisChain,
+  anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason,
 } from './catalog';
 import { codexStream } from './codexClient';
@@ -676,7 +676,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // target" (first bridged turn, evicted chain entry), and the heuristic's known false-positive rate
         // is already low (~1/392 post-#145).
         if (lastDiagnosis?.missReason) {
-          deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
+          // A verdict the bill contradicts is a stale compare (two concurrent sends named the same
+          // previous_message_id) — advisory wording, not a MISS line the user should worry about.
+          if (lastUsage && anthropicDiagnosisStale(lastDiagnosis.missReason.cacheMissedInputTokens, lastUsage))
+            deps.log(`[bridge] prompt-cache diagnosis STALE ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} but billed=${lastUsage.cache_creation_input_tokens + lastUsage.input_tokens} read=${lastUsage.cache_read_input_tokens} turns=${convoTurns} — concurrent send named an old previous_message_id, not a real miss (#156)`);
+          else
+            deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
         } else if (lastUsage) {
           const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
           if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);

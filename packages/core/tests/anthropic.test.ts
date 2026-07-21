@@ -9,7 +9,7 @@ import {
   anthropicFingerprint, anthropicAttribution,
   buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
-  anthropicUsage, anthropicCacheOutcome, anthropicDiagnosis, createAnthropicDiagnosisChain,
+  anthropicUsage, anthropicCacheOutcome, anthropicDiagnosis, anthropicDiagnosisStale, createAnthropicDiagnosisChain,
   type Provider, type SseEvent, type BridgeUsage,
 } from '../src/catalog';
 import { anthropicMessagesHeaders, anthropicStream, selectAnthropicBetas } from '../src/anthropicClient';
@@ -898,6 +898,20 @@ describe('cache diagnosis (#156)', () => {
     expect(anthropicDiagnosis(healthy)).toEqual({ messageId: 'msg_a' });
     const missed: SseEvent = { event: 'message_start', data: { message: { id: 'msg_b', diagnostics: { cache_miss_reason: { type: 'system_changed', cache_missed_input_tokens: 6594 } } } } };
     expect(anthropicDiagnosis(missed)).toEqual({ messageId: 'msg_b', missReason: { type: 'system_changed', cacheMissedInputTokens: 6594 } });
+  });
+
+  // Live capture 2026-07-21 (second session): two concurrent sends carried the SAME stale
+  // previous_message_id (the second fired before the first response's id was recorded), so the server
+  // diagnosed both against the pre-change message — identical reason + missed_input on back-to-back turns,
+  // the second with perfectly healthy usage. A real miss always shows up in the bill (the missed tokens are
+  // re-written as cache_creation or billed as uncached input); a stale compare bills almost nothing.
+  it('anthropicDiagnosisStale flags a server miss the bill contradicts', () => {
+    // the stale duplicate: server claims 88639 missed, usage billed 1904 + 2 with a 97k cache read
+    expect(anthropicDiagnosisStale(88_639, { input_tokens: 2, cache_creation_input_tokens: 1904, cache_read_input_tokens: 97_777, output_tokens: 50 })).toBe(true);
+    // the real bust one turn earlier: 88639 missed, 97425 re-written — bill matches the claim
+    expect(anthropicDiagnosisStale(88_639, { input_tokens: 2, cache_creation_input_tokens: 97_425, cache_read_input_tokens: 0, output_tokens: 50 })).toBe(false);
+    // a real partial break: missed tokens split between a re-write and uncached input
+    expect(anthropicDiagnosisStale(18_065, { input_tokens: 15_995, cache_creation_input_tokens: 2070, cache_read_input_tokens: 70_538, output_tokens: 50 })).toBe(false);
   });
 
   // Live capture 2026-07-21: the server can answer `cache_miss_reason: {type: 'unavailable'}` on a turn whose
