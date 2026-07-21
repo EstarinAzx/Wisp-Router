@@ -214,14 +214,35 @@ describe('parseAnthropicMessagesRequest', () => {
   });
 
   // The mid-conversation-system beta puts `role:"system"` turns INSIDE messages (hook outputs land there).
-  // They fold into the system string, not the turn list — the normalized seam carries one top-level system.
-  it('folds a mid-conversation system message into the system string', () => {
+  // #145: they stay POSITIONED in the turn list — hoisting them into the top-level system slot rendered
+  // them ahead of the whole history and re-billed it on every reminder change (the cache amplifier).
+  it('keeps a mid-conversation system message positioned in the turn list', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', system: 'top', messages: [
       { role: 'user', content: 'hi' },
       { role: 'system', content: 'hook note' },
+      { role: 'assistant', content: 'sure' },
     ] } as any);
-    expect(parsed.system).toBe('top\n\nhook note');
-    expect(parsed.turns).toEqual([{ role: 'user', text: 'hi', toolCalls: [], toolResults: [] }]);
+    expect(parsed.system).toBe('top');
+    expect(parsed.turns).toEqual([
+      { role: 'user', text: 'hi', toolCalls: [], toolResults: [] },
+      { role: 'system', text: 'hook note', toolCalls: [], toolResults: [] },
+      { role: 'assistant', text: 'sure', toolCalls: [], toolResults: [] },
+    ]);
+  });
+
+  // A system turn between an advisor result and the user turn must not swallow the pending pairing —
+  // advisor results attach to the next USER turn, skipping positioned system turns.
+  it('carries pending advisor results past a positioned system turn to the next user turn', () => {
+    const parsed = parseAnthropicMessagesRequest({ model: 'm', messages: [
+      { role: 'assistant', content: [
+        { type: 'server_tool_use', id: 'adv_1', name: 'advisor', input: {} },
+        { type: 'advisor_tool_result', tool_use_id: 'adv_1', content: { type: 'advisor_result', text: 'ship it' } },
+      ] },
+      { role: 'system', content: 'hook note' },
+      { role: 'user', content: 'go on' },
+    ] } as any);
+    expect(parsed.turns[1]).toEqual({ role: 'system', text: 'hook note', toolCalls: [], toolResults: [] });
+    expect(parsed.turns[2].toolResults).toEqual([{ callId: 'adv_1', content: 'ship it' }]);
   });
 
   // #139: Claude Code's own cache_control marks the stable/volatile boundary in its system block array —
@@ -246,17 +267,19 @@ describe('parseAnthropicMessagesRequest', () => {
     expect(parsed.systemSplit).toEqual({ stable: 'a\n\nb', volatile: '' });
   });
 
-  // Mid-conversation system arrives mid-session by definition — always volatile, never part of the
-  // stable prefix, whatever the top-level marker layout says.
-  it('folds mid-conversation system into the volatile side of the split', () => {
+  // #145: mid-conversation system no longer feeds the split — it rides positioned in the turn list, so
+  // volatile carries ONLY the top-level tail after the client's marker.
+  it('keeps mid-conversation system out of the split — volatile is the top-level tail alone', () => {
     const parsed = parseAnthropicMessagesRequest({ model: 'm', system: [
       { type: 'text', text: 'top', cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: '<system-reminder>tail</system-reminder>' },
     ], messages: [
       { role: 'user', content: 'hi' },
       { role: 'system', content: 'hook note' },
     ] } as any);
-    expect(parsed.system).toBe('top\n\nhook note');
-    expect(parsed.systemSplit).toEqual({ stable: 'top', volatile: 'hook note' });
+    expect(parsed.system).toBe('top\n\n<system-reminder>tail</system-reminder>');
+    expect(parsed.systemSplit).toEqual({ stable: 'top', volatile: '<system-reminder>tail</system-reminder>' });
+    expect(parsed.turns[1]).toEqual({ role: 'system', text: 'hook note', toolCalls: [], toolResults: [] });
   });
 
   // No client marker (string system, or a non-Claude-Code client) → no split — the build side then keeps
@@ -995,6 +1018,16 @@ describe('serializeForReview', () => {
     const s = serializeForReview(turns);
     expect(s).toContain('[1 image(s) omitted]');
     expect(s).not.toContain('AAAA');
+  });
+
+  // #145: a positioned system turn (hook reminder) reads as System, not User — the reviewer should see
+  // harness noise labelled as what it is.
+  it('labels a positioned system turn System', () => {
+    const turns: NormalizedTurn[] = [
+      { role: 'user', text: 'hi', toolCalls: [], toolResults: [] },
+      { role: 'system', text: 'hook note', toolCalls: [], toolResults: [] },
+    ];
+    expect(serializeForReview(turns)).toContain('System: hook note');
   });
 });
 

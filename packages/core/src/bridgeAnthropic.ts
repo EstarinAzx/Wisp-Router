@@ -149,11 +149,11 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
   return { text, toolResults, images, documents };
 };
 
-// Parse an Anthropic /v1/messages body into Wisp's normalized shape. System text is lifted out of the turn
-// list into a separate string — both the top-level `system` (string or block array) AND any mid-conversation
-// role:"system" turn (the mid-conversation-system beta) fold in, joined blank-line-separated.
-// ponytail: mid-conversation system loses its position among turns — the normalized seam has one top-level
-// system slot; fine for the translator, #46 revisits if positioned system ever matters.
+// Parse an Anthropic /v1/messages body into Wisp's normalized shape. The TOP-LEVEL `system` (string or
+// block array) is lifted into a separate string; a mid-conversation role:"system" turn (the
+// mid-conversation-system beta — Claude Code's hook reminders arrive this way) stays POSITIONED in the
+// turn list as a role:'system' turn (#145). Hoisting those into the top-level slot rendered them ahead of
+// the whole message history and re-billed it at the cache boundary on every reminder change.
 // The claude-wisp- discovery alias is stripped from `model` (slice-1 decision); a stock claude-* id (the
 // background tier's haiku) has no such prefix and passes verbatim. output_config.effort is read (Claude
 // Code's /effort — #47 threads it to the backend); the other beta fields (thinking, context_management,
@@ -161,10 +161,9 @@ const splitUserBlocks = (blocks: AntContentBlock[]): {
 // the last marked block is the client's own stable/volatile boundary, recorded as systemSplit.
 export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): BridgeAnthropicRequest => {
   const messages = Array.isArray(body.messages) ? body.messages : [];
-  const systemParts: string[] = [];
-  if (body.system !== undefined) systemParts.push(blockText(body.system, '\n\n'));
+  const systemTop = body.system !== undefined ? blockText(body.system, '\n\n') : '';
   // #139: index of the LAST client-marked top-level system block — everything through it is the stable
-  // prefix, everything after (later blocks, mid-conversation system) is volatile. -1 = no marker, no split.
+  // prefix, later top-level blocks are volatile. -1 = no marker, no split.
   let stableEnd = -1;
   if (Array.isArray(body.system)) body.system.forEach((b, i) => { if (b && typeof b === 'object' && b.cache_control !== undefined) stableEnd = i; });
 
@@ -174,7 +173,8 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
   // follows. A trailing result with no user turn after it is dropped (nowhere to land, never a crash).
   let pendingAdvisorResults: { callId: string; content: string; isError?: boolean }[] = [];
   for (const msg of messages) {
-    if (msg.role === 'system') { systemParts.push(blockText(msg.content, '\n\n')); continue; }
+    // #145: positioned, never hoisted. Pending advisor results ride past it to the next real user turn.
+    if (msg.role === 'system') { turns.push({ role: 'system', text: blockText(msg.content, '\n\n'), toolCalls: [], toolResults: [] }); continue; }
     if (typeof msg.content === 'string') {
       const carried = msg.role === 'user' ? pendingAdvisorResults : [];
       if (msg.role === 'user') pendingAdvisorResults = [];
@@ -241,16 +241,15 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
   const toolChoice = normalizeToolChoice(body.tool_choice);
   const effort = normalizeEffort(body.output_config?.effort);
   // #139: split at the client's marker. stable = top-level blocks through the last marked one; volatile =
-  // the top-level tail plus every mid-conversation system part (systemParts[0] is the top-level join —
-  // present whenever stableEnd was found — so the mid parts are systemParts[1..]).
+  // the top-level tail alone (mid-conversation system rides positioned in the turn list since #145).
   const systemSplit = stableEnd >= 0 ? {
     stable: blockText((body.system as AntTextBlock[]).slice(0, stableEnd + 1), '\n\n'),
-    volatile: [blockText((body.system as AntTextBlock[]).slice(stableEnd + 1), '\n\n'), ...systemParts.slice(1)].filter(Boolean).join('\n\n'),
+    volatile: blockText((body.system as AntTextBlock[]).slice(stableEnd + 1), '\n\n'),
   } : undefined;
   return {
     model: (body.model ?? '').replace(/^claude-wisp-/, ''),
     stream: body.stream ?? false,
-    system: systemParts.filter(Boolean).join('\n\n'),
+    system: systemTop,
     turns,
     tools,
     // Only attach the extras when present, so a plain request stays byte-identical to a bare BridgeChatRequest.
@@ -537,7 +536,7 @@ const RESULT_CAP = 2000;
 // One turn's serialization — pure and deterministic (same turn → same bytes), which is what makes the
 // per-turn blocks in buildReviewerRequest a cache-stable prefix across reviewer invocations (#141).
 const serializeTurn = (t: NormalizedTurn): string => {
-  const who = t.role === 'assistant' ? 'Assistant' : 'User';
+  const who = t.role === 'assistant' ? 'Assistant' : t.role === 'system' ? 'System' : 'User';
   const parts: string[] = [];
   if (t.text) parts.push(t.text);
   for (const c of t.toolCalls ?? []) parts.push(`[called ${c.name}]`);

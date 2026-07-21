@@ -340,7 +340,10 @@ export const toOpenAiTools = (tools: ToolSpec[]): OAToolDef[] =>
 // One chat turn flattened to plain data: text, tool calls (assistant turns), tool results (user turns),
 // attached images (user turns). chatProvider.ts builds these from the vscode parts; images is optional.
 export type NormalizedTurn = {
-  role: 'user' | 'assistant';
+  // 'system' is a POSITIONED mid-conversation system turn (#145, Anthropic-door only today): Claude Code
+  // sends hook reminders as role:"system" turns inside messages, and hoisting them to the top-level system
+  // slot re-billed the whole history behind them on every change. A system turn carries text only.
+  role: 'user' | 'assistant' | 'system';
   text: string;
   toolCalls: { id: string; name: string; argsJson: string }[];
   // isError carries Anthropic's tool_result.is_error flag (a failed tool call) through the Anthropic door;
@@ -371,6 +374,7 @@ type OAContentPart = { type: 'text'; text: string } | { type: 'image_url'; image
 export type OAChatMessage =
   | { role: 'user'; content: string | OAContentPart[] }
   | { role: 'assistant'; content: string; tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[] }
+  | { role: 'system'; content: string }
   | { role: 'tool'; tool_call_id: string; content: string };
 
 // Flatten normalized turns into the OpenAI message sequence. A user turn's tool results expand into
@@ -379,6 +383,9 @@ export type OAChatMessage =
 // multimodal content array (text part + image_url data URIs).
 export const buildOpenAiChatMessages = (turns: NormalizedTurn[]): OAChatMessage[] =>
   turns.flatMap((turn) => {
+    // #145: a positioned system turn stays a system message at its place — OpenAI-compatible backends
+    // accept mid-conversation system messages.
+    if (turn.role === 'system') return [{ role: 'system' as const, content: turn.text }];
     if (turn.role === 'assistant') {
       const calls = turn.toolCalls.map((c) => ({ id: c.id, type: 'function' as const, function: { name: c.name, arguments: c.argsJson } }));
       return [calls.length

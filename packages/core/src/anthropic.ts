@@ -105,9 +105,10 @@ export const anthropicTruncationReason = (stopReason: string | undefined): strin
   stopReason === 'max_tokens' || stopReason === 'content_filter' || stopReason === 'refusal' ? stopReason : undefined;
 
 // One conversation message for the Messages backend. Inquire sends system+user; native chat sends
-// user/assistant. The Messages API carries the system prompt top-level (not as a role), so a 'system'
-// entry here is lifted out by the body builder. Agent mode also carries a turn's tool round-trip:
-// toolCalls on an assistant turn, toolResults on a user turn — expanded to content blocks below.
+// user/assistant. The Messages API carries the system prompt top-level (not as a role), so a LEADING
+// 'system' entry here is lifted out by the body builder; a system entry after any non-system stays
+// positioned in messages (#145 — the mid-conversation-system beta). Agent mode also carries a turn's tool
+// round-trip: toolCalls on an assistant turn, toolResults on a user turn — expanded to content blocks below.
 export type AnthropicMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -183,9 +184,10 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 
 // ----------------------------- Anthropic Messages body + reply reducers ----------------------------- //
 
-// Translate a conversation into an Anthropic Messages request body. The system text moves to the top-level
-// `system` block array, led by the Claude Code attribution block (its fingerprint derived from the first
-// user turn's TEXT — so it MUST stay sourced from `content`). A turn with tool calls/results expands to a
+// Translate a conversation into an Anthropic Messages request body. The LEADING system text moves to the
+// top-level `system` block array, led by the Claude Code attribution block (its fingerprint derived from
+// the first user turn's TEXT — so it MUST stay sourced from `content`); mid-conversation system stays
+// positioned (#145). A turn with tool calls/results expands to a
 // content BLOCK array (assistant: text then tool_use; user: tool_result FIRST then text); a plain turn
 // stays a bare string — EXCEPT the final turn, which converts to one text block so it can carry the cache
 // breakpoint (#111). An empty text block is never emitted. tools ride only when non-empty.
@@ -196,19 +198,29 @@ export const buildAnthropicMessagesBody = (args: {
   // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
   systemSuffix?: string;
 }) => {
-  const wispSystem = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n');
-  const convo = args.messages.filter((m) => m.role !== 'system');
+  // #145: only the LEADING run of system messages lifts into the top-level system array; a system message
+  // after any non-system stays POSITIONED in `messages` as a role:"system" turn (the
+  // mid-conversation-system beta — Claude Code's hook reminders), so its churn re-bills only the tail
+  // behind it instead of the whole history. convo[0] is the first non-system message either way, so the
+  // attribution fingerprint samples the same text as before.
+  let lead = 0;
+  while (lead < args.messages.length && args.messages[lead].role === 'system') lead++;
+  const wispSystem = args.messages.slice(0, lead).map((m) => m.content).join('\n\n');
+  const convo = args.messages.slice(lead).filter((m) => m.role !== 'system' || m.content);
   const firstUserMessage = convo[0]?.content ?? '';
   const system: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral'; ttl?: '1h' } }> = [
     { type: 'text' as const, text: anthropicAttribution(firstUserMessage, args.version) },
     ...(wispSystem ? [{ type: 'text' as const, text: wispSystem }] : []),
   ];
-  type BuiltTurn = { role: 'user' | 'assistant'; content: string | unknown[] };
+  type BuiltTurn = { role: 'user' | 'assistant' | 'system'; content: string | unknown[] };
   // Computed once, up front: the replay decision below and the body spread at the bottom must agree —
   // replaying thinking blocks into a thinking-off request is a 400, same as dropping them from a
   // thinking-on tool continuation.
   const thinkingEffort = anthropicThinkingEffort(args.model, args.effort);
   const messages: BuiltTurn[] = convo.map((m) => {
+    // #145: a positioned system turn is a single text block — a markable anchor for the walk below
+    // (native Claude Code marks these blocks too), never a bare string.
+    if (m.role === 'system') return { role: 'system' as const, content: [{ type: 'text', text: m.content }] };
     if (m.role === 'assistant') {
       // Thinking passthrough: a turn with the door's byte-for-byte sidecar replays it VERBATIM when this
       // body enables thinking — signatures + interleaved order intact. Thinking off → sidecar skipped,

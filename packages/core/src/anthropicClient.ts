@@ -58,7 +58,9 @@ const INQUIRE_MAX_TOKENS = 16_000;
 // unenforced today.
 // effort-2025-11-24 gates the API's parsing of output_config.effort (slice #31) — without it the level is
 // silently dropped. Advertised on every request; harmless when the body omits output_config (e.g. Haiku).
-const ANTHROPIC_BETA = 'claude-code-20250219,oauth-2025-04-20,effort-2025-11-24';
+// mid-conversation-system-2026-04-07 gates positioned role:"system" turns inside messages (#145) — claude
+// CLI advertises the same token natively (header capture 2026-07-21).
+const ANTHROPIC_BETA = 'claude-code-20250219,oauth-2025-04-20,effort-2025-11-24,mid-conversation-system-2026-04-07';
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
 // match (the backend ties the cc_version to the claude-cli UA). This exact string is accepted today.
 const CLAUDE_CODE_VERSION = '0.19.0';
