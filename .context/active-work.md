@@ -8,47 +8,51 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: c385c04 (v2.0.29 release) + later wrap-ups + this one._
+_At commit: c385c04 (v2.0.29 release) + later wrap-ups; #149 on branch
+`149-fingerprint-parity` (63276bf), PR open._
 
 ## Current focus
 
-**Nothing in flight — a wire-parity backlog just got filed.** v2.0.29 is shipped
-+ installed and verified live (post-release forensics: whole-history fallback
-~1/392, better than ~1/70 native — posted on #145). This session compared wisp's
-Anthropic-OAuth path against OmniRoute + a live `claude-cli 2.1.216` capture and
-filed umbrella **#148** + children **#149–#152**. Nothing implemented yet.
+**#149 implemented + PR open — awaiting live wire-capture before close.** Tier-1
+fingerprint parity coded on branch `149-fingerprint-parity` (605 tests green,
+compile clean), pushed, PR opened. Issue kept OPEN: the unit tests restate the
+ticket, not its acceptance — acceptance is a live `ANTHROPIC_BASE_URL` re-capture
+against an interactive bridged session. Next code ticket: **#150**.
 
 ## State
 
-- **In flight:** nothing.
-- **Queue (`ready-for-agent`):** **#149** (Tier-1 fingerprint parity — version
-  bump + Stainless headers + session-id), **#150** (bootstrap account identity +
+- **In flight:** #149 PR open (branch `149-fingerprint-parity`, off main).
+- **Queue (`ready-for-agent`):** **#150** (bootstrap account identity +
   `metadata.user_id`), **#151** (shape-aware `anthropic-beta` 4→12). **#152**
-  (cache-diagnosis probe) is `ready-for-human`. Umbrella **#148** tracks all four.
+  (cache-diagnosis probe) is `ready-for-human`. Umbrella **#148** tracks all.
   Older open: #126 (2.0.24 spec umbrella, probably closable) and #69 (backlog).
-- **Done this session:**
+- **Done this session (earlier):**
   1. **Post-release verification of #145.** Forensics over 5 bridged sessions
      (392 requests): 1 cold, ~1/392 fallback (was ~1/7 pre-fix). Posted on #145.
   2. **OmniRoute comparison + live 2.1.216 capture.** Settled that the
      `cc_version` fingerprint is UNVALIDATED (real `c5e` vs wisp recipe `2b0`,
-     accepted anyway → version bump is safe). Diffed the full wire; wisp is
-     missing `x-stainless-*` (8), `x-claude-code-session-id`, `metadata.user_id`,
-     and 8 of 12 `anthropic-beta` flags. Decision file:
+     accepted anyway → version bump is safe). Decision file:
      [[2026-07-21-anthropic-oauth-fingerprint-unvalidated]].
   3. **Filed #148–#152** (umbrella + 4 children) with file:line touch points.
+- **Done this session (#149):** version bump 0.19.0→2.1.216 (feeds UA +
+  cc_version block), 8 `x-stainless-*` headers, per-process
+  `x-claude-code-session-id`, `anthropic-dangerous-direct-browser-access`,
+  POST `/v1/messages?beta=true`. All in `anthropicClient.ts` + tests. Kept
+  `cc_entrypoint=cli` / UA `(external, cli)`. Breadcrumb posted; left OPEN.
 - **Blocked:** none.
 
 ## Pick up here
 
-**Next: #149 (Tier-1 fingerprint parity, `ready-for-agent`).** Self-contained PR:
-bump `CLAUDE_CODE_VERSION` 0.19.0→2.1.216 (`anthropicClient.ts:66`), emit the 8
-`x-stainless-*` headers + `x-claude-code-session-id` in `anthropicMessagesHeaders`
-(`anthropicClient.ts:71`). Then #150 (bootstrap → account_uuid → metadata),
-#151 (beta widen), #152 (probe cache-diagnosis first). Verify with the same
-`ANTHROPIC_BASE_URL` capture harness.
+**Next: #150 (bootstrap account identity + `metadata.user_id`, `ready-for-agent`).**
+Needs the bootstrap fetch (part 1) first for `account_uuid`; `metadata.user_id.
+session_id` MUST equal the `x-claude-code-session-id` #149 added
+(`CLAUDE_CODE_SESSION_ID` const in `anthropicClient.ts`). **Decide there** whether
+that id should be per-conversation, not per-process — one `wisp serve` can serve
+many Claude Code conversations that would share one id, unlike real claude. Then
+#151 (beta widen), #152 (probe cache-diagnosis first).
 
-Also still open: close #126 if fully shipped; the user-side session-start
-cold-write prune (`/preset health`, non-wisp).
+Also: land/close #149 once the live re-capture passes; close #126 if fully
+shipped; the user-side session-start cold-write prune (`/preset health`, non-wisp).
 
 ## Skills for next session
 

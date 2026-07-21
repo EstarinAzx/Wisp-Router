@@ -9,36 +9,39 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last task (DONE): OmniRoute comparison + live `claude-cli 2.1.216` capture → wire-parity backlog filed (#148–#152).**
+**Last task (DONE, PR open): #149 — Tier-1 fingerprint parity.**
 
-- Compared wisp's Anthropic-OAuth path against diegosouzapw/OmniRoute and a live
-  capture of real `claude-cli 2.1.216` (`ANTHROPIC_BASE_URL` listener + `claude -p`).
-- Settled fact: the `cc_version` billing fingerprint is **not validated** (real hash
-  `2.1.216.c5e` vs wisp's own recipe `2b0`, accepted anyway) → version bump is
-  zero-risk. Decision: [[decisions/2026-07-21-anthropic-oauth-fingerprint-unvalidated]].
-- Filed umbrella #148 + children #149 (fingerprint parity), #150 (account identity),
-  #151 (anthropic-beta widen), #152 (cache-diagnosis probe).
-- v2.0.29 also verified live this session (fallback ~1/392; posted on #145).
+- Branch `149-fingerprint-parity` (`63276bf`, off main), PR open. 605 tests green,
+  compile clean. All changes in `packages/core/src/anthropicClient.ts` + tests.
+- Shipped: `CLAUDE_CODE_VERSION` 0.19.0 → 2.1.216 (feeds UA + `cc_version` block),
+  8 `x-stainless-*` headers, per-process `x-claude-code-session-id`,
+  `anthropic-dangerous-direct-browser-access`, POST `/v1/messages?beta=true`.
+- **#149 stays OPEN** — acceptance is a live `ANTHROPIC_BASE_URL` re-capture vs real
+  2.1.216 (interactive bridged session, NOT `-p`), diffing all outbound headers.
+  Unit-green is not wire-verified. Breadcrumb posted on the issue.
 
-**Next task: #149 — Tier-1 fingerprint parity (`ready-for-agent`).**
+**Next task: #150 — bootstrap account identity + `metadata.user_id` (`ready-for-agent`).**
 
-- One self-contained PR: bump `CLAUDE_CODE_VERSION` 0.19.0 → 2.1.216
-  (`packages/core/src/anthropicClient.ts:66`, feeds both UA + cc_version), and emit
-  the 8 `x-stainless-*` headers + `x-claude-code-session-id` +
-  `anthropic-dangerous-direct-browser-access` in `anthropicMessagesHeaders`
-  (`anthropicClient.ts:71`). Then #150 → #151 → #152.
+- Needs the bootstrap fetch (part 1) first to get `account_uuid`.
+- `metadata.user_id.session_id` MUST equal the `x-claude-code-session-id` header
+  #149 added — reuse the `CLAUDE_CODE_SESSION_ID` const in `anthropicClient.ts`.
+- Then #151 (beta widen 4→12), #152 (probe cache-diagnosis first, `ready-for-human`).
 
 **Landmines:**
 
-- **Keep `cc_entrypoint=cli` and UA suffix `(external, cli)`.** The `-p` capture shows
-  `sdk-cli` ONLY because `-p` uses the SDK entrypoint; the interactive bridge is `cli`.
-  Do NOT switch to `sdk-cli`.
-- Fingerprint hash is unvalidated — do NOT try to reproduce claude's real algorithm;
-  wisp's salt/index math is harmless theater, leave it.
-- #150's `metadata.user_id.account_uuid` needs the bootstrap fetch (part 1) first;
-  `session_id` must equal the `x-claude-code-session-id` header from #149.
-- Verify every change with the `ANTHROPIC_BASE_URL` capture harness (re-run against an
-  interactive bridged session for the exact `cli`-entrypoint UA).
+- **Session-id scope decision (#150):** `CLAUDE_CODE_SESSION_ID` is minted once per
+  PROCESS (module-load `randomUUID()`), not per conversation. One `wisp serve` can
+  serve many Claude Code conversations that would then share one id — unlike real
+  claude, which mints a fresh one per invocation. #150 threads this into
+  `metadata.user_id.session_id`; decide there if per-process is acceptable or it
+  must become per-conversation.
+- Keep `cc_entrypoint=cli` + UA suffix `(external, cli)` (do NOT switch to `sdk-cli`).
+- Fingerprint hash is UNVALIDATED — don't reproduce claude's real algorithm.
+- Verify every wire change with the `ANTHROPIC_BASE_URL` capture harness against an
+  interactive bridged session (not `-p`).
+- **Repo hazard this session:** a concurrent process repeatedly checked out `main`
+  mid-work. Commits were safe on the branch; if the working tree looks reverted,
+  `git checkout 149-fingerprint-parity` restores it. Confirm branch before any git write.
 - Prior #145 landmines still hold (see [[active-work]] Recent context).
 
 ## Related
