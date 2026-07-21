@@ -4,10 +4,35 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] — 2026-07-21
+
+The Bridge's Anthropic door catches up with the TUI line (wisp-router 2.0.11–2.0.31):
+Advisor, a prompt-cache health overhaul, and server-side cache diagnostics.
+
+### Added
+
+- **Server-side cache diagnostics on the Anthropic OAuth path (#156).** Every OAuth
+  Messages request rides the `cache-diagnosis-2026-04-07` beta and chains
+  `diagnostics.previous_message_id`; when the backend diagnoses a broken cache prefix, the
+  Bridge's MISS line reports the server's authoritative reason and re-billed magnitude.
+  The usage heuristic stays as fallback, and a server `unavailable` answer reads as
+  no-diagnosis, not a miss.
+- **Claude Code's native Advisor works through the Bridge (#141–#143).** The door plays
+  the advisor server role: it runs the reviewer over the conversation (quarantined
+  system prompt, prompt-cacheable transcript), streams the verdict back, and reports
+  reviewer cost via `usage.iterations` so `/cost` sees it.
+- **Anthropic-door passthrough fidelity.** Thinking / redacted-thinking blocks, Claude 5
+  effort, base64 PDF `document` blocks, `tool_result.is_error`, and real token usage off
+  the wire (previously synthesized).
+- **Prompt-cache observability.** `prompt-cache MISS` / `PARTIAL` advisory log lines on
+  the Anthropic door (#111, #146).
 
 ### Fixed
 
+- **Prompt-cache health overhaul on the Anthropic door (#111, #139, #145).** Fixed cache
+  TTL per request path (no mid-session flip), breakpoints spread across fat tool turns,
+  1h TTL on bridge sessions, and the hook-reminder re-bill amplifier removed. Measured
+  miss rate ~1/392 turns — better than native claude-cli (~1/70).
 - **Claude Code `/model <alias>` no longer crashes validating a Wisp model.** The Bridge's
   Anthropic door ignored `stream: false` and always replied with an SSE stream; Claude Code's
   model-validation probe is a non-streaming request whose JSON body it reads `usage.input_tokens`

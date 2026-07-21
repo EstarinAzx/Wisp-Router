@@ -2,7 +2,7 @@
   "name": "wisp",
   "displayName": "Wisp",
   "description": "BYOK model router for VS Code's Copilot chat, agent, and Ctrl+I — bring your own API keys or ChatGPT (Codex) / Claude.ai subscription. Bridge external tools like Claude Code onto the same providers. Plus Inquire inline edits.",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "license": "MIT",
   "publisher": "EsarinAzx",
   "repository": {
