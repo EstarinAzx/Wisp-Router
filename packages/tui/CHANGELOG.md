@@ -6,6 +6,23 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.33] — 2026-07-22
+
+### Fixed
+
+- **Spurious `system_changed` STALE noise when advisor requests interleave (#158).**
+  The advisor tool rides in the request's tools array, so advisor-on and advisor-off
+  requests of one conversation are two cached prefix variants — but both shared one
+  diagnosis chain, so the server compared each against the other variant's previous
+  message and emitted verdicts the bill contradicted. The chain key now folds in the
+  tool lineup's names (alongside model + first user turn); each variant chains its own
+  previous message, and a variant-flip turn reads as the already-silent null-chain case.
+- **STALE advisory states the observable, not one cause (#159).** The line asserted
+  "concurrent send named an old previous_message_id", but a prefix-variant flip
+  produces the identical bill-contradicts-verdict shape with no concurrency involved.
+  It now reads "bill contradicts the verdict: stale compare target (concurrent send or
+  prefix-variant flip)".
+
 ## [2.0.32] — 2026-07-21
 
 ### Fixed
