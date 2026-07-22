@@ -9,27 +9,39 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last leg (2026-07-22, relay leg 1): #158 shipped.** Diagnosis chain key now
-distinguishes cache-prefix variants by tool lineup; landed on main `4123dc1`,
-pushed, ticket closed. 634/634 tests + compile green.
+**Last leg (2026-07-22, relay leg 2): #159 shipped.** STALE cache-diagnosis
+advisory in `packages/core/src/bridgeServer.ts` (~line 682) no longer asserts
+"concurrent send" as the cause — it states the bill-contradicts-verdict
+observable and names both known shapes (concurrent send, prefix-variant
+flip). Landed on main `76e4fba`, pushed, ticket closed. 634/634 + compile
+green.
 
-**Next task: #159** (`ready-for-agent`, unblocked) — STALE cache-diagnosis
-advisory overclaims "concurrent send" as the cause. Small change: the bridge's
-STALE advisory log line asserts a specific cause it can't know; reword to
-state what's actually known (bill contradicts the verdict → stale compare).
-Likely file: `packages/core/src/bridgeServer.ts` (advisory line near the
-diagnosis rendering, ~line 680) or the wording source in
-`packages/core/src/anthropic.ts` — read ticket #159 body for the exact ask.
+**Next task: #160** (`ready-for-agent`, unblocked, LAST queue item) —
+Investigate: advisor field drops mid-conversation (prefix flip, ~95k cache
+re-write). **Investigation, not a code change.** A bridged session shows one
+conversation alternating between carrying the advisor field and not; each
+flip forks the cached prefix (first flip ≈95k-token full-prefix re-write,
+flapping double-bills history deltas). Find who drops the field:
 
-After #159: **#160** (investigate who drops the advisor field
-mid-conversation; may produce no code — deliverable is a written cause +
-follow-up ticket if wisp-side).
+- user toggling Advisor mid-session (benign — document and close), vs
+- picker/panel state flapping (wisp bug — file a fix ticket), vs
+- a Claude Code request class that never carries the field (clue: lone
+  `effort=high` request inside the no-advisor cluster while surrounding
+  main-loop requests ran `effort=xhigh`).
+
+Deliverable per acceptance criteria: written cause on the ticket (repro
+steps or ruled-out list with evidence); wisp-side bug → follow-up fix
+ticket; inherent → document a flip's expected cost so log readers recognize
+the shape. Possibly no code.
+
+After #160: **queue empty** — ticket-loop signals stop; relay sets
+`stop: true`, no further legs.
 
 **The chain's vehicle — relay, one ticket per leg, gateless wrap-up per
 slice** (state file `.claude/relay/ticket-loop.md`):
 
 ```
-/relay N=1 /preset ticket-loop -> after the ticket's gate (tests green + landed, or ready-for-human relabel), run /preset wrap-up gateless: eyeball gate auto-go (unattended), /context-update, rewrite .context/pick-up.md to the next unblocked ready-for-agent ticket or "queue empty", commit .context on main — never the ticket branch. At leg boot also read .context/pick-up.md.
+/relay N=1 /preset ticket-loop -> after the ticket's gate (tests green + landed, or ready-for-human relabel), run /preset wrap-up gateless: eyeball gate auto-go (unattended), /context-update, rewrite .context/pick-up.md to the next unblocked ready-for-agent ticket or 'queue empty', commit .context on main — never the ticket branch. At leg boot also read .context/pick-up.md.
 ```
 
 **Landmines:**
@@ -38,13 +50,18 @@ slice** (state file `.claude/relay/ticket-loop.md`):
   that's why the body ends with "at leg boot also read .context/pick-up.md".
 - `/preset wrap-up`'s step 1 is a human eyeball gate (AskUserQuestion) — an
   unattended leg must treat it as auto-go, exactly as the body says.
-- `.context/` commits go to main, never the ticket branch — otherwise the next
+- `.context/` commits go to main, never a ticket branch — otherwise the next
   leg (booting on main) reads a stale baton.
-- #159 is small; repo rule says small diffs land straight on main (solo repo).
-- #159 wording: don't assert "concurrent send" — the stale-compare detection
-  (`anthropicDiagnosisStale`) only knows the bill contradicts the verdict,
-  not why. Concurrency is one hypothesis, not the diagnosis.
-- Details on the cache-fork mechanics:
+- Relay spawns with `binary: claude` (native, NOT `claude-wisp`) — wisp legs
+  die at boot when no Bridge runs at 127.0.0.1:41184. Keep the state file's
+  `binary:` as-is.
+- #160 is an investigation ticket: closing it with a documented benign cause
+  and no diff is a valid gate pass ("landed" = the write-up comment). If it
+  turns ambiguous or needs a human decision, relabel `ready-for-human`.
+- Where to look: advisor field enters the Bridge request path in
+  `packages/core/src/bridgeServer.ts` (advisorTools substitution upstream of
+  the Anthropic arm's chain call site — see #158's mechanics in
+  [[active-work]]); cache-fork economics in
   [[advisor-toggle-forks-the-cache-prefix-two-variants]].
 
 ## Related
