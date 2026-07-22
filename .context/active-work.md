@@ -7,38 +7,36 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-22 by Fable 5 (wrap-up)._
-_At commit: 03d6086 (v2.0.32 release — STALE advisory logging on main)._
+_Last updated: 2026-07-22 by Fable 5 (relay leg 1 wrap-up)._
+_At commit: 4123dc1 (#158 fix on main)._
 
 ## Current focus
 
-**Cache-log triage → three-ticket queue.** User's bridged-session logs were
-diagnosed: caching machinery healthy (STALE downgrades correct, #145 PARTIAL
-known), but an advisor on/off toggle mid-session forked the cache prefix — one
-real ~95K re-write plus advisory noise. No code changed this session; findings
-became tickets **#158, #159, #160** (all `ready-for-agent`, no blocking edges)
-and gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]].
+**Working the cache-triage ticket queue via relay — one ticket per leg.**
+#158 done this leg; #159 and #160 remain (`ready-for-agent`, independent).
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main at v2.0.32.
-- **Queue:** #158 (diagnosis chain key gets a tools-based variant
-  discriminator; system-churn key stability must survive), #159 (STALE
-  advisory wording stops asserting "concurrent send"), #160 (investigate who
-  drops the advisor field mid-conversation — user toggle vs panel flap vs a
-  request class; clue: lone `effort=high` request in the no-advisor cluster).
-- **Plan:** user runs the queue via relay — one ticket per leg, gateless
-  wrap-up after each slice. Exact command lives in [[pick-up]].
-- **Done this session:** log diagnosis (advisor-flap → prefix fork → STALE
-  chain explained), issues #158/#159/#160 filed, gotcha recorded.
+- **In flight:** nothing. Working tree clean on main at 4123dc1.
+- **Done this leg:** **#158 closed** — diagnosis chain key now folds in the
+  tool lineup's names (`model + first user turn + tool names`). Advisor
+  on/off prefix variants chain separately; a flip turn reads as the silent
+  null-chain case instead of producing spurious STALE advisories. New unit
+  test + existing #139 system-churn guard green (634/634), compile clean.
+  Landed straight on main (small-diff rule), pushed.
+- **Queue:** #159 (STALE advisory wording stops asserting "concurrent send" —
+  small, bridge log line), #160 (investigate who drops the advisor field
+  mid-conversation — user toggle vs panel flap vs a request class; clue:
+  lone `effort=high` request in the no-advisor cluster; may end in a
+  wisp-side fix ticket or a documented benign cause, possibly no code).
+- **Plan:** relay chain continues — next leg picks #159 (oldest first).
+  Exact command + per-leg contract live in [[pick-up]].
 - **Blocked:** nothing.
 
 ## Pick up here
 
-Work the frontier: any of #158/#159/#160 (independent). `/preset ticket-loop`
-picks oldest first. #158/#159 are small single-file changes (core: anthropic
-diagnosis chain / bridge log line); #160 is investigation, may end in a
-wisp-side fix ticket or a documented benign cause.
+Work the frontier: #159 then #160 (independent; `/preset ticket-loop` picks
+oldest first). #159 is a small single-file change; #160 is investigation.
 
 ## Skills for next session
 
@@ -53,19 +51,20 @@ wisp-side fix ticket or a documented benign cause.
 
 ## Recent context
 
-- **v2.0.31 + v2.0.32 landed since last handoff** (previous session):
-  'unavailable' miss reason reads as no-diagnosis; server miss verdicts the
-  bill contradicts log as STALE advisory. Both shipped; this session's logs
-  show them working live.
+- **#158 mechanics (this leg):** discriminator is tools-only — the advisor
+  tool already arrives in `parsed.tools` at the Anthropic arm's chain call
+  site (advisorTools substitution upstream in bridgeServer), so the fix was
+  key-shape only, no new plumbing. Omitted tools ≡ empty lineup = its own
+  variant.
 - **Advisor-flap cache economics:** advisor tool rides in the cached prefix;
   flip = full prefix re-write, flapping = double-billed history deltas. Both
   variants stay warm so bills look healthy between flips. Details in the
-  gotcha.
-- **Diagnosis chain landmines (still true):** key = model + FIRST user turn —
-  leading system churn must not shift it (tested); #158's discriminator must
-  be tools-based, never system-based. Server diagnosis null ≠ healthy — never
-  let it suppress the heuristic. `selectAnthropicBetas` gates are EXCLUSION
-  lists; diagnosis token rides LAST.
+  gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]].
+- **Diagnosis chain landmines (still true):** key = model + FIRST user turn
+  (+ tool names since #158) — leading system churn must not shift it
+  (tested). Server diagnosis null ≠ healthy — never let it suppress the
+  heuristic. `selectAnthropicBetas` gates are EXCLUSION lists; diagnosis
+  token rides LAST.
 - **Live-check technique:** scratchpad bun script importing core src with
   stored `~/.wisp/auth.json` creds; haiku's min cacheable prefix is 4096
   tokens — pad fillers past it.
