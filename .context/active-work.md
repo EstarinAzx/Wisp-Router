@@ -1,78 +1,79 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-21
+updated: 2026-07-22
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-21 by Fable 5 (wrap-up)._
-_At commit: 5b87e8f (v2.0.30 release — #156 cache diagnostics on main)._
+_Last updated: 2026-07-22 by Fable 5 (wrap-up)._
+_At commit: 03d6086 (v2.0.32 release — STALE advisory logging on main)._
 
 ## Current focus
 
-**#156 DONE + CLOSED + released (v2.0.30). The whole #148 umbrella arc is CLOSED.**
-Server-side cache diagnostics adopted on the Anthropic OAuth path: every request
-rides `cache-diagnosis-2026-04-07` + `diagnostics.previous_message_id` (chained
-per conversation), the Bridge logs the server's authoritative `cache_miss_reason`
-in the MISS line, heuristic kept as fallback. Merged via PR #157 (631 tests, 5
-new). **The `ready-for-agent` queue is EMPTY; no umbrella open.**
+**Cache-log triage → three-ticket queue.** User's bridged-session logs were
+diagnosed: caching machinery healthy (STALE downgrades correct, #145 PARTIAL
+known), but an advisor on/off toggle mid-session forked the cache prefix — one
+real ~95K re-write plus advisory noise. No code changed this session; findings
+became tickets **#158, #159, #160** (all `ready-for-agent`, no blocking edges)
+and gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]].
 
 ## State
 
-- **In flight:** nothing — the v2.0.30 release workflow completed GREEN before
-  wrap-up finished (2m10s, binaries + npm shell published).
-- **Queue:** empty. **#148 closed** (all four children #149/#150/#151/#152 done).
-  **#152 closed** — probe (breadcrumb comment on the issue) proved the OAuth
-  backend honors the diagnosis beta; adoption shipped as #156/PR #157. **#69**
-  backlog remains the only open thread.
-- **Done this session:** #152 probe (3 scratchpad scripts: control, forced-miss,
-  streaming — full captures preserved as comments on #152), #156 implementation
-  (`selectAnthropicBetas` +1 token, `buildAnthropicMessagesBody` diagnostics
-  field, `anthropicDiagnosis` extractor, `createAnthropicDiagnosisChain`,
-  Bridge wiring + log preference), v2.0.30 release commit + tag.
+- **In flight:** nothing. Working tree clean on main at v2.0.32.
+- **Queue:** #158 (diagnosis chain key gets a tools-based variant
+  discriminator; system-churn key stability must survive), #159 (STALE
+  advisory wording stops asserting "concurrent send"), #160 (investigate who
+  drops the advisor field mid-conversation — user toggle vs panel flap vs a
+  request class; clue: lone `effort=high` request in the no-advisor cluster).
+- **Plan:** user runs the queue via relay — one ticket per leg, gateless
+  wrap-up after each slice. Exact command lives in [[pick-up]].
+- **Done this session:** log diagnosis (advisor-flap → prefix fork → STALE
+  chain explained), issues #158/#159/#160 filed, gotcha recorded.
 - **Blocked:** nothing.
 
 ## Pick up here
 
-No task queued. Ask the user what's next: #69 backlog, a new spec, or a
-vscode-face release (extension changelog does NOT yet mention #156; only the
-TUI changelog does).
+Work the frontier: any of #158/#159/#160 (independent). `/preset ticket-loop`
+picks oldest first. #158/#159 are small single-file changes (core: anthropic
+diagnosis chain / bridge log line); #160 is investigation, may end in a
+wisp-side fix ticket or a documented benign cause.
 
 ## Skills for next session
 
-- `/preset pick-up` — note points here.
+- `/preset pick-up` — note carries the relay command + per-leg contract.
+- `/preset ticket-loop` — the loop body the relay fires.
 - `packages/tui:verify` — sandboxed CLI verification for TUI command-surface changes.
 
 ## Open questions
 
-- None for the wisp codebase.
+- #160's question: what drops the `advisor` field mid-conversation? (Tracked
+  as the ticket, not answered.)
 
 ## Recent context
 
-- **Diagnosis beta contract (probe-verified, #152):** header token + body
-  `diagnostics: {previous_message_id}` BOTH required; response carries
-  `message_start.message.diagnostics` — `null` healthy, `{cache_miss_reason:
-  {type, cache_missed_input_tokens}}` on a diagnosed break. Key absent entirely
-  without the beta. First-party-only per public docs but the OAuth subscription
-  backend honors it.
-- **Live-check technique (still the cheap path):** scratchpad bun script
-  importing core src with stored `~/.wisp/auth.json` creds. Caution from this
-  session: haiku's min cacheable prefix is 4096 tokens — pad filler well past it
-  or creation reads 0 and the check looks broken when it isn't.
-- Landmines (still true): `selectAnthropicBetas` gates are EXCLUSION lists —
-  don't invert to allowlists; the diagnosis token is deliberately LAST (trailing
-  position probe-validated). Refresh/sign-out must keep creds identity fields.
-  Max 4 `cache_control` markers; builder hoists at most ONE leading system
-  message. Keep `cc_entrypoint=cli` + UA `(external, cli)`; fingerprint hash
-  UNVALIDATED. Wisp cache health: ~1/392 misses post-#145 — better than native
-  (~1/70).
+- **v2.0.31 + v2.0.32 landed since last handoff** (previous session):
+  'unavailable' miss reason reads as no-diagnosis; server miss verdicts the
+  bill contradicts log as STALE advisory. Both shipped; this session's logs
+  show them working live.
+- **Advisor-flap cache economics:** advisor tool rides in the cached prefix;
+  flip = full prefix re-write, flapping = double-billed history deltas. Both
+  variants stay warm so bills look healthy between flips. Details in the
+  gotcha.
+- **Diagnosis chain landmines (still true):** key = model + FIRST user turn —
+  leading system churn must not shift it (tested); #158's discriminator must
+  be tools-based, never system-based. Server diagnosis null ≠ healthy — never
+  let it suppress the heuristic. `selectAnthropicBetas` gates are EXCLUSION
+  lists; diagnosis token rides LAST.
+- **Live-check technique:** scratchpad bun script importing core src with
+  stored `~/.wisp/auth.json` creds; haiku's min cacheable prefix is 4096
+  tokens — pad fillers past it.
 
 ## Related
 
 - [[overview]]
 - [[pick-up]]
 - [[decisions]]
+- [[advisor-toggle-forks-the-cache-prefix-two-variants]]
 - [[2026-07-21-server-cache-diagnosis-adopted]]
-- [[2026-07-21-beta-selection-model-gated-exclusion]]

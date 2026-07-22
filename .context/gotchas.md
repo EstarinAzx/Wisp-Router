@@ -1,7 +1,7 @@
 ---
 type: gotchas-index
 project: wisp
-updated: 2026-07-19
+updated: 2026-07-22
 tags: [context, gotchas]
 ---
 
@@ -9,6 +9,7 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[advisor-toggle-forks-the-cache-prefix-two-variants]] — advisor on/off mid-session forks the cached prefix (advisor tool rides in tools): first flip re-writes ~whole prefix uncached, later flips double-bill history deltas; variant-blind diagnosis chain then emits spurious `system_changed` → STALE noise. Tickets #158/#159/#160
 - [[buildanthropicmessagesbody-must-not-mutate-caller-rawcontent]] — `buildAnthropicMessagesBody` must replay a *copy* of `rawContent` (strip any inbound `cache_control`); mutating the caller's array lets multi-build flows (advisor base→reviewer→continuation) stack markers past Anthropic's cap of 4 → "Found 5". Regression in `anthropic.test.ts`
 - [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]] — deriving the Anthropic cache TTL from `convo.length` flips 5m→1h between turn 1 and turn 2 of the same session; a TTL change rewrites `cache_control` and busts the server-side prefix cache (2× re-bill on turn 2 of every session). Fix TTL per call path, never from turn count
 - [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]] — codex `502 … input exceeds the context window` is a passthrough of the codex window (400K gpt-5.x / 200K o-series), not a bridge bug; bridge forwards untrimmed, `/compact` before codex turns
