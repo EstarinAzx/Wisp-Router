@@ -523,10 +523,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const sys = parsed.systemSplit?.stable ?? parsed.system;
       const messages = sys ? [{ role: 'system' as const, content: sys }, ...turns] : turns;
       // #156: name the conversation's previous response so the server's cache diagnosis has a compare
-      // target, and record this response's id for the next turn. Keyed off the same messages the request
-      // ships (model + first user turn) — advisor continuation passes chain through here too.
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, previousMessageId: diagnosisChain.previousIdFor(modelId, messages), signal: controller.signal });
-      return { ok: true, events: mapOAuthStream(upstream, (id) => diagnosisChain.record(modelId, messages, id)), model: modelId };
+      // target, and record this response's id for the next turn. Keyed off the same messages + tool lineup
+      // the request ships (model + first user turn + tool names — #158: the advisor tool arrives in
+      // parsed.tools already, so each prefix variant chains its own previous message) — advisor
+      // continuation passes chain through here too.
+      const tools = toAnthropicTools(parsed.tools);
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools, toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, previousMessageId: diagnosisChain.previousIdFor(modelId, messages, tools), signal: controller.signal });
+      return { ok: true, events: mapOAuthStream(upstream, (id) => diagnosisChain.record(modelId, messages, id, tools)), model: modelId };
     }
     if (isXaiProvider(provider)) {
       const creds = await deps.xaiCreds?.();

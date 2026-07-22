@@ -500,25 +500,30 @@ export const anthropicDiagnosisStale = (missedInput: number, usage: BridgeUsage)
 // #156: the previous_message_id chain. Diagnosis is only meaningful when the request names the conversation's
 // previous response, but the Bridge is stateless per request — so this map remembers the last message id per
 // conversation, keyed by model + the FIRST user turn's text (stable for a conversation's whole life; the
-// last turn changes every request). Interleaved conversations (main + subagents + utility turns) each get
-// their own key. Capped FIFO (Map insertion order) — log-only feature, an evicted entry costs one null-chain
-// turn, never correctness.
+// last turn changes every request) + the tool lineup's names (#158: an advisor on/off toggle flips the
+// synthetic advisor tool in and out — two cached prefix variants; one shared chain made the server diagnose
+// each against the other variant's previous message, spurious system_changed → STALE noise. Per-lineup keys
+// give a variant-flip turn no compare target: the already-silent null-chain case). The discriminator is
+// tools-only, never system content — leading system churn must not shift the key (#139). Interleaved
+// conversations (main + subagents + utility turns) each get their own key. Capped FIFO (Map insertion
+// order) — log-only feature, an evicted entry costs one null-chain turn, never correctness.
 // ponytail: identical first turns (repeated one-shot utility calls) share a key and chain across invocations;
 // same-shaped requests SHOULD hit the same cache, so the diagnosis stays meaningful. Split per-request if not.
 export type AnthropicDiagnosisChain = {
-  previousIdFor: (model: string, messages: { role: string; content: string }[]) => string | undefined;
-  record: (model: string, messages: { role: string; content: string }[], messageId: string) => void;
+  previousIdFor: (model: string, messages: { role: string; content: string }[], tools?: { name: string }[]) => string | undefined;
+  record: (model: string, messages: { role: string; content: string }[], messageId: string, tools?: { name: string }[]) => void;
 };
 export const createAnthropicDiagnosisChain = (cap = 256): AnthropicDiagnosisChain => {
   const last = new Map<string, string>();
-  const keyFor = (model: string, messages: { role: string; content: string }[]): string => {
+  const keyFor = (model: string, messages: { role: string; content: string }[], tools?: { name: string }[]): string => {
     const first = messages.find((m) => m.role === 'user')?.content ?? '';
-    return createHash('sha256').update(`${model}\0${first}`).digest('hex').slice(0, 16);
+    const lineup = (tools ?? []).map((t) => t.name).join('\x1f');
+    return createHash('sha256').update(`${model}\0${first}\0${lineup}`).digest('hex').slice(0, 16);
   };
   return {
-    previousIdFor: (model, messages) => last.get(keyFor(model, messages)),
-    record: (model, messages, messageId) => {
-      const key = keyFor(model, messages);
+    previousIdFor: (model, messages, tools) => last.get(keyFor(model, messages, tools)),
+    record: (model, messages, messageId, tools) => {
+      const key = keyFor(model, messages, tools);
       last.delete(key); // re-insert so eviction order tracks recency, not first sighting
       last.set(key, messageId);
       if (last.size > cap) last.delete(last.keys().next().value as string);

@@ -954,6 +954,24 @@ describe('cache diagnosis (#156)', () => {
     chain.record('m', [{ role: 'system', content: 'sys v1' }, { role: 'user', content: 'ask' }], 'msg_1');
     expect(chain.previousIdFor('m', [{ role: 'system', content: 'sys v2 — reminder appended' }, { role: 'user', content: 'ask' }])).toBe('msg_1');
   });
+
+  // #158: the tool lineup discriminates cache-prefix variants. An advisor on/off toggle mid-session flips
+  // the synthetic advisor tool in and out of the request — two distinct cached prefixes sharing one chain
+  // made the server diagnose each against the other variant's previous message (spurious system_changed →
+  // STALE noise). Keyed per lineup, the flip turn has no compare target: a silent null-chain turn.
+  it('chains cache-prefix variants separately by tool lineup (advisor on/off)', () => {
+    const chain = createAnthropicDiagnosisChain();
+    const conv = [{ role: 'user', content: 'ask' }];
+    const base = [{ name: 'read' }, { name: 'write' }];
+    const withAdvisor = [...base, { name: 'advisor' }];
+    chain.record('m', conv, 'msg_1', base);
+    expect(chain.previousIdFor('m', conv, base)).toBe('msg_1');
+    expect(chain.previousIdFor('m', conv, withAdvisor)).toBeUndefined(); // flip turn — no compare target
+    chain.record('m', conv, 'msg_2', withAdvisor);
+    expect(chain.previousIdFor('m', conv, withAdvisor)).toBe('msg_2');
+    expect(chain.previousIdFor('m', conv, base)).toBe('msg_1');          // flip back — old variant intact
+    expect(chain.previousIdFor('m', conv)).toBeUndefined();              // omitted tools = empty lineup, its own variant
+  });
 });
 
 describe('buildAnthropicMessagesBody — metadata.user_id (#150)', () => {
