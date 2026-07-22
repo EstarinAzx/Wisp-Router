@@ -7,59 +7,61 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-22 by Fable 5 (relay leg 2 wrap-up)._
-_At commit: 76e4fba (#159 fix on main)._
+_Last updated: 2026-07-22 by Fable 5 (relay leg 3 wrap-up)._
+_At commit: 76e4fba (#159 fix on main) — leg 3 shipped no code, only this write-up._
 
 ## Current focus
 
-**Working the cache-triage ticket queue via relay — one ticket per leg.**
-#158 (leg 1) and #159 (leg 2) done; #160 is the last queue item.
+**Cache-triage queue COMPLETE.** #158 (leg 1), #159 (leg 2), #160 (leg 3) all
+closed. The relay chain stopped itself — queue empty.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main at 76e4fba.
-- **Done this leg:** **#159 closed** — the STALE cache-diagnosis advisory in
-  `packages/core/src/bridgeServer.ts` no longer asserts "concurrent send" as
-  the cause; it states the observable (bill contradicts the server verdict →
-  stale compare target) and names both known shapes (concurrent send,
-  prefix-variant flip) without asserting either. No tests asserted the old
-  wording (verified by search). 634/634 + compile green. Landed straight on
-  main (small-diff rule), pushed.
-- **Queue:** #160 (investigate who drops the advisor field mid-conversation —
-  user toggle vs panel flap vs a request class; clue: lone `effort=high`
-  request in the no-advisor cluster; may end in a wisp-side fix ticket or a
-  documented benign cause, possibly no code).
-- **Plan:** relay chain continues — next leg picks #160 (last queue item).
-  Exact command + per-leg contract live in [[pick-up]].
+- **In flight:** nothing. Working tree clean on main.
+- **Done this leg:** **#160 closed** — investigation, no code. Cause of the
+  advisor-field drops: Claude Code's auxiliary fork queries (auto-memory
+  extraction `querySource:"extract_memories"`, compact, agent_summary) fork
+  the main conversation but the `advisor_20260301` tool is injected only for
+  querySources `repl_main_thread*`/`agent:*`/`sdk`/`hook_agent` — aux classes
+  never carry it, so with advisor on every aux fork is a second prefix
+  variant (first fork = ~95k uncached re-write, `skipTranscript` hides its
+  usage from transcripts, `skipCacheWrite` mitigation feature-gated off
+  upstream). Not a user toggle, not a wisp bug — full evidence chain in the
+  [#160 comment](https://github.com/EstarinAzx/Wisp-Router/issues/160).
+  Gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]] rewritten to
+  name the real actor. No follow-up ticket — nothing wisp-side to fix.
+- **Queue:** empty. Only open issue is #69 (backlog: copilot-wisp launcher,
+  `enhancement`, not `ready-for-agent`).
 - **Blocked:** nothing.
 
 ## Pick up here
 
-Work #160 — investigation ticket, deliverable is a written cause on the
-ticket (+ follow-up ticket if wisp-side), not necessarily code. After #160
-the queue is empty → the relay chain stops itself.
+No queued agent work. Next session: user decides — options in [[pick-up]].
 
 ## Skills for next session
 
-- `/preset pick-up` — note carries the relay command + per-leg contract.
-- `/preset ticket-loop` — the loop body the relay fires.
+- `/preset pick-up` / `catch-up` — session doors.
+- `/preset ticket-loop` — re-seed via `/relay` when new tickets get
+  `ready-for-agent` (exact command preserved in [[pick-up]]).
 - `packages/tui:verify` — sandboxed CLI verification for TUI command-surface changes.
 
 ## Open questions
 
-- #160's question: what drops the `advisor` field mid-conversation? (Tracked
-  as the ticket, not answered.)
+- none from the cache-triage arc. (#160's question answered on the ticket.)
 
 ## Recent context
 
-- **#159 mechanics (this leg):** wording-only change to the STALE advisory
-  log line + its comment in `bridgeServer.ts` (~line 682). The
-  `anthropicDiagnosisStale` doc comment in `anthropic.ts:491` was left alone
-  deliberately — it already hedges ("can") and ends on the observable.
-- **Advisor-flap cache economics:** advisor tool rides in the cached prefix;
-  flip = full prefix re-write, flapping = double-billed history deltas. Both
-  variants stay warm so bills look healthy between flips. Details in the
-  gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]].
+- **#160 evidence technique (this leg):** the flap session's raw serve logs
+  were gone, but the triage session's transcript (`b9bdba5c`) preserved the
+  pasted log block; the flap session itself (`ece6d83f`) was located by
+  grepping all project transcripts for the exact `cache_read` values in the
+  STALE lines; the mechanism came from string-grepping the compiled Claude
+  Code binary (`~/.local/share/claude/versions/2.1.217` — minified JS is
+  greppable with `grep -a`). Absence of `creation=95299` from every JSONL was
+  itself evidence (`skipTranscript`).
+- **Advisor-flap cache economics:** two warm variants, money leaks at growth
+  spurts only — details + recognition marks now live in the gotcha
+  [[advisor-toggle-forks-the-cache-prefix-two-variants]].
 - **Diagnosis chain landmines (still true):** key = model + FIRST user turn
   (+ tool names since #158) — leading system churn must not shift it
   (tested). Server diagnosis null ≠ healthy — never let it suppress the
