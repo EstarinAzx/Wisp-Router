@@ -679,10 +679,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // target" (first bridged turn, evicted chain entry), and the heuristic's known false-positive rate
         // is already low (~1/392 post-#145).
         if (lastDiagnosis?.missReason) {
-          // A verdict the bill contradicts is a stale compare (two concurrent sends named the same
-          // previous_message_id) — advisory wording, not a MISS line the user should worry about.
+          // A verdict the bill contradicts means the server compared against a stale target — known
+          // shapes: a concurrent send racing the chain, or a prefix-variant flip (#158). Which one is
+          // not observable here — advisory wording, not a MISS line the user should worry about.
           if (lastUsage && anthropicDiagnosisStale(lastDiagnosis.missReason.cacheMissedInputTokens, lastUsage))
-            deps.log(`[bridge] prompt-cache diagnosis STALE ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} but billed=${lastUsage.cache_creation_input_tokens + lastUsage.input_tokens} read=${lastUsage.cache_read_input_tokens} turns=${convoTurns} — concurrent send named an old previous_message_id, not a real miss (#156)`);
+            deps.log(`[bridge] prompt-cache diagnosis STALE ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} but billed=${lastUsage.cache_creation_input_tokens + lastUsage.input_tokens} read=${lastUsage.cache_read_input_tokens} turns=${convoTurns} — bill contradicts the verdict: stale compare target (concurrent send or prefix-variant flip), not a real miss (#156)`);
           else
             deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
         } else if (lastUsage) {
