@@ -513,20 +513,59 @@ export type AnthropicDiagnosisChain = {
   previousIdFor: (model: string, messages: { role: string; content: string }[], tools?: { name: string }[]) => string | undefined;
   record: (model: string, messages: { role: string; content: string }[], messageId: string, tools?: { name: string }[]) => void;
 };
+// The shared conversation key (#156 chain, #162 growth tracker): model + FIRST user turn + tool-name
+// lineup — stable for a conversation's whole life, variant-split on advisor on/off (#158), never
+// shifted by leading system churn (#139).
+export const anthropicConversationKey = (model: string, messages: { role: string; content: string }[], tools?: { name: string }[]): string => {
+  const first = messages.find((m) => m.role === 'user')?.content ?? '';
+  const lineup = (tools ?? []).map((t) => t.name).join('\x1f');
+  return createHash('sha256').update(`${model}\0${first}\0${lineup}`).digest('hex').slice(0, 16);
+};
+
 export const createAnthropicDiagnosisChain = (cap = 256): AnthropicDiagnosisChain => {
   const last = new Map<string, string>();
-  const keyFor = (model: string, messages: { role: string; content: string }[], tools?: { name: string }[]): string => {
-    const first = messages.find((m) => m.role === 'user')?.content ?? '';
-    const lineup = (tools ?? []).map((t) => t.name).join('\x1f');
-    return createHash('sha256').update(`${model}\0${first}\0${lineup}`).digest('hex').slice(0, 16);
-  };
   return {
-    previousIdFor: (model, messages, tools) => last.get(keyFor(model, messages, tools)),
+    previousIdFor: (model, messages, tools) => last.get(anthropicConversationKey(model, messages, tools)),
     record: (model, messages, messageId, tools) => {
-      const key = keyFor(model, messages, tools);
+      const key = anthropicConversationKey(model, messages, tools);
       last.delete(key); // re-insert so eviction order tracks recency, not first sighting
       last.set(key, messageId);
       if (last.size > cap) last.delete(last.keys().next().value as string);
+    },
+  };
+};
+
+// #162: growth-aware PARTIAL classification. A growing conversation legitimately writes each new
+// turn's content once (tool results are routinely 4–10k tokens), and the next request reads that
+// write back — live capture 2026-07-23: read(n+1) = read(n) + creation(n) EXACTLY in consecutive
+// pairs. The turn-local anthropicCacheOutcome can't see across requests, so it labeled this healthy
+// incremental pattern "probable history re-bill" (#145's advisory). This tracker can: it remembers
+// last turn's read+creation per conversation (same key as the diagnosis chain) and classifies the
+// next turn — the write was banked ('grew', suppress the advisory) or it wasn't ('stalled', a real
+// re-bill worth the line). Intermediate healthy turns only ADD to read, so the ≥ comparison is safe
+// across gaps. TTL expiry (read collapses to 0) stays a MISS — this never touches that branch.
+export type AnthropicGrowthVerdict =
+  | { kind: 'grew' }                                     // read swallowed the prior write — healthy growth
+  | { kind: 'stalled'; expectedRead: number }            // prior write NOT read back — a real partial re-bill
+  | { kind: 'unknown' };                                 // first sighting of this conversation — no baseline
+export type AnthropicCacheGrowthTracker = {
+  // Classify THIS turn against the conversation's previous turn, then record this turn as the new
+  // baseline. Call once per anthropic response that carried usage — every kind, not just partials,
+  // so the baseline tracks the conversation even through healthy turns.
+  classify: (model: string, messages: { role: string; content: string }[], tools: { name: string }[] | undefined, usage: BridgeUsage) => AnthropicGrowthVerdict;
+};
+export const createAnthropicCacheGrowthTracker = (cap = 256): AnthropicCacheGrowthTracker => {
+  const last = new Map<string, { read: number; creation: number }>();
+  return {
+    classify: (model, messages, tools, usage) => {
+      const key = anthropicConversationKey(model, messages, tools);
+      const prev = last.get(key);
+      last.delete(key); // re-insert so eviction order tracks recency (same discipline as the chain)
+      last.set(key, { read: usage.cache_read_input_tokens, creation: usage.cache_creation_input_tokens });
+      if (last.size > cap) last.delete(last.keys().next().value as string);
+      if (!prev) return { kind: 'unknown' };
+      const expectedRead = prev.read + prev.creation;
+      return usage.cache_read_input_tokens >= expectedRead ? { kind: 'grew' } : { kind: 'stalled', expectedRead };
     },
   };
 };

@@ -28,7 +28,7 @@ import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain,
+  anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason,
 } from './catalog';
 import { codexStream } from './codexClient';
@@ -473,6 +473,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // Bridge host; only the Anthropic arm below reads/writes it.
   const diagnosisChain = createAnthropicDiagnosisChain();
 
+  // #162: the growth tracker — same per-conversation keying as the chain, remembers read+creation so
+  // the next turn can tell healthy incremental growth from a real partial re-bill. Only the Anthropic
+  // door's cache-health log consults it.
+  const growthTracker = createAnthropicCacheGrowthTracker();
+
   const mapOAuthStream = async function* (
     upstream: AsyncIterable<AnthropicStreamEvent>,
     onDiagnosis?: (messageId: string) => void,
@@ -695,6 +700,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // #145: system turns don't count toward the ≥3-turn gate — a first exchange carrying two hook
         // reminders is not "past the first exchange".
         const convoTurns = parsed.turns.filter((t) => t.role !== 'system').length;
+        // #162: classify this turn against the conversation's previous read+creation baseline — every
+        // usage-carrying turn records (the baseline must track through healthy turns), the verdict is
+        // consumed only by the heuristic PARTIAL branch below. Key parity with the diagnosis chain:
+        // same first-user-turn text, same tool lineup (advisorTools is what actually shipped).
+        const growth = lastUsage
+          ? growthTracker.classify(result.model, parsed.turns.map((t) => ({ role: t.role, content: t.text })), advisorTools, lastUsage)
+          : undefined;
         // #156: the server's own diagnosis is authoritative when it reports a break — reason + magnitude,
         // no inference. A null diagnosis does NOT silence the heuristic below: it also means "no compare
         // target" (first bridged turn, evicted chain entry), and the heuristic's known false-positive rate
@@ -710,7 +722,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         } else if (lastUsage) {
           const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
           if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);
-          else if (outcome.kind === 'partial') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
+          // #162: a partial whose read swallowed the previous turn's write is incremental growth — the
+          // cache working as designed, not a re-bill. Silent. Only a stalled read (prior write not read
+          // back) or a baseline-less first sighting still earns the advisory line.
+          else if (outcome.kind === 'partial' && growth?.kind !== 'grew') {
+            if (growth?.kind === 'stalled') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} expected>=${growth.expectedRead} creation=${outcome.creationTokens} turns=${convoTurns} — prior write not read back: real history re-bill (#162)`);
+            else deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
+          }
         }
       }
     } catch (err) {

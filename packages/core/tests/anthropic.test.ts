@@ -1673,3 +1673,57 @@ describe('anthropicCacheOutcome', () => {
     expect(anthropicCacheOutcome(usage({ cache_read_input_tokens: 10_000, cache_creation_input_tokens: 30_000 }), 1).kind).toBe('hit');
   });
 });
+
+// ----------------------------- Cache growth tracker (#162) ----------------------------- //
+
+import { createAnthropicCacheGrowthTracker, anthropicConversationKey } from '../src/anthropic';
+
+describe('createAnthropicCacheGrowthTracker', () => {
+  const usage = (read: number, creation: number) =>
+    ({ input_tokens: 2, cache_creation_input_tokens: creation, cache_read_input_tokens: read, output_tokens: 100 });
+  const msgs = [{ role: 'user', content: 'first turn' }];
+  const tools = [{ name: 'Read' }, { name: 'Bash' }];
+
+  it('first sighting is unknown, then the banked write classifies as grew', () => {
+    const t = createAnthropicCacheGrowthTracker();
+    // Live capture 2026-07-23: read(n+1) = read(n) + creation(n) exactly.
+    expect(t.classify('fable', msgs, tools, usage(102728, 10336))).toEqual({ kind: 'unknown' });
+    expect(t.classify('fable', msgs, tools, usage(113064, 7567))).toEqual({ kind: 'grew' });
+    // Intermediate healthy turns only add read — a bigger-than-expected read is still growth.
+    expect(t.classify('fable', msgs, tools, usage(131734, 9283))).toEqual({ kind: 'grew' });
+  });
+
+  it('a read that does not swallow the prior write is stalled, with the expectation attached', () => {
+    const t = createAnthropicCacheGrowthTracker();
+    t.classify('fable', msgs, tools, usage(100_000, 8_000));
+    expect(t.classify('fable', msgs, tools, usage(100_000, 8_000))).toEqual({ kind: 'stalled', expectedRead: 108_000 });
+    // The stalled turn still becomes the new baseline: recovery next turn reads as grew.
+    expect(t.classify('fable', msgs, tools, usage(108_000, 500))).toEqual({ kind: 'grew' });
+  });
+
+  it('conversations are keyed apart — an interleaved subagent never pollutes the main baseline', () => {
+    const t = createAnthropicCacheGrowthTracker();
+    t.classify('fable', msgs, tools, usage(100_000, 8_000));
+    expect(t.classify('fable', [{ role: 'user', content: 'other conversation' }], tools, usage(5_000, 5_000))).toEqual({ kind: 'unknown' });
+    expect(t.classify('fable', msgs, tools, usage(108_000, 4_000))).toEqual({ kind: 'grew' });
+  });
+
+  it('tool-lineup variants key apart (the #158 advisor split)', () => {
+    const t = createAnthropicCacheGrowthTracker();
+    t.classify('fable', msgs, tools, usage(100_000, 8_000));
+    expect(t.classify('fable', msgs, [...tools, { name: 'advisor' }], usage(90_000, 9_000))).toEqual({ kind: 'unknown' });
+  });
+
+  it('evicts the oldest conversation past the cap', () => {
+    const t = createAnthropicCacheGrowthTracker(2);
+    t.classify('fable', [{ role: 'user', content: 'a' }], tools, usage(10, 10));
+    t.classify('fable', [{ role: 'user', content: 'b' }], tools, usage(10, 10));
+    t.classify('fable', [{ role: 'user', content: 'c' }], tools, usage(10, 10)); // evicts 'a'
+    expect(t.classify('fable', [{ role: 'user', content: 'a' }], tools, usage(20, 10))).toEqual({ kind: 'unknown' });
+  });
+
+  it('shares the diagnosis-chain key discipline: leading system churn never shifts the key', () => {
+    const withSystem = [{ role: 'system', content: 'volatile reminder' }, ...msgs];
+    expect(anthropicConversationKey('fable', withSystem, tools)).toBe(anthropicConversationKey('fable', msgs, tools));
+  });
+});
