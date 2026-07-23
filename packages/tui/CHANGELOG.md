@@ -6,6 +6,20 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.35] — 2026-07-23
+
+### Fixed
+
+- **PARTIAL advisory no longer flags healthy incremental growth (#162).** The #145
+  line fired on every multi-turn request writing ≥4k cache-creation tokens — but a
+  growing conversation legitimately writes each new turn's content once, and the
+  2026-07-23 capture proves the writes are banked (`read(n+1) = read(n) + creation(n)`
+  exactly). A per-conversation growth tracker (same key as the #156 diagnosis chain)
+  now classifies each turn: prior write read back → silent; prior write NOT read
+  back → the line fires with expected-vs-observed evidence (`expected>=N`); first
+  sighting → previous wording. The serve log stops crying wolf on the cache working
+  as designed.
+
 ## [2.0.34] — 2026-07-23
 
 ### Added
