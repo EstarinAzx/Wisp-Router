@@ -6,6 +6,21 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.34] — 2026-07-23
+
+### Added
+
+- **Auto-cooldown + family fallback on usage-limit 429 (#161).** A provider answering
+  `429 usage_limit_reached` (live capture: codex, `resets_in_seconds=551032` ≈ 6 days)
+  used to eat every routed request as a 502 until the user manually rebound the family
+  route to anthropic. The Bridge now parses the reset horizon from the error body, marks
+  the provider cooling (in-memory; a Bridge restart clears it), and family-matched
+  `claude-*` routes fall back to the anthropic Provider with the requested id pinned
+  until the window ends — the same flip the user made by hand, minus the babysitting.
+  Explicit provider-id and Alias routes never re-aim; transient (non-usage-limit) 429s
+  never start a cooldown; a missing `resets_in_seconds` defaults to 300s so a wrong
+  guess self-heals.
+
 ## [2.0.33] — 2026-07-22
 
 ### Fixed
