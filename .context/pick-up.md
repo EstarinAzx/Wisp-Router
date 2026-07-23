@@ -9,21 +9,22 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-23): #161 shipped + released as wisp-router 2.0.34.**
-Bridge auto-cooldowns a provider on `429 usage_limit_reached` (parses
-`resets_in_seconds`) and family-matched `claude-*` routes fall back to
-anthropic until the window ends. feat 5bcff26, release 7b632d7, tag v2.0.34,
-CI green (npm + GitHub release published). Design limits (in-memory only,
-family-only fallback, usage-limit-only trigger):
-[[2026-07-23-usage-limit-cooldown-family-fallback-only]].
+**Last session (2026-07-23): #161 + #162 shipped, released as 2.0.34 + 2.0.35.**
+#161 (feat 5bcff26, v2.0.34, CI green): bridge auto-cooldowns a provider on
+`429 usage_limit_reached` and family-matched `claude-*` routes fall back to
+anthropic until the window ends — design limits in
+[[2026-07-23-usage-limit-cooldown-family-fallback-only]]. #162 (feat b350614,
+v2.0.35, CI in flight at wrap-up — `gh run list` to confirm): the #145
+PARTIAL advisory proved to be flagging healthy incremental growth
+(`read(n+1) = read(n) + creation(n)` exactly in the live capture); a
+per-conversation growth tracker now silences banked-write turns and a
+surviving PARTIAL line carries `expected>=N` evidence — post-2.0.35 PARTIALs
+are real stalls, take them seriously.
 
 **Next task: none queued.** `ready-for-agent` queue is empty. Open backlog:
 
 - #69 — copilot-wisp launcher for the Copilot CLI (`enhancement`, needs
   grooming before it's agent-grabbable).
-- #145 PARTIAL drip — unexplained ~4–10k/turn cache-creation behind a stable
-  prefix; small leak. If the user wants it chased, first step is a fresh serve
-  capture with the #156 server-diagnosis lines, then groom into a ticket.
 
 When new work exists: label tickets `ready-for-agent`, then re-seed the
 chain with the exact relay command below (state file

@@ -12,10 +12,13 @@ _At commit: 7b632d7 (release 2.0.34 on main, pushed; tag v2.0.34, CI green)._
 
 ## Current focus
 
-**#161 shipped and released.** Bridge now auto-handles provider usage-limit
-429s: cooldown until `resets_in_seconds`, family-matched `claude-*` routes fall
-back to anthropic meanwhile. wisp-router 2.0.34 published (npm + GitHub
-release, all four platform builds green).
+**#161 + #162 shipped and released.** Bridge auto-handles provider usage-limit
+429s (#161, 2.0.34: cooldown until `resets_in_seconds`, family-matched
+`claude-*` routes fall back to anthropic meanwhile) and the PARTIAL advisory
+stopped crying wolf on healthy incremental growth (#162, 2.0.35:
+per-conversation growth tracker — prior write read back → silent; not read
+back → line fires with `expected>=N` evidence). 2.0.34 CI green; 2.0.35 CI
+was in flight at wrap-up — check `gh run list` if unconfirmed.
 
 ## State
 
@@ -47,10 +50,12 @@ No queued agent work. Next session: user decides — options in [[pick-up]].
 
 ## Open questions
 
-- **#145 PARTIAL drip still unexplained** — ~4–10k cache-creation per few
-  turns behind a stable prefix (~92k across the 2026-07-23 log window). Small
-  leak, root cause unknown; would need a fresh capture with server diagnosis
-  (#156 lines) to chase.
+- **#145 "drip" RESOLVED as mostly-normal (#162):** the 2026-07-23 log's
+  PARTIAL chain proved `read(n+1) = read(n) + creation(n)` exactly — the
+  writes were banked, i.e. incremental caching working as designed, not a
+  leak. The advisory was the problem; the growth tracker fixed the advisory.
+  A future PARTIAL line (post-2.0.35) means a REAL stall — take those
+  seriously, they carry `expected>=N` evidence now.
 
 ## Recent context
 
