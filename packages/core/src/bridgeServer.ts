@@ -44,7 +44,7 @@ import {
   type AnthropicSseMeta, type BridgeAnthropicRequest, type ReviewerVerdict,
 } from './bridgeAnthropic';
 import type { NormalizedTurn } from './catalog';
-import { resolveRoute, type RoutingMap, type RouteMatch } from './routing';
+import { resolveRoute, withCooldownFallback, createProviderCooldowns, type RoutingMap, type RouteMatch } from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -164,12 +164,29 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     });
   };
 
+  // #161: the usage-limit cooldown store — a provider that 429'd usage_limit_reached is skipped by family
+  // routes until its plan window resets, so a dead codex doesn't eat every request (and the user doesn't
+  // babysit the Routing map). One instance per Bridge host, like the diagnosis chain below.
+  const cooldowns = createProviderCooldowns();
+
+  // Record a provider error against the cooldown store; a recognized usage-limit 429 logs the horizon once.
+  const noteProviderError = (providerId: string, err: unknown): void => {
+    const seconds = cooldowns.noteUsageLimit(providerId, String(err));
+    if (seconds !== undefined) deps.log(`[bridge] provider ${providerId} usage limit hit — cooling down ${Math.round(seconds / 60)}m; claude-* family routes fall back to anthropic until ${new Date(Date.now() + seconds * 1000).toISOString()} (#161)`);
+  };
+
   // Resolve a requested model name through the Routing map (#51): Provider id → Alias exact → Family
   // fuzzy → Active fallback. One log line per routed request names the matched row kind + Target (the
   // observable the acceptance criteria demand); undefined (dangling Target / no Active) → the caller 404s.
+  // #161: a family match whose Target provider is cooling re-aims to the anthropic Provider with the
+  // requested claude-* id pinned — the same flip the user used to make by hand, minus the babysitting.
   const routeFor = (requestedModel: string): RouteMatch | undefined => {
-    const route = resolveRoute(deps.routingMap(), deps.providers, deps.activeProviderId(), requestedModel);
-    if (route) deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}`);
+    const direct = resolveRoute(deps.routingMap(), deps.providers, deps.activeProviderId(), requestedModel);
+    const route = withCooldownFallback(direct, requestedModel, deps.providers, cooldowns.cooling, isAnthropicProvider);
+    if (route) {
+      const fellBack = direct && route.provider.id !== direct.provider.id;
+      deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}${fellBack ? ` (cooldown fallback: ${direct.provider.id} limited until ${new Date(cooldowns.coolingUntil(direct.provider.id) ?? 0).toISOString()} #161)` : ''}`);
+    }
     return route;
   };
 
@@ -243,6 +260,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      noteProviderError(provider.id, err);
       // A signed-out / refresh-failed Codex throws here — a clean 502 (or end if the SSE head is already out).
       if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
@@ -298,6 +316,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      noteProviderError(provider.id, err);
       // A signed-out / refresh-failed Anthropic throws here — a clean 502 (or end if the SSE head is already out).
       if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
@@ -349,6 +368,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      noteProviderError(provider.id, err);
       // A signed-out / refresh-failed Grok throws here — a clean 502 (or end if the SSE head is already out).
       if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
@@ -430,6 +450,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      noteProviderError(provider.id, err);
       // Once the SSE head is out there's no status left to set — just end; otherwise a clean 502.
       if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
@@ -695,6 +716,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+      noteProviderError(provider.id, err);
       // Head already out (mid-stream failure) → write a proper Anthropic `error` event so Claude Code shows the
       // real message instead of "empty or malformed"; otherwise a clean 502.
       if (res.headersSent) { res.write(anthropicErrorFrame(String(err))); res.end(); }

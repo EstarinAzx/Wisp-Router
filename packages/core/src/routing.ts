@@ -90,6 +90,71 @@ export const resolveRoute = (
   return active && { provider: active, matched: 'active' };
 };
 
+// ----------------------------- Usage-limit cooldown (#161) ----------------------------- //
+
+// A provider that answered 429 usage_limit_reached is dead until its plan window resets — codex reported
+// resets_in_seconds=551032 (~6 days) in the live capture. Without a cooldown the Bridge re-sends every
+// request into the same 429 until the user manually rebinds the family route; with one, family-matched
+// claude-* requests fall back to the anthropic Provider automatically and routing heals itself when the
+// window ends. In-memory on purpose: a Bridge restart clears a wrong cooldown, and persisting one risks
+// stranding a recovered provider.
+
+// Recognize a usage-limit 429 in a provider error message and extract the reset horizon. The message is
+// the thrown `<kind> API error 429: {json}` string (body capped at 500 chars upstream — the error object
+// fits well inside). Not a usage-limit 429 → undefined (transient 429s must NOT start a multi-day cooldown).
+// ponytail: missing resets_in_seconds defaults to 300s — short enough that a wrong guess self-heals.
+export const DEFAULT_COOLDOWN_SECONDS = 300;
+export const parseUsageLimitReset = (message: string): number | undefined => {
+  if (!message.includes('429') || !message.includes('usage_limit_reached')) return undefined;
+  const m = /"resets_in_seconds"\s*:\s*(\d+)/.exec(message);
+  return m ? Number(m[1]) : DEFAULT_COOLDOWN_SECONDS;
+};
+
+// The per-provider cooldown store — one instance per Bridge host (the bridgeServer owns it, mirroring the
+// diagnosis chain). noteUsageLimit returns the cooldown seconds when the error was a usage-limit 429
+// (caller logs it), undefined otherwise. coolingUntil feeds the fallback log line's timestamp.
+export type ProviderCooldowns = {
+  noteUsageLimit: (providerId: string, errorMessage: string) => number | undefined;
+  cooling: (providerId: string) => boolean;
+  coolingUntil: (providerId: string) => number | undefined; // epoch ms, undefined when not cooling
+};
+export const createProviderCooldowns = (now: () => number = Date.now): ProviderCooldowns => {
+  const until = new Map<string, number>();
+  return {
+    noteUsageLimit: (providerId, errorMessage) => {
+      const seconds = parseUsageLimitReset(errorMessage);
+      if (seconds === undefined) return undefined;
+      until.set(providerId, now() + seconds * 1000);
+      return seconds;
+    },
+    cooling: (providerId) => (until.get(providerId) ?? 0) > now(),
+    coolingUntil: (providerId) => {
+      const t = until.get(providerId);
+      return t !== undefined && t > now() ? t : undefined;
+    },
+  };
+};
+
+// Re-aim a resolved route around a cooling provider. Family matches only: a family hit is by construction
+// a claude-* model id, so the anthropic Provider can answer it natively with the requested id pinned.
+// Provider-id and Alias matches stay untouched — an explicit address must stay honest, and an alias Target
+// pins a model no other provider is guaranteed to serve. No fallback when there is no anthropic Provider,
+// when the cooling provider IS the anthropic one, or when anthropic is itself cooling — the original match
+// returns and the request fails loud as before. isFallbackProvider is injected (catalog's
+// isAnthropicProvider) so this resolver stays a pure decision table.
+export const withCooldownFallback = (
+  match: RouteMatch | undefined,
+  requestedModel: string,
+  providers: Provider[],
+  cooling: (providerId: string) => boolean,
+  isFallbackProvider: (p: Provider) => boolean,
+): RouteMatch | undefined => {
+  if (!match || match.matched !== 'family' || !cooling(match.provider.id)) return match;
+  const fallback = providers.find(isFallbackProvider);
+  if (!fallback || fallback.id === match.provider.id || cooling(fallback.id)) return match;
+  return { provider: fallback, pinnedModel: requestedModel, matched: 'family' };
+};
+
 // ----------------------------- Edit operations ----------------------------- //
 
 // Pure map edits (#65) — each returns the next map, or undefined when the edit is refused. Both

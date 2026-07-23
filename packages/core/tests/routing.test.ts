@@ -174,3 +174,88 @@ describe('edit operations (#65)', () => {
     expect(fullMap).toEqual(before);
   });
 });
+
+// ----------------------------- Usage-limit cooldown (#161) ----------------------------- //
+
+import {
+  parseUsageLimitReset, createProviderCooldowns, withCooldownFallback, DEFAULT_COOLDOWN_SECONDS,
+} from '../src/routing';
+
+// The live-captured codex 429 body (2026-07-23) — the exact string the thrown error carries.
+const CODEX_429 = 'Codex API error 429: {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus","resets_at":1785328524,"eligible_promo":null,"resets_in_seconds":551032}}';
+
+describe('parseUsageLimitReset', () => {
+  it('extracts resets_in_seconds from a usage-limit 429', () => {
+    expect(parseUsageLimitReset(CODEX_429)).toBe(551032);
+  });
+
+  // A transient 429 (rate limit, not plan limit) must NOT start a multi-day cooldown.
+  it('ignores a 429 that is not usage_limit_reached', () => {
+    expect(parseUsageLimitReset('Codex API error 429: {"error":{"type":"rate_limit_error"}}')).toBeUndefined();
+  });
+
+  it('ignores non-429 errors mentioning usage limits', () => {
+    expect(parseUsageLimitReset('Codex API error 500: usage_limit_reached backend hiccup')).toBeUndefined();
+  });
+
+  it('defaults when resets_in_seconds is missing', () => {
+    expect(parseUsageLimitReset('API error 429: {"error":{"type":"usage_limit_reached"}}')).toBe(DEFAULT_COOLDOWN_SECONDS);
+  });
+});
+
+describe('createProviderCooldowns', () => {
+  it('cools a provider until the reset horizon, then heals', () => {
+    let now = 1_000_000;
+    const cd = createProviderCooldowns(() => now);
+    expect(cd.noteUsageLimit('codex', CODEX_429)).toBe(551032);
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.coolingUntil('codex')).toBe(1_000_000 + 551032 * 1000);
+    expect(cd.cooling('anthropic')).toBe(false);
+    now += 551032 * 1000 + 1;
+    expect(cd.cooling('codex')).toBe(false);
+    expect(cd.coolingUntil('codex')).toBeUndefined();
+  });
+
+  it('records nothing for an unrecognized error', () => {
+    const cd = createProviderCooldowns(() => 0);
+    expect(cd.noteUsageLimit('codex', 'Codex API error 502: bad gateway')).toBeUndefined();
+    expect(cd.cooling('codex')).toBe(false);
+  });
+});
+
+describe('withCooldownFallback', () => {
+  const isAnthropic = (pr: Provider) => pr.id === 'anthropic';
+  const cooling = (id: string) => id === 'codex';
+  // The live shape: family fable -> codex, codex usage-limited.
+  const familyMatch = { provider: providers[1], pinnedModel: 'gpt-5.6-big', matched: 'family' as const };
+
+  it('re-aims a family match off a cooling provider to anthropic with the requested claude id', () => {
+    const r = withCooldownFallback(familyMatch, 'claude-fable-5', providers, cooling, isAnthropic);
+    expect(r).toEqual({ provider: providers[3], pinnedModel: 'claude-fable-5', matched: 'family' });
+  });
+
+  it('leaves a family match alone when its provider is healthy', () => {
+    const healthy = withCooldownFallback(familyMatch, 'claude-fable-5', providers, () => false, isAnthropic);
+    expect(healthy).toBe(familyMatch);
+  });
+
+  // Explicit addressing stays honest: provider-id and alias matches never re-aim.
+  it('never re-aims provider-id or alias matches', () => {
+    const byId = { provider: providers[1], matched: 'provider-id' as const };
+    const byAlias = { provider: providers[1], pinnedModel: 'gpt-5.6-sol', matched: 'alias' as const };
+    expect(withCooldownFallback(byId, 'codex', providers, cooling, isAnthropic)).toBe(byId);
+    expect(withCooldownFallback(byAlias, 'sol', providers, cooling, isAnthropic)).toBe(byAlias);
+  });
+
+  it('returns the original match when anthropic is absent, is itself the target, or is cooling too', () => {
+    const noAnthropic = providers.filter((pr) => pr.id !== 'anthropic');
+    expect(withCooldownFallback(familyMatch, 'claude-fable-5', noAnthropic, cooling, isAnthropic)).toBe(familyMatch);
+    const anthropicMatch = { provider: providers[3], pinnedModel: 'claude-fable-5', matched: 'family' as const };
+    expect(withCooldownFallback(anthropicMatch, 'claude-fable-5', providers, (id) => id === 'anthropic', isAnthropic)).toBe(anthropicMatch);
+    expect(withCooldownFallback(familyMatch, 'claude-fable-5', providers, () => true, isAnthropic)).toBe(familyMatch);
+  });
+
+  it('passes undefined through', () => {
+    expect(withCooldownFallback(undefined, 'claude-fable-5', providers, cooling, isAnthropic)).toBeUndefined();
+  });
+});
