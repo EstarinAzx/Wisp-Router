@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-07-21
+updated: 2026-07-23
 tags: [context, decisions]
 ---
 
@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-23-usage-limit-cooldown-family-fallback-only]] — **SHIPPED 2.0.34:** usage-limit 429 cooldown is in-memory (restart clears; persistence strands recovered providers) and only family-matched claude-* routes fall back to anthropic (#161); provider-id/alias stay honest, transient 429s never cool
 - [[2026-07-21-server-cache-diagnosis-adopted]] — cache-diagnosis-2026-04-07 adopted on the OAuth path (#156, probe #152): server `cache_miss_reason` authoritative in the MISS log, heuristic retained (server silent on PARTIAL; null ≠ healthy); conversation chain keyed model + first user turn; inbound diagnostics passthrough + non-trailing token position deliberately not built
 - [[2026-07-21-beta-selection-model-gated-exclusion]] — `selectAnthropicBetas(model)` picks anthropic-beta per request (#151): context-1m is an exclusion gate (haiku/claude-3/opus<4-6 out) so new families inherit 1M; Haiku keeps claude-code (agentic + 429 gate, deviates from real claude's non-agentic drop); heavier-shape betas + inbound door passthrough deliberately not built (door normalizes, those shapes never leave wisp)
 - [[2026-07-21-session-id-per-process-metadata-identity]] — `metadata.user_id.session_id` stays per-process (shared across bridged conversations; live-accepted, per-conversation plumbing deliberately not built) and account identity rides ON `AnthropicCreds` in auth.json (refresh must carry it, sign-out keeps deviceId, pre-#150 creds get derived fallbacks) (#150)

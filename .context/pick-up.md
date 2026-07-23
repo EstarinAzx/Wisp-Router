@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-22
+updated: 2026-07-23
 tags: [context, pick-up]
 ---
 
@@ -9,23 +9,25 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last leg (2026-07-22, relay leg 3): #160 closed — queue empty, relay chain
-stopped itself.** The advisor-field drops were Claude Code's auxiliary fork
-queries (auto-memory extraction et al.) which never carry the advisor tool —
-inherent upstream behavior, not a user toggle, not a wisp bug. No code
-changed; the deliverable is the evidence write-up on
-[#160](https://github.com/EstarinAzx/Wisp-Router/issues/160) and the
-rewritten gotcha [[advisor-toggle-forks-the-cache-prefix-two-variants]].
-The whole cache-triage arc (#158 chain-key, #159 STALE wording, #160
-investigation) is done.
+**Last session (2026-07-23): #161 shipped + released as wisp-router 2.0.34.**
+Bridge auto-cooldowns a provider on `429 usage_limit_reached` (parses
+`resets_in_seconds`) and family-matched `claude-*` routes fall back to
+anthropic until the window ends. feat 5bcff26, release 7b632d7, tag v2.0.34,
+CI green (npm + GitHub release published). Design limits (in-memory only,
+family-only fallback, usage-limit-only trigger):
+[[2026-07-23-usage-limit-cooldown-family-fallback-only]].
 
 **Next task: none queued.** `ready-for-agent` queue is empty. Open backlog:
+
 - #69 — copilot-wisp launcher for the Copilot CLI (`enhancement`, needs
   grooming before it's agent-grabbable).
+- #145 PARTIAL drip — unexplained ~4–10k/turn cache-creation behind a stable
+  prefix; small leak. If the user wants it chased, first step is a fresh serve
+  capture with the #156 server-diagnosis lines, then groom into a ticket.
 
 When new work exists: label tickets `ready-for-agent`, then re-seed the
 chain with the exact relay command below (state file
-`.claude/relay/ticket-loop.md` now has `stop: true`; re-running the command
+`.claude/relay/ticket-loop.md` has `stop: true`; re-running the command
 re-inits it):
 
 ```
@@ -36,8 +38,8 @@ re-inits it):
 
 - Relay's leg boot reads `overview.md` + `active-work.md`, NOT this file —
   that's why the body ends with "at leg boot also read .context/pick-up.md".
-- `/preset wrap-up`'s step 1 is a human eyeball gate (AskUserQuestion) — an
-  unattended leg must treat it as auto-go, exactly as the body says.
+- `/preset wrap-up`'s step 1 is a human eyeball gate — an unattended leg must
+  treat it as auto-go, exactly as the body says.
 - `.context/` commits go to main, never a ticket branch — otherwise the next
   leg (booting on main) reads a stale baton.
 - Relay spawns with `binary: claude` (native, NOT `claude-wisp`) — wisp legs
@@ -45,9 +47,13 @@ re-inits it):
   `binary:` as-is.
 - Body uses 'queue empty' in single quotes (double quotes shred the cmd
   spawn quoting); keep it that way when re-seeding.
+- The user's running Bridge may still be pre-#161 code until they restart it
+  — a codex 429 storm in a serve log is not evidence the fix failed; check
+  the Bridge's boot time vs the 2.0.34 install first.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
+- [[2026-07-23-usage-limit-cooldown-family-fallback-only]]
 - [[advisor-toggle-forks-the-cache-prefix-two-variants]]
