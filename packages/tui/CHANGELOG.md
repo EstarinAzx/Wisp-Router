@@ -6,6 +6,24 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.3] - 2026-09-07
+
+### Fixed
+
+- The TUI-hosted Bridge now writes engine logs to `bridge.log`, just like `wisp serve`.
+- Idle hosts and failed Bridge starts preserve the active and previous logs. Rotation begins only
+  after the host successfully binds its port.
+- `wisp log -f` follows replacement files from their beginning, survives the missing-file gap during
+  rotation, and retains lines when rotation happens during follower startup.
+- `wisp routing set` recognizes an existing Antigravity sign-in instead of reporting a false warning.
+
+### Surfaces
+
+- **npm / TUI / terminal-hosted Bridge: 2.1.3** - all four fixes. The source change is confined to
+  `packages/tui`; the core protocol translators are unchanged.
+- **VS Code extension: 1.13.6, unchanged.** The existing version is attached to the release as usual.
+- **wisp-slot: unchanged.**
+
 ## [2.1.2] ? 2026-09-07
 
 ### Fixed
