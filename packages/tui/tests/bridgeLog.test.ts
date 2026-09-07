@@ -9,7 +9,7 @@
  */
 
 import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, unwatchFile, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, unwatchFile, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { appendBridgeLog, bridgeLogPath, logHeader, rotateBridgeLog, runLogCli, stampLine } from '../src/bridgeLog';
@@ -160,4 +160,35 @@ test('-f prints the existing content then streams what is appended after', async
   expect(out.join('')).toContain('] after\n');
   // The already-printed content is not reprinted on each tick.
   expect(out.join('').match(/before/g)?.length).toBe(1);
+});
+
+test('-f catches rotation between the initial read and watcher registration', async () => {
+  writeFileSync(logPath(), 'before\n');
+  const out: string[] = [];
+  const log = console.log;
+  const write = process.stdout.write;
+  console.log = (...args: unknown[]) => { out.push(`${args.join(' ')}\n`); };
+  (process.stdout as { write: unknown }).write = (chunk: unknown) => {
+    const text = String(chunk);
+    out.push(text);
+    if (text === 'before\n') {
+      renameSync(logPath(), `${logPath()}.1`);
+      writeFileSync(logPath(), 'after!\n');
+    }
+    return true;
+  };
+  try {
+    expect(runLogCli(['-f'])).toBe(0);
+    // Give the watcher time to adopt its first baseline before a later append wakes it.
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    appendFileSync(logPath(), 'tail\n');
+    for (let i = 0; i < 40 && !out.join('').includes('tail\n'); i++)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+  } finally {
+    unwatchFile(logPath());
+    console.log = log;
+    (process.stdout as { write: unknown }).write = write;
+  }
+  expect(out.join('')).toContain('after!\ntail\n');
+  expect(out.join('').match(/before\n/g)?.length).toBe(1);
 });

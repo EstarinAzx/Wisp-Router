@@ -9,11 +9,11 @@
 
 import {
   EMPTY_ROUTING_MAP, PROVIDERS,
-  isAnthropicProvider, isCodexProvider, isXaiProvider, isKimiProvider,
+  isAnthropicProvider, isCodexProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
   resolveKeyId, runRoutingCommand,
   type Provider,
 } from '@wisp/core';
-import { home, anthropicAuth, codexAuth, xaiAuth, kimiAuth } from './store';
+import { home, anthropicAuth, codexAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
 
 // ----------------------------- Credential readiness ----------------------------- //
 
@@ -24,6 +24,7 @@ const hasCredentials = async (provider: Provider): Promise<boolean> => {
   if (isXaiProvider(provider)) return xaiAuth.isSignedIn();
   // Kimi (#170) is credentialed by sign-in, not a key — its bearer never lands in the keys map below.
   if (isKimiProvider(provider)) return kimiAuth.isSignedIn();
+  if (isAntigravityProvider(provider)) return antigravityAuth.isSignedIn();
 
   const stored = home.readAuth().keys?.[resolveKeyId(provider)]?.trim();
   const fromEnv = provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined;

@@ -7,6 +7,7 @@
  *   - @wisp/core: createBridgeServer (the engine) + DEFAULT_BRIDGE_PORT, catalog resolvers,
  *     the empty routing map, the effort default.
  *   - ./store: the shared ~/.wisp handle + OAuth managers (#63).
+ *   - ./bridgeLog: file logging shared by the TUI and headless hosts.
  *
  * Data shapes: none of its own — BridgeDeps comes from core.
  *
@@ -22,6 +23,7 @@ import {
   EMPTY_ROUTING_MAP, DEFAULT_EFFORT, effectiveAliasOnly, type Provider,
 } from '@wisp/core';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth, bearerFor } from './store';
+import { appendBridgeLog, rotateBridgeLog } from './bridgeLog';
 
 // ----------------------------- Secret + address ----------------------------- //
 
@@ -57,8 +59,9 @@ const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
 
 // Build the engine over this face's store. Every getter reads fresh (ADR-0002), and accessSecret
 // goes through ensureBridgeSecret so the listener always checks the live stored value.
-export const createTuiBridge = (log: (message: string) => void) =>
-  createBridgeServer({
+export const createTuiBridge = (log: (message: string) => void) => {
+  let loggingStarted = false;
+  return createBridgeServer({
     providers: PROVIDERS,
     modelMap: () => home.readConfig().models ?? {},
     customBaseUrl: () => home.readConfig().customBaseUrl ?? '',
@@ -79,8 +82,15 @@ export const createTuiBridge = (log: (message: string) => void) =>
     aliasOnlyModels: () => effectiveAliasOnly(home.readConfig()),
     port: bridgePort,
     accessSecret: ensureBridgeSecret,
-    log,
+    log: (message) => {
+      // The first engine line follows a successful bind. Idle TUI instances and failed starts must
+      // leave the active host's log alone; later /bridge toggles stay in the same session log.
+      if (!loggingStarted) { rotateBridgeLog(); loggingStarted = true; }
+      appendBridgeLog(message);
+      log(message);
+    },
     // #171: the statusline snapshot lands in the same store the config does, so the wisp-slot statusline
     // script reads it straight out of ~/.wisp without knowing which face is hosting.
     recordStatus: (status) => home.writeStatus(status),
   });
+};

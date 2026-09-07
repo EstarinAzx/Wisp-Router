@@ -3,7 +3,6 @@
 /*
  * Depends on:
  *   - ./bridge: the TUI's engine wiring (createTuiBridge, ensureBridgeSecret, addresses).
- *   - ./bridgeLog: the Bridge log file the terminal output is mirrored into (#202).
  *
  * Data shapes: none.
  *
@@ -12,16 +11,12 @@
  */
 
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
-import { appendBridgeLog, rotateBridgeLog } from './bridgeLog';
 
 // ----------------------------- Run ----------------------------- //
 
 export const runServe = async (): Promise<void> => {
-  // #202: last run's log steps aside before the first line of this one lands, so the two never interleave.
-  rotateBridgeLog();
-  // Terminal output is unchanged — the file is an addition beside it, never a redirect. Only the Bridge's
-  // own lines are mirrored: the banner below carries the access SECRET and must not reach a file.
-  const bridge = createTuiBridge((m) => { console.log(m); appendBridgeLog(m); });
+  // The shared host persists engine lines. This banner carries the access SECRET and stays terminal-only.
+  const bridge = createTuiBridge(console.log);
   try {
     await bridge.start();
   } catch (err) {
