@@ -8,30 +8,37 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-09-07 by GPT-6 Astra / Codex (auto)_
-_At implementation commit: `d32869a`_
+_At release commit: `12e638f`, tag `v2.1.3`_
 
 ## Current focus
 
-The requested bug hunt is complete. The reviewed terminal patch is committed and fast-forwarded into local `main`; publication and installation have not been requested. The installed release remains Wisp 2.1.2 / VS Code 1.13.6.
+**Wisp 2.1.3 is released, verified, and installed.** The terminal bug-hunt patch is shipped. VS Code remains 1.13.6 and wisp-slot is unchanged; this patch only changes the terminal package.
 
 ## State
 
-- **Done:** four verified faults fixed: missing TUI-hosted Bridge file logs, failed `serve` starts rotating an active log, log followers skipping or crashing during rotation (including startup), and false Antigravity sign-in warnings from routing.
-- **Verification:** 1,066 core tests and 39 terminal tests pass. Core and terminal typechecks plus the VS Code host/webview build pass. Regression tests reproduced every repaired fault before its fix. A temporary-home real `serve` probe checked HTTP access control, one persisted startup line, previous-log retention, exclusion of the banner secret, renderer-free CLI output, and invalid routing flags.
-- **Review:** an independent GPT-6 Astra reviewer found one narrower startup race; its exact reproduction failed before the follow-up fix and passed afterward. Final review: no actionable findings. Artifact: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/terminal-bug-hunt-review/index.md`.
-- **Git:** code commit `d32869a` is on local `main` and retained branch `fix/terminal-bridge-bug-hunt`. This session's commits are unpushed. The managed worktree remains at `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/fix-terminal-bridge-bug-hunt`, with ignored build/probe outputs.
-- **User files:** existing `.context/flows.md` changes and `.context/Untitled.canvas` stay outside the session's commits.
+- **Published:** source and annotated tag pushed. All five [release jobs](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34105343246) passed. The [release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.3) contains four platform binaries and the existing 1.13.6 VSIX. Exact npm version metadata and its archive serve 2.1.3; a fresh metadata request confirms `latest: 2.1.3`.
+- **Verified:** 1,066 core tests, 39 terminal tests, core/terminal typechecks, extension build, and independent implementation review passed. The locally built, downloaded, and installed Windows binaries each passed seven isolated executable probes. The published 2.1.2 control failed five repaired cases. Downloaded/installed binary SHA-256 matches GitHub; npm archive SHA-512 matches registry metadata. Both launchers passed clean-install and global-install checks.
+- **Installed:** global `wisp-router@2.1.3`, with the verified Windows binary at `C:/Users/S.D/.wisp/bin/v2.1.3/wisp.exe`. The standard Node downloader failed `unable to verify the first certificate`; the validated GitHub CLI download populated its existing version cache. No TLS settings changed.
+- **Runtime:** no Wisp process or listener on port 41184 remained after checks. No user host needed restarting. Saved routes, credentials, providers, and plugin configuration were preserved.
+- **Git:** implementation `d32869a`, release `12e638f`; retained fix branch/worktree remain available. Unrelated `.context/flows.md` and `.context/Untitled.canvas` edits remain outside commits.
 
 ## Pick up here
 
-No implementation is in flight. If the next request is to release the fixes, inspect `git log --oneline origin/main..main`, then follow the release checks in [[release-follow-ups]]. This patch changes the terminal package only; package versions have not been bumped. Re-query ready-for-agent issues before selecting unrelated work.
+No active work. No ready-for-agent issue was open at the cut; re-query before selecting work. Remaining candidates and carried risks live in [[release-follow-ups]]. The TUI Bridge file-log and Antigravity routing-warning candidates are now shipped.
+
+## Evidence
+
+Release report: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/wisp-2-1-3-release/index.md`.
+Independent review: sibling artifact `terminal-bug-hunt-review/index.md`.
+Re-runnable probes and downloaded artifacts: `out/release-2.1.3/` in the main checkout (gitignored).
 
 ## Recent context
 
-- The user requested `pick-up -> vibe -> bug hunt this codebase of mine and improve it`. The handoff had no queued task. This ran as a direct Codex bug hunt; the installed `vibe` accepts `init` and its Claude relay is not available in this harness. No recurring loop was started.
-- All new CLI and Bridge probes used synthetic credentials and temporary `WISP_HOME` directories. No live provider requests, authentication changes, or installed-host restarts were needed.
-- Log rotation belongs to the first successful start of a terminal host. An idle TUI, a rejected bind, and later toggles within the same host session must not discard that session's evidence.
-- Existing release concerns, including the saved Codex bearer 401 and the remaining held provider/usage/statusline work, remain in [[release-follow-ups]]. No ecosystem configuration changed.
+- The user explicitly requested release and installation after the autonomous bug hunt. No new features or provider-wire changes were added for the release.
+- npm's normal version-list cache still returned 2.1.2 despite the live exact-version endpoint and archive. Installation used the checksum-verified published archive. A fresh metadata URL confirms 2.1.3 is latest; do not infer a failed publication from the stale cached response.
+- New probes used temporary WISP_HOME directories and synthetic credentials. No live provider turns or authentication repair were needed.
+- Shared ecosystem runtime notes were updated. Health: skills audit 0; template differences 9; age-only vault flags 4 ecosystem, 38 BCDE311, 21 BCDE321; no structural vault errors. Traycer vault is clean. The Codex adapter check stops because current project trust includes an additional unrelated project absent from its saved baseline; trust settings were preserved. Details are in the release report.
+- The saved Codex bearer 401 from the earlier cache investigation remains a separate held concern.
 
 ## Related
 

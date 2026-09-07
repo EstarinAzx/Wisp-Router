@@ -9,9 +9,9 @@ tags: [context, follow-ups, gotchas]
 
 Carried from the September 6 baton so the current pick-up note can stay short. Re-check live state before acting. The cache release left these held; the September 7 terminal bug hunt has since completed the two items named below.
 
-## Completed locally, awaiting release
+## Completed and released in Wisp 2.1.3
 
-The 2026-09-07 bug hunt landed `d32869a` on local `main`: TUI-hosted Bridge file logging and Antigravity routing readiness are fixed. It also fixes failed starts rotating the active log and `wisp log -f` replacement/startup races. Verified with 1,066 core tests, 39 terminal tests, builds/typechecks, an isolated `serve` probe, and independent review. These changes are unpushed and not in the installed 2.1.2 release. See [[active-work]].
+The 2026-09-07 bug hunt landed `d32869a` on local `main`: TUI-hosted Bridge file logging and Antigravity routing readiness are fixed. It also fixes failed starts rotating the active log and `wisp log -f` replacement/startup races. Verified with 1,066 core tests, 39 terminal tests, builds/typechecks, an isolated `serve` probe, and independent review. Released and installed as Wisp 2.1.3, source `12e638f`, workflow `34105343246`. The published and installed binaries pass the probes that the 2.1.2 control fails. See [[active-work]].
 
 ## Remaining held candidates
 
@@ -174,7 +174,7 @@ Statusline / status.json:
 Bridge log (#202):
 
 - **The serve banner is NOT mirrored into `bridge.log`** — it prints the Bridge access secret.
-- **Installed Wisp 2.1.2 logs only from `wisp serve`.** Local commit `d32869a` moves file logging to the shared terminal host and fixes rotation/following. **Check the host and version before trusting an empty log** until that patch is released and the host restarted.
+- **Wisp 2.1.3 logs from both terminal hosts.** Rotation begins on the first successful bind, and `wisp log -f` survives replacement and startup races. Older running hosts still require a restart to receive a binary update.
 - **`bridge.log` is regenerable telemetry** — never overwrite-protected, invisible to the home-store
   watcher via the non-`.json` name filter (`homeStore.ts:125`).
 
@@ -200,6 +200,8 @@ Quota / recon (#204):
 
 Release:
 
+- **Local Node download can fail certificate-chain validation.** The 2.1.3 install used a GitHub CLI download verified against the published SHA-256, then populated the existing version cache. Do not disable TLS verification. Details and artifact paths are in [[active-work]].
+- **npm packument caches can lag the exact-version endpoint.** For 2.1.3, normal version-list queries stayed stale while the exact endpoint, tarball, and fresh metadata all showed the release. Verify artifact integrity before using an exact archive as an install source.
 - **An npm version can never be republished.** The tag is the trigger; no undo.
 - **The tag must equal `packages/tui/package.json` exactly** — `release.yml` verifies.
 - **`git push --follow-tags` does NOT push a lightweight tag.** Create with `git tag <v> <sha>` and push
