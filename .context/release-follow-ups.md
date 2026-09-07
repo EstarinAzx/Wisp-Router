@@ -7,9 +7,13 @@ tags: [context, follow-ups, gotchas]
 
 # Release follow-ups and carried landmines
 
-Carried from the September 6 baton so the current pick-up note can stay short. Re-check live state before acting; no held bug was implemented or relabeled by the cache release.
+Carried from the September 6 baton so the current pick-up note can stay short. Re-check live state before acting. The cache release left these held; the September 7 terminal bug hunt has since completed the two items named below.
 
-## Next task: none queued — pick from the held bugs
+## Completed locally, awaiting release
+
+The 2026-09-07 bug hunt landed `d32869a` on local `main`: TUI-hosted Bridge file logging and Antigravity routing readiness are fixed. It also fixes failed starts rotating the active log and `wisp log -f` replacement/startup races. Verified with 1,066 core tests, 39 terminal tests, builds/typechecks, an isolated `serve` probe, and independent review. These changes are unpushed and not in the installed 2.1.2 release. See [[active-work]].
+
+## Remaining held candidates
 
 `gh issue list --label ready-for-agent --state open` → `[]` at the cut. **Verify by query, not by this
 note** ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]). Open but deliberately
@@ -17,12 +21,6 @@ note** ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]). O
 
 Bugs found but NOT shipped (still held — candidate tickets, strongest first):
 
-- **A TUI-hosted Bridge writes nothing to `bridge.log`** — only `wisp serve` appends
-  (`packages/tui/src/serve.ts:24`). Twice now the log that would have shown a failure did not exist; the
-  re-bill had to be diagnosed from Claude Code transcripts instead. Best next cut.
-- **`wisp routing set` always warns "not signed in" for antigravity** — `hasCredentials` in
-  `packages/tui/src/routingCli.ts:21` has no antigravity rung and falls through to the API-key test.
-  Trivial.
 - **toolChoice not threaded to the Anthropic arm** (`bridgeServer.ts:664` hardcodes `'auto'`). HELD —
   forwarding a forced `tool_choice` would **400 on Fable 5.1/Mythos** (the docs now say so outright);
   needs a model-gated forward.
@@ -176,8 +174,7 @@ Statusline / status.json:
 Bridge log (#202):
 
 - **The serve banner is NOT mirrored into `bridge.log`** — it prints the Bridge access secret.
-- **Only `wisp serve` writes `bridge.log`** — a TUI-hosted Bridge writes nothing. **Check which host is
-  running before trusting an empty log.** (Held bug, best next cut.)
+- **Installed Wisp 2.1.2 logs only from `wisp serve`.** Local commit `d32869a` moves file logging to the shared terminal host and fixes rotation/following. **Check the host and version before trusting an empty log** until that patch is released and the host restarted.
 - **`bridge.log` is regenerable telemetry** — never overwrite-protected, invisible to the home-store
   watcher via the non-`.json` name filter (`homeStore.ts:125`).
 

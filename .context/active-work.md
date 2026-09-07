@@ -8,34 +8,30 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-09-07 by GPT-6 Astra / Codex (auto)_
-_At release commit: `f4bd855`, tag `v2.1.2`_
+_At implementation commit: `d32869a`_
 
 ## Current focus
 
-**Wisp 2.1.2 and VS Code extension 1.13.6 are released, verified, and installed.** Codex caching now preserves conversation identity and the position of late system notes. No implementation work remains in flight.
+The requested bug hunt is complete. The reviewed terminal patch is committed and fast-forwarded into local `main`; publication and installation have not been requested. The installed release remains Wisp 2.1.2 / VS Code 1.13.6.
 
 ## State
 
-- **Done:** release merged and pushed to main, annotated v2.1.2 tag published, all five [release jobs](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34035909343) passed. [Release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.2) contains all four platform binaries and the 1.13.6 VSIX; npm serves 2.1.2.
-- **Verified:** 1,066 core tests and 30 terminal tests, typechecks/builds, independent review, and a small live comparison through the actual Bridge. Both downloaded Windows artifacts matched GitHub SHA-256 digests. New binary/VSIX contain the fixes; the previous Windows release is the negative control.
-- **Installed:** global npm package is 2.1.2; its release-download fallback at `~/.wisp/bin/v2.1.2/wisp.exe` boots successfully with `wisp routing --json`. VS Code reports `esarinazx.wisp@1.13.6`. Existing Wisp hosts need reopening; reload VS Code to activate its new extension host.
-- **Runtime:** no listener on port 41184 at the final check. No Bridge was started or user window reloaded. Saved routes, auth, model/provider, permissions, and notification settings were preserved.
-- **Remaining:** no ready-for-agent issue was open at the cut. Unrelated `.context/flows.md` edits and `.context/Untitled.canvas` remain outside these commits. The Traycer-managed fix worktree is retained with gitignored build/probe outputs.
+- **Done:** four verified faults fixed: missing TUI-hosted Bridge file logs, failed `serve` starts rotating an active log, log followers skipping or crashing during rotation (including startup), and false Antigravity sign-in warnings from routing.
+- **Verification:** 1,066 core tests and 39 terminal tests pass. Core and terminal typechecks plus the VS Code host/webview build pass. Regression tests reproduced every repaired fault before its fix. A temporary-home real `serve` probe checked HTTP access control, one persisted startup line, previous-log retention, exclusion of the banner secret, renderer-free CLI output, and invalid routing flags.
+- **Review:** an independent GPT-6 Astra reviewer found one narrower startup race; its exact reproduction failed before the follow-up fix and passed afterward. Final review: no actionable findings. Artifact: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/terminal-bug-hunt-review/index.md`.
+- **Git:** code commit `d32869a` is on local `main` and retained branch `fix/terminal-bridge-bug-hunt`. This session's commits are unpushed. The managed worktree remains at `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/fix-terminal-bridge-bug-hunt`, with ignored build/probe outputs.
+- **User files:** existing `.context/flows.md` changes and `.context/Untitled.canvas` stay outside the session's commits.
 
 ## Pick up here
 
-No active work ? pick a new task. Re-query `gh issue list --label ready-for-agent --state open`; if empty, ask the user which held item to scope. The TUI-hosted Bridge log gap remains the strongest held candidate, but is not authorized merely by this note. See [[release-follow-ups]].
-
-## Open questions
-
-The saved Wisp Codex bearer returned 401 during investigation; the native Codex bearer for the same account worked. Neither was changed. If the next bridged turn still fails, investigate/sign in normally rather than blindly rotating or copying refresh tokens.
+No implementation is in flight. If the next request is to release the fixes, inspect `git log --oneline origin/main..main`, then follow the release checks in [[release-follow-ups]]. This patch changes the terminal package only; package versions have not been bumped. Re-query ready-for-agent issues before selecting unrelated work.
 
 ## Recent context
 
-- Keep the per-request fallback when conversation identity is missing/invalid. A global ID would group unrelated clients. xAI still uses its existing system-message folding.
-- Cache hits vary: the first fixed late-note probe missed once; the follow-up preserved 3,200 tokens through repeats and late notes. Do not promise a fixed percentage of weekly savings.
-- The native vs bridged usage comparison had unequal workloads and effort. The current native conversation was high; some bridged work was xhigh. Published fixes address demonstrated mechanisms, not a proven historical cost multiplier.
-- The health preset found zero skill-install findings and passed the Codex adapter check. Template drift (9 findings) and stale-only vault notices (4 ecosystem, 38 BCDE311, 21 BCDE321) were recorded; no structural vault errors. Traycer vault lint passed. No template mirroring or unrelated cleanup was performed.
+- The user requested `pick-up -> vibe -> bug hunt this codebase of mine and improve it`. The handoff had no queued task. This ran as a direct Codex bug hunt; the installed `vibe` accepts `init` and its Claude relay is not available in this harness. No recurring loop was started.
+- All new CLI and Bridge probes used synthetic credentials and temporary `WISP_HOME` directories. No live provider requests, authentication changes, or installed-host restarts were needed.
+- Log rotation belongs to the first successful start of a terminal host. An idle TUI, a rejected bind, and later toggles within the same host session must not discard that session's evidence.
+- Existing release concerns, including the saved Codex bearer 401 and the remaining held provider/usage/statusline work, remain in [[release-follow-ups]]. No ecosystem configuration changed.
 
 ## Related
 

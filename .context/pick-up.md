@@ -9,18 +9,18 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Wisp 2.1.2 + VS Code 1.13.6 are shipped, verified, and installed.** Release source `f4bd855`, tag `v2.1.2`; workflow `34035909343` passed all five jobs. Codex preserves valid conversation IDs and late-note order; independent or unidentified callers remain isolated. See [[2026-09-07-codex-cache-identity-and-ordered-notes]].
+**The terminal bug hunt is complete locally.** Fix commit `d32869a` was fast-forwarded into local `main`: both terminal Bridge hosts persist logs, failed starts preserve the active log, log followers survive rotation and startup races, and routing recognizes Antigravity sign-in. Independent review has no remaining findings. Verified: 1,066 core tests, 39 terminal tests, typechecks/build, and an isolated real `serve` smoke check.
 
 ## Next task
 
-None queued at the cut. Re-query `gh issue list --label ready-for-agent --state open`. If empty, get the user's next task; [[release-follow-ups]] preserves held candidates and all carried landmines. The TUI-hosted Bridge log gap remains a candidate, not an active ticket.
+No implementation remains. The local patch is ready for a release when requested. Inspect `git log --oneline origin/main..main` first: this session's fix and handoff commits are local only. The installed release remains Wisp 2.1.2 / VS Code 1.13.6. See [[release-follow-ups]] for the remaining candidates; do not re-open the two terminal bugs fixed here.
 
-## Before using the new release
+## Landmines
 
-- Reload VS Code / reopen old Wisp hosts. No Bridge was listening on 41184 at the final check.
-- The saved Wisp Codex bearer returned 401 during probes; the same-account native token worked. Auth files were unchanged. Investigate normal sign-in if this persists.
-- Keep unrelated `.context/flows.md` and `.context/Untitled.canvas` edits out of automatic commits.
-- Before cutting another ticket branch, verify `git rev-list --left-right --count origin/main...main` is `0 0`.
+- Keep unrelated `.context/flows.md` edits and `.context/Untitled.canvas` out of automatic commits.
+- Before another ticket branch, reconcile local `main` with `origin/main`; these commits have not been pushed.
+- The fix branch `fix/terminal-bridge-bug-hunt` and Traycer-managed worktree are retained; paths and review evidence are in [[active-work]].
+- The previously observed saved Codex bearer 401 was not investigated in this task. Use normal sign-in if it persists; do not copy or rotate shared tokens blindly.
 
 ## Related
 
