@@ -22,7 +22,7 @@ import { codexCatalog, type CodexModelInfo } from './codexModels';
 
 // A conversation message for the Codex backend: Inquire sends system+user, native chat sends user/assistant
 // — optionally with images and, in agent mode, the tool calls it made / the tool results it carries.
-type CodexMessage = { role: 'system' | 'user' | 'assistant'; content: string; images?: { mimeType: string; dataBase64: string }[]; toolCalls?: { id: string; name: string; argsJson: string }[]; toolResults?: { callId: string; content: string }[] };
+type CodexMessage = Parameters<typeof buildCodexResponsesBody>[0]['messages'][number];
 
 // onQuota (#171): a side channel for the response's utilization headers. NOT a stream event — quota is
 // telemetry, carries no wire content, and must not widen the union every door narrows on. Fires once per
@@ -70,7 +70,7 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
   const res = await fetch(`${args.baseUrl}/responses`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: reasoning && { ...reasoning, ...(args.responses?.context ? { context: args.responses.context } : {}) }, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true })),
+    body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: args.responses?.context ? { ...reasoning, context: args.responses.context } : reasoning, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -155,6 +155,7 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
   let incompleteReason: string | undefined;   // set when the backend truncated the reply (budget / content filter)
   let streamError: string | undefined;        // a bare `error` SSE frame emitted after the 200 OK
   const toolEvents: CodexResponsesEvent[] = [];
+  let streamedText = '';
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
     if (!ev) continue;
@@ -162,7 +163,7 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
       throw new Error(ev.data?.response?.error?.message ?? ev.data?.error?.message ?? 'Codex response failed');
     }
     if (ev.event === 'response.output_text.delta') {
-      if (typeof ev.data?.delta === 'string') { sawDelta = true; yield { type: 'text', value: ev.data.delta }; }
+      if (typeof ev.data?.delta === 'string') { sawDelta = true; streamedText += ev.data.delta; yield { type: 'text', value: ev.data.delta }; }
     } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta' || (args.responses && ev.event === 'response.output_item.done')) {
       toolEvents.push(ev);
     } else if (ev.event === 'response.completed' || ev.event === 'response.incomplete') {
@@ -181,13 +182,16 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
       // no-delta turn's usage reaches the door BEFORE its first content — the door defers message_start
       // until usage arrives, so this is what puts real counts on the opening frame instead of zeros.
       // A frame with no usage block yields nothing at all: zeros are the bug, not a safe default.
-      const usage = responsesUsage(ev.data?.response);
+      const usage = responsesUsage(ev.data?.response, !!args.responses);
       if (usage) yield { type: 'usage', usage };
     } else if (ev.event === 'error') {
       streamError = ev.data?.message ?? ev.data?.error?.message ?? streamError;
     }
   }
-  if (!sawDelta && completed) yield { type: 'text', value: completed };
+  if (args.responses && completed) {
+    if (!completed.startsWith(streamedText)) throw new Error('Provider terminal text disagrees with streamed text');
+    if (completed.length > streamedText.length) yield { type: 'text', value: completed.slice(streamedText.length) };
+  } else if (!sawDelta && completed) yield { type: 'text', value: completed };
   if (args.responses && (streamError || !sawTerminal)) throw new Error(streamError ?? 'Provider stream ended before completion');
   if (args.responses && incompleteReason) yield { type: 'truncation', reason: incompleteReason === 'content_filter' ? 'content_filter' : 'max_tokens' };
   if (!args.responses && incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };

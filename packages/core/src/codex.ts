@@ -13,10 +13,11 @@
  *   - CodexResponsesBody / CodexInputItem / CodexContentPart / CodexResponsesTool: the Responses-API request.
  */
 
-import type { Provider } from './catalog';
+import type { Provider, NormalizedTurn, NormalizedContentPart } from './catalog';
 import type { CodexModelInfo } from './codexModels';
 import {
   trimmedString,
+  validTokenCounts,
   type BridgeUsage,
   type ModelCaps,
   type CodexEffort, type CodexReasoning,
@@ -52,7 +53,9 @@ export const isCodexSignedIn = (creds: CodexCreds | undefined): boolean =>
 
 // One content part of a Responses input message: text (input_text for user/system, output_text for a
 // replayed assistant turn) or an image (input_image as a base64 data-URI / url).
-export type CodexContentPart = { type: 'input_text' | 'output_text'; text: string } | { type: 'input_image'; image_url: string };
+export type CodexContentPart = { type: 'input_text' | 'output_text'; text: string } | { type: 'input_image'; image_url: string; detail?: 'auto' | 'low' | 'high' | 'original' };
+const responsesContent = (parts: NormalizedContentPart[]): CodexContentPart[] => parts.map(p => p.type === 'text'
+  ? { type: 'input_text', text: p.text } : { type: 'input_image', image_url: `data:${p.mimeType};base64,${p.dataBase64}`, ...(p.detail ? { detail: p.detail } : {}) });
 
 // One Responses `input` item. A message turn, OR — for an agent round-trip — a function_call (a prior
 // assistant tool call, replayed) / function_call_output (its result), top-level items NOT message
@@ -60,7 +63,7 @@ export type CodexContentPart = { type: 'input_text' | 'output_text'; text: strin
 export type CodexInputItem =
   | { type: 'message'; role: string; content: CodexContentPart[] }
   | { type: 'function_call'; call_id: string; name: string; arguments: string }
-  | { type: 'function_call_output'; call_id: string; output: string };
+  | { type: 'function_call_output'; call_id: string; output: string | CodexContentPart[] };
 
 // A Responses-API function tool. FLAT (name/description/parameters at top level), unlike chat completions'
 // nested `function`. strict:true makes Codex honour the schema exactly — every object must close
@@ -71,7 +74,7 @@ export type CodexResponsesBody = {
   model: string;
   instructions: string;
   input: CodexInputItem[];
-  reasoning?: CodexReasoning;
+  reasoning?: Partial<CodexReasoning> & { context?: 'auto' | 'current_turn' | 'all_turns' };
   store: false;
   stream: true;
   tools?: CodexResponsesTool[];
@@ -141,8 +144,8 @@ const CODEX_DEFAULT_INSTRUCTIONS = 'You are a helpful coding assistant.';
 // non-empty, with tool_choice (default 'auto') + parallel_tool_calls — a tool_choice with no tools 400s.
 export const buildCodexResponsesBody = (args: {
   model: string;
-  messages: { role: 'system' | 'user' | 'assistant'; content: string; images?: { mimeType: string; dataBase64: string }[]; toolCalls?: { id: string; name: string; argsJson: string }[]; toolResults?: { callId: string; content: string }[] }[];
-  reasoning?: CodexReasoning;
+  messages: { role: 'system' | 'user' | 'assistant'; content: string; images?: NormalizedTurn['images']; contentParts?: NormalizedContentPart[]; toolCalls?: NormalizedTurn['toolCalls']; toolResults?: NormalizedTurn['toolResults'] }[];
+  reasoning?: CodexResponsesBody['reasoning'];
   tools?: CodexResponsesTool[];
   toolChoice?: 'auto' | 'required';
   // Codex accepts ordered developer input; other Responses providers retain their existing folding.
@@ -166,7 +169,8 @@ export const buildCodexResponsesBody = (args: {
     } else {
       // A tool result is its own top-level item and must precede the user's text so the
       // assistant(function_call) → function_call_output ordering the API requires is preserved.
-      for (const tr of m.toolResults ?? []) input.push({ type: 'function_call_output', call_id: tr.callId, output: tr.content });
+      for (const tr of m.toolResults ?? []) input.push({ type: 'function_call_output', call_id: tr.callId, output: tr.contentParts ? responsesContent(tr.contentParts) : tr.content });
+      if (m.contentParts) { input.push({ type: 'message', role: 'user', content: responsesContent(m.contentParts) }); continue; }
       const content: CodexContentPart[] = [];
       if (m.content) content.push({ type: 'input_text', text: m.content });
       for (const img of m.images ?? []) content.push({ type: 'input_image', image_url: `data:${img.mimeType};base64,${img.dataBase64}` });
@@ -251,12 +255,13 @@ export const responsesIncompleteReason = (response: any): string | undefined => 
 // No usage block, or totals that aren't numbers → undefined, so the caller emits NO event. That distinction
 // is load-bearing: a synthesized zero is the very bug this exists to kill (Claude Code sizes auto-compaction
 // off these counts, and a zero means it never compacts until the backend rejects the history).
-export const responsesUsage = (response: any): BridgeUsage | undefined => {
+export const responsesUsage = (response: any, strict = false): BridgeUsage | undefined => {
   const usage = response?.usage;
   const input = usage?.input_tokens;
   const output = usage?.output_tokens;
   if (typeof input !== 'number' || typeof output !== 'number') return undefined;
   const cachedDetail = usage?.input_tokens_details?.cached_tokens;
+  if (strict && (!validTokenCounts(input, output, cachedDetail === undefined ? 0 : cachedDetail, input + output) || cachedDetail > input)) return undefined;
   const cached = typeof cachedDetail === 'number' ? cachedDetail : 0;
   return {
     input_tokens: Math.max(0, input - cached),

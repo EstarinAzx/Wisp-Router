@@ -14,9 +14,10 @@
  */
 
 import { createHash, randomBytes } from 'crypto';
-import type { Provider } from './catalog';
+import type { Provider, NormalizedTurn, NormalizedContentPart } from './catalog';
 import {
   sortByReleaseDesc,
+  validTokenCounts,
   type ModelCaps, type ModelsDevCatalog, type EffortLevel,
   type SseEvent, type ToolSpec, type AssembledToolCall, type BridgeUsage,
 } from './shared';
@@ -170,7 +171,8 @@ export type AnthropicMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
   toolCalls?: { id: string; name: string; argsJson: string }[];
-  toolResults?: { callId: string; content: string; isError?: boolean }[];
+  toolResults?: NormalizedTurn['toolResults'];
+  contentParts?: NormalizedContentPart[];
   images?: { mimeType: string; dataBase64: string }[];
   documents?: { mimeType: string; dataBase64: string }[];
   // #141: pre-split text blocks (the advisor reviewer's per-turn transcript). When present on a user turn,
@@ -344,10 +346,13 @@ export const buildAnthropicMessagesBody = (args: {
     // reviewer builds these turns; they carry no tool results or media.
     if (m.textBlocks?.length) return { role: 'user' as const, content: m.textBlocks.filter(Boolean).map((text) => ({ type: 'text' as const, text })) };
     // A plain text turn (no tool results, no images, no documents) stays a bare string (the #29 shape).
-    if (!m.toolResults?.length && !images.length && !documents.length) return { role: 'user' as const, content: m.content };
+    const orderedContent = (parts: NormalizedContentPart[]) => parts.map(p => p.type === 'text'
+      ? { type: 'text', text: p.text } : { type: 'image', source: { type: 'base64', media_type: p.mimeType, data: p.dataBase64 } });
+    if (!m.toolResults?.length && !images.length && !documents.length && !m.contentParts) return { role: 'user' as const, content: m.content };
     const blocks: unknown[] = [];
     // tool_result blocks lead so the assistant(tool_use) → tool_result order the API wants holds.
-    for (const tr of m.toolResults ?? []) blocks.push({ type: 'tool_result', tool_use_id: tr.callId, content: tr.content, ...(tr.isError ? { is_error: true } : {}) });
+    for (const tr of m.toolResults ?? []) blocks.push({ type: 'tool_result', tool_use_id: tr.callId, content: tr.contentParts ? orderedContent(tr.contentParts) : tr.content, ...(tr.isError ? { is_error: true } : {}) });
+    if (m.contentParts) return { role: 'user' as const, content: [...blocks, ...orderedContent(m.contentParts)] };
     // Documents, then images, before the text — media leads the prose, matching Anthropic's vision ordering.
     for (const doc of documents) blocks.push({ type: 'document', source: { type: 'base64', media_type: doc.mimeType, data: doc.dataBase64 } });
     for (const img of images) blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mimeType, data: img.dataBase64 } });
@@ -472,11 +477,13 @@ export const anthropicTextDelta = (ev: SseEvent): string =>
 // the stream so the door re-emits real numbers instead of the synthesized zeros — the wisped client's token
 // meter then matches native. Cache/output fields default to 0 (a message_start can predate any cache read);
 // a bare input_tokens still yields usage. Any other event carries none.
-export const anthropicUsage = (ev: SseEvent): BridgeUsage | undefined => {
+export const anthropicUsage = (ev: SseEvent, strict = false): BridgeUsage | undefined => {
   const u = ev.event === 'message_start' ? ev.data?.message?.usage
     : ev.event === 'message_delta' ? ev.data?.usage
     : undefined;
   if (!u || typeof u.input_tokens !== 'number') return undefined;
+  if (strict && !validTokenCounts(u.input_tokens, u.output_tokens, u.cache_creation_input_tokens === undefined ? 0 : u.cache_creation_input_tokens, u.cache_read_input_tokens === undefined ? 0 : u.cache_read_input_tokens,
+    u.input_tokens + u.output_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0))) return undefined;
   return {
     input_tokens: u.input_tokens,
     cache_creation_input_tokens: typeof u.cache_creation_input_tokens === 'number' ? u.cache_creation_input_tokens : 0,

@@ -94,6 +94,7 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
   let incompleteReason: string | undefined;
   let streamError: string | undefined;
   const toolEvents: CodexResponsesEvent[] = [];
+  let streamedText = '';
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
     if (!ev) continue;
@@ -101,7 +102,7 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
       throw new Error(ev.data?.response?.error?.message ?? ev.data?.error?.message ?? 'Grok response failed');
     }
     if (ev.event === 'response.output_text.delta') {
-      if (typeof ev.data?.delta === 'string') { sawDelta = true; yield { type: 'text', value: ev.data.delta }; }
+      if (typeof ev.data?.delta === 'string') { sawDelta = true; streamedText += ev.data.delta; yield { type: 'text', value: ev.data.delta }; }
     } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta' || (args.responses && ev.event === 'response.output_item.done')) {
       toolEvents.push(ev);
     } else if (ev.event === 'response.completed' || ev.event === 'response.incomplete') {
@@ -116,13 +117,16 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
       if (text) completed = text;
       incompleteReason = responsesIncompleteReason(ev.data?.response) ?? incompleteReason;
       // #165: same wire, same mapping function as Codex — see responsesUsage for why no usage means no event.
-      const usage = responsesUsage(ev.data?.response);
+      const usage = responsesUsage(ev.data?.response, !!args.responses);
       if (usage) yield { type: 'usage', usage };
     } else if (ev.event === 'error') {
       streamError = ev.data?.message ?? ev.data?.error?.message ?? streamError;
     }
   }
-  if (!sawDelta && completed) yield { type: 'text', value: completed };
+  if (args.responses && completed) {
+    if (!completed.startsWith(streamedText)) throw new Error('Provider terminal text disagrees with streamed text');
+    if (completed.length > streamedText.length) yield { type: 'text', value: completed.slice(streamedText.length) };
+  } else if (!sawDelta && completed) yield { type: 'text', value: completed };
   if (args.responses && (streamError || !sawTerminal)) throw new Error(streamError ?? 'Provider stream ended before completion');
   if (args.responses && incompleteReason) yield { type: 'truncation', reason: incompleteReason === 'content_filter' ? 'content_filter' : 'max_tokens' };
   if (!args.responses && incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };

@@ -32,7 +32,7 @@ import {
   isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
   antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker, isFableFamilyModel,
-  classifyCodexErrorMessage, buildStatus,
+  classifyCodexErrorMessage, buildStatus, codexEffortOptions, anthropicThinkingEffort, xaiReasoning,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type AntigravityCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
   type QuotaMeter, type WispStatus,
 } from './catalog';
@@ -326,7 +326,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
       // No usage on the chunk → no event at all. A Provider that ignores the opt-in must finish clean, and a
       // synthesized zero is the bug #165 exists to kill (see chatCompletionsUsage).
-      const usage = chatCompletionsUsage(chunk);
+      const usage = chatCompletionsUsage(chunk, strict);
       if (usage) yield { type: 'usage', usage };
     }
     if (strict && !terminal) throw new Error('Provider stream ended before completion');
@@ -389,6 +389,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const upstream = await client.chat.completions.create(
         { model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
           ...(parsed.responses?.parallelToolCalls !== undefined ? { parallel_tool_calls: parsed.responses.parallelToolCalls } : {}),
+          ...(parsed.responses?.effort ? { reasoning_effort: parsed.responses.effort as OpenAI.ChatCompletionCreateParams['reasoning_effort'] } : {}),
           ...(parsed.responses?.verbosity ? { verbosity: parsed.responses.verbosity } : {}) },
         { signal },
       );
@@ -406,11 +407,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       open: async ({ parsed, provider, model, baseUrl, signal }) => {
         const creds = await deps.codexCreds();
         if (!creds) return signedOut(provider);
+        signal.throwIfAborted();
+        const modelInfo = parsed.responses?.effort ? (await codexCatalog.get({ creds, baseUrl })).models.find(m => m.id === model) : undefined;
+        if (parsed.responses?.effort && !codexEffortOptions(modelInfo).includes(parsed.responses.effort)) {
+          return { ok: false, status: 400, message: `Unsupported reasoning effort '${parsed.responses.effort}' for Codex model '${model}'` };
+        }
         // bridge.ts lifts system OUT of the turns; Codex consumes it as `instructions`, so re-attach it as the
         // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
-        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        const upstream = codexStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toCodexResponsesTools(parsed.tools, !parsed.responses), toolChoice: 'auto', signal, responses: parsed.responses });
+        const upstream = codexStream({ creds, baseUrl, model, modelInfo, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toCodexResponsesTools(parsed.tools, !parsed.responses), toolChoice: 'auto', signal, responses: parsed.responses });
         return { ok: true, events: mapOAuthStream(upstream) };
       },
     },
@@ -423,9 +429,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const creds = await deps.anthropicCreds();
         if (!creds) return signedOut(provider);
         // bridge.ts lifts system OUT of the turns; buildAnthropicMessagesBody lifts a role:'system' message back
-        // to the top-level `system`, so re-attach it as the leading system message. Images are dropped on THIS
-        // door (its Anthropic arm always has been — the /v1/messages door is where vision is wired).
-        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        // to the top-level `system`, so re-attach it as the leading system message. Responses carries
+        // ordered images in contentParts; Chat Completions retains its existing flattened behavior.
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
         const upstream = anthropicStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal, strictCompletion: !!parsed.responses, parallelToolCalls: parsed.responses?.parallelToolCalls });
         return { ok: true, events: mapOAuthStream(upstream) };
@@ -441,7 +447,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const creds = await deps.xaiCreds?.();
         if (!creds) return signedOut(provider);
         // Images ride along (grok-4.5 is multimodal).
-        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
         const upstream = xaiStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toCodexResponsesTools(parsed.tools, !parsed.responses), toolChoice: 'auto', signal, responses: parsed.responses });
         return { ok: true, events: mapOAuthStream(upstream) };
@@ -468,7 +474,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // bridge.ts lifts system OUT of the turns; buildAntigravityPayload folds a role:'system' message
         // into request.systemInstruction, so re-attach it as the leading system message. Images ride along
         // as inlineData parts — #186 confirmed this upstream accepts vision input.
-        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
         return { ok: true, events: antigravityStream({ creds, baseUrl, model, messages, tools: parsed.tools, signal, strictCompletion: !!parsed.responses }) };
       },
@@ -617,6 +623,22 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const { provider, pinnedModel } = route;
     const executor = executorFor(provider);
     const encoder = createResponsesEncoder(parsed, `resp_${crypto.randomBytes(12).toString('hex')}`);
+    const model = pinnedModel ?? resolveModel(deps.modelMap(), provider);
+    const effort = parsed.responses?.effort;
+    const images = parsed.turns.flatMap(t => [...(t.contentParts ?? []), ...t.toolResults.flatMap(r => r.contentParts ?? [])]).filter(p => p.type === 'image');
+    if (images.length && (isAntigravityProvider(provider) || (isAnthropicProvider(provider) && images.some(p => p.detail && p.detail !== 'auto'))
+      || (!isCodexProvider(provider) && !isXaiProvider(provider) && images.some(p => p.detail === 'original')))) {
+      return sendError(res, 400, 'This Provider wire cannot preserve the requested image content/detail');
+    }
+    if (effort && !isCodexProvider(provider)) {
+      const supported = isAnthropicProvider(provider) ? anthropicThinkingEffort(model, effort).output_config?.effort === effort
+        : isXaiProvider(provider) ? xaiReasoning(model, effort)?.effort === effort
+        : isAntigravityProvider(provider) ? false : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(effort);
+      if (!supported) return sendError(res, 400, `Unsupported reasoning effort '${effort}' for Provider '${provider.id}' model '${model}'`);
+    }
+    if (!isCodexProvider(provider) && !isXaiProvider(provider) && !isAnthropicProvider(provider) && parsed.turns.some(t => t.toolResults.some(r => r.contentParts))) {
+      return sendError(res, 400, 'This Provider wire cannot preserve image-bearing tool results');
+    }
     if (isAntigravityProvider(provider)) {
       const firstConversation = parsed.turns.findIndex(t => t.role !== 'system');
       if (firstConversation >= 0 && parsed.turns.slice(firstConversation).some(t => t.role === 'system')) {
