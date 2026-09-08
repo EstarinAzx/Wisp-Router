@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
 
       # The tag is the single version source — a binary whose baked-in package.json version
       # disagrees would lie on the splash screen, so fail loud here.

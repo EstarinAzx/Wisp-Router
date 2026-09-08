@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { delimiter, join, resolve } from 'path';
 
 import * as launcher from '../src/codex-wisp';
+import { catalogArguments, mergeAliasCatalog, parseNativeCatalog, readNativeCatalog, writeChildCatalog } from '../src/codexCatalog';
 const root = resolve(import.meta.dir, '../../..');
 const source = join(root, 'packages/tui/src/codex-wisp.ts');
 const dispatch = join(root, 'packages/tui/src/index.tsx');
@@ -127,13 +128,26 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   const port = await listen((req, res) => { captures.push(req.headers); res.writeHead(401); res.end(); });
   let proxyHits = 0;
   const proxy = await listen((_req, res) => { proxyHits++; res.end(); });
-  const config = JSON.stringify({ bridge: { port } });
+  const config = JSON.stringify({ bridge: { port, aliasOnlyModels: true }, routing: { families: {}, aliases: [
+    { name: 'my-alias', target: { providerId: 'custom', model: 'unknown-backend' } },
+    { name: 'native-visible', target: { providerId: 'custom', model: 'collision-backend' } },
+  ] } });
   const auth = JSON.stringify({ bridgeSecret: 'synthetic-only' });
   writeFileSync(join(home, 'config.json'), config);
   writeFileSync(join(home, 'auth.json'), auth);
   const bin = join(home, 'node_modules', '@openai', 'codex', 'bin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'codex.js'), `console.log(JSON.stringify({args:process.argv.slice(2), token:process.env.WISP_CODEX_BRIDGE_SECRET, bypass:process.env.NO_PROXY, lower:process.env.no_proxy, home:process.env.CODEX_HOME})); process.exit(23);`);
+  writeFileSync(join(bin, 'codex.js'), `
+    const fs = require('fs'); const args = process.argv.slice(2);
+    if (args.includes('debug')) {
+      console.log(JSON.stringify({models: [
+        {slug:'native-visible',display_name:'Native',visibility:'list',supported_in_api:true,unknown_future_field:{preserve:true}},
+        {slug:'native-hidden',display_name:'Hidden',visibility:'hide',supported_in_api:false,unknown_future_field:{preserve:true}}
+      ]})); process.exit(0);
+    }
+    const override = args.find(a => a.startsWith('model_catalog_json='));
+    const path = override && JSON.parse(override.slice('model_catalog_json='.length));
+    console.log(JSON.stringify({args, catalogPath:path, catalog:path && JSON.parse(fs.readFileSync(path,'utf8')), token:process.env.WISP_CODEX_BRIDGE_SECRET, bypass:process.env.NO_PROXY, lower:process.env.no_proxy, home:process.env.CODEX_HOME})); process.exit(23);`);
   // A shell shim would corrupt %PATH%; the launcher must bypass it completely.
   writeFileSync(join(home, 'codex.cmd'), '@echo BROKEN_SHIM\r\nexit /b 99\r\n');
   const args = ['exec', '-m', 'unchanged', ' spaces "quoted" & | < > ^ %PATH% ', '--', '--search'];
@@ -144,6 +158,11 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   });
   expect(result, result.err).toMatchObject({ code: 23 });
   const received = JSON.parse(result.out);
+  expect(received.catalog?.models.map((m: any) => m.slug)).toEqual(['native-visible', 'native-hidden', 'my-alias']);
+  expect(received.catalog.models[0]).toMatchObject({ description: expect.stringContaining('Custom'), supported_reasoning_levels: [], input_modalities: ['text'], context_window: null });
+  expect(received.catalog.models[1]).toEqual({slug:'native-hidden',display_name:'Hidden',visibility:'hide',supported_in_api:false,unknown_future_field:{preserve:true}});
+  expect(received.catalog.models[2].description).not.toContain('unknown-backend');
+  expect(existsSync(received.catalogPath)).toBe(false);
   expect(received.args.slice(-args.length)).toEqual(args);
   expect(received.token).toBe('synthetic-only');
   expect(received.bypass).toBe('internal,127.0.0.1,localhost,::1');
@@ -218,7 +237,7 @@ test('spawn failure exits cleanly without leaking a credential', async () => {
   writeFileSync(join(home, process.platform === 'win32' ? 'codex.exe' : 'codex'), 'invalid executable');
   const result = await run([source], [], { PATH: home });
   expect(result.code).toBe(1);
-  expect(result.err).toContain('Could not start Codex');
+  expect(result.err).toContain('Could not export the Codex catalog');
   expect(result.err).not.toContain('synthetic-only');
 });
 
@@ -238,7 +257,7 @@ test('termination handler forwards to the child and preserves signal exit status
   writeFileSync(join(home, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-only' }));
   const bin = join(home, 'node_modules', '@openai', 'codex', 'bin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'codex.js'), `require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'ready'),String(process.pid)); setInterval(() => {},1000);`);
+  writeFileSync(join(bin, 'codex.js'), `if(process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); } require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'ready'),String(process.pid)); setInterval(() => {},1000);`);
   const result = await run(['--eval', `
     import { existsSync } from 'fs';
     import { join } from 'path';
@@ -255,4 +274,81 @@ test('termination handler forwards to the child and preserves signal exit status
   if (process.platform === 'win32') expect(result.out).toContain('listeners=0');
   const pid = Number(readFileSync(join(home, 'ready'), 'utf8'));
   expect(() => process.kill(pid, 0)).toThrow();
+});
+
+test('catalog arguments preserve ordinary options, honor source overrides and follow the native working directory', () => {
+  const args = ['--cd', home, 'exec', '--config=model_catalog_json="first.json"', '-cmodel_catalog_json="last.json"', '-c', 'sandbox_mode="read-only"', '--', '-cmodel_catalog_json="prompt"'];
+  expect(catalogArguments(args)).toEqual({
+    config: ['-c', 'model_catalog_json="first.json"', '-c', 'model_catalog_json="last.json"', '-c', 'sandbox_mode="read-only"'],
+    child: ['-c', 'sandbox_mode="read-only"', '--cd', home, 'exec', '--', '-cmodel_catalog_json="prompt"'], explicit: true, cwd: home,
+  });
+  for (const arg of [`-C=${home}`, `-C${home}`, `--cd=${home}`]) {
+    expect(catalogArguments(['exec',arg]).cwd).toBe(home);
+    expect(catalogArguments(['exec',arg]).child).toEqual(['exec',arg]);
+  }
+});
+
+test('catalog validation rejects malformed envelopes and duplicate ids without reducing hidden descriptors', () => {
+  for (const value of [null, [], {}, {models:[{}]}, {models:[{slug:''}]}, {models:[{slug:'x'},{slug:'x'}]}]) {
+    expect(() => parseNativeCatalog(value)).toThrow();
+  }
+  const native = {models:[{slug:'private',visibility:'hide',supported_in_api:false,future:{field:42}}]};
+  expect(parseNativeCatalog(native)).toEqual(native);
+});
+
+test('aliases use pinned capabilities, label preferences and one collision row without modifying the native catalog', () => {
+  const native = { models: [{slug:'image-alias', visibility:'hide', arbitrary:'native-profile'}, {slug:'old-model',visibility:'hide'}] };
+  const config = { routing: {families:{}, aliases:[{name:'image-alias', target:{providerId:'custom',model:'fixture'}}]}, bridge:{aliasPickerShowsModel:true} };
+  const merged = mergeAliasCatalog(native, config, () => ({vision:true,contextInput:12345,efforts:['high'],defaultEffort:'high'}));
+  expect(merged.models).toHaveLength(2);
+  expect(merged.models[0]).toMatchObject({slug:'image-alias',description:expect.stringContaining('fixture'),input_modalities:['text','image'],context_window:12345,supported_reasoning_levels:[{effort:'high',description:'high reasoning'}],default_reasoning_level:'high',service_tiers:[],supports_image_detail_original:false});
+  expect(native.models[0]).toEqual({slug:'image-alias', visibility:'hide', arbitrary:'native-profile'});
+  expect(merged.models[1]).toEqual(native.models[1]);
+  expect(() => mergeAliasCatalog(native, {...config,routing:{families:{},aliases:[{name:'bad',target:{providerId:'missing',model:'x'}}]}}, () => undefined)).toThrow();
+});
+
+test('per-child catalogs are UTF-8 without BOM and remain isolated until cleanup', () => {
+  const a = writeChildCatalog({models:[{slug:'日本語'}]}), b = writeChildCatalog({models:[{slug:'other'}]});
+  try {
+    expect(a.path).not.toBe(b.path);
+    expect(readFileSync(a.path).subarray(0,3)).not.toEqual(Buffer.from([0xef,0xbb,0xbf]));
+    expect(JSON.parse(readFileSync(a.path,'utf8')).models[0].slug).toBe('日本語');
+    a.cleanup(); expect(existsSync(a.path)).toBe(false); expect(existsSync(b.path)).toBe(true);
+  } finally { a.cleanup(); b.cleanup(); }
+});
+
+test('catalog export uses the resolved executable, source catalog and bounded bundled fallback', async () => {
+  const script = join(home, 'fake codex.ts');
+  writeFileSync(script, `
+    const args = process.argv.slice(2);
+    if (args.includes('--bundled')) console.log(JSON.stringify({models:[{slug:'bundled'}]}));
+    else if (args.includes('model_catalog_json="input.json"')) console.log(JSON.stringify({models:[{slug:'supplied'}]}));
+    else setInterval(() => {}, 1000);
+  `);
+  const codex = {file:process.execPath,args:[script]};
+  expect((await readNativeCatalog(codex,['-c','model_catalog_json="input.json"'],process.env,1000)).models[0].slug).toBe('supplied');
+  expect((await readNativeCatalog(codex,[],process.env,150)).models[0].slug).toBe('bundled');
+  await expect(readNativeCatalog(codex,['-c','model_catalog_json="missing.json"'],process.env,150)).rejects.toThrow(/catalog/);
+  writeFileSync(script, `console.log(JSON.stringify({models:[{slug:'duplicate'},{slug:'duplicate'}]}));`);
+  await expect(readNativeCatalog(codex,[],process.env,1000)).rejects.toThrow(/unique/);
+});
+
+test('a timed-out npm export also terminates the native executable descendant', async () => {
+  const script = join(home,'export-tree.ts'), pidFile = join(home,'descendant.pid');
+  writeFileSync(script, `
+    import {spawn} from 'child_process'; import {writeFileSync} from 'fs';
+    if (process.argv.includes('--bundled')) { console.log(JSON.stringify({models:[]})); process.exit(0); }
+    if (process.argv.includes('--descendant')) { writeFileSync(${JSON.stringify(pidFile)},String(process.pid)); }
+    else spawn(process.execPath,[${JSON.stringify(script)},'--descendant'],{stdio:'ignore',windowsHide:true});
+    setInterval(() => {}, 1000);
+  `);
+  let pid: number | undefined;
+  try {
+    await readNativeCatalog({file:process.execPath,args:[script]},[],process.env,500);
+    pid = Number(readFileSync(pidFile,'utf8'));
+    expect(() => process.kill(pid!,0)).toThrow();
+  } finally {
+    pid ??= existsSync(pidFile) ? Number(readFileSync(pidFile,'utf8')) : undefined;
+    if (pid) try { process.kill(pid); } catch { /* Already terminated by the exporter. */ }
+  }
 });
