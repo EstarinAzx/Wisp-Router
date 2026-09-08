@@ -17,10 +17,11 @@
     },
     "packages/tui": {
       "name": "wisp-router",
-      "version": "2.1.3",
+      "version": "2.1.4",
       "bin": {
         "wisp": "./src/index.tsx",
         "claude-wisp": "./src/claude-wisp.ts",
+        "codex-wisp": "./src/codex-wisp.ts",
       },
       "dependencies": {
         "@opentui/core": "0.4.3",

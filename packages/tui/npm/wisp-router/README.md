@@ -5,6 +5,7 @@
 - `wisp` — the TUI: pick a Provider (OpenCode Go, Codex/ChatGPT, Anthropic/Claude.ai, OpenAI, Groq, Mistral, OpenRouter, Ollama, and more), set keys or OAuth sign-in, edit the Routing map, host the Bridge.
 - `wisp serve` — the headless Bridge: a local OpenAI-compatible **and** Anthropic-compatible endpoint that routes to whichever backend you configured.
 - `claude-wisp` — launch Claude Code pre-wired to the Bridge (env on the child only, argv passed through verbatim).
+- `codex-wisp` (2.1.4) — launch installed native Codex through the Bridge's visible-history Responses subset. Codex owns tools and policy; saved configuration and authentication remain unchanged.
 
 ## Install
 
@@ -12,7 +13,9 @@
 npm i -g wisp-router
 ```
 
-Ships as a compiled per-platform binary (win32-x64, darwin-arm64, darwin-x64, linux-x64) — no Bun or particular Node version needed at runtime.
+Ships as a compiled per-platform binary (win32-x64, darwin-arm64, darwin-x64, linux-x64).
+The binary needs neither Bun nor Node.js; npm command shims require Node.js >=16. All three
+commands use the same exact-version optional dependency or release-download cache.
 
 ## Quick start
 
@@ -20,7 +23,24 @@ Ships as a compiled per-platform binary (win32-x64, darwin-arm64, darwin-x64, li
 wisp            # the TUI — type / for commands (/providers, /key, /model, /routing, /bridge, …)
 wisp serve      # headless Bridge host
 claude-wisp     # Claude Code through the Bridge (start the Bridge first)
+codex-wisp      # native Codex through a 2.1.4 Bridge (start the Bridge first)
 ```
+
+Direct binary: `wisp codex-wisp exec "Explain this project"`. Native Codex must be installed
+separately. On Windows, Wisp starts the native executable or npm JavaScript entry directly,
+preserving literal arguments without a shell. Native model selection and `-m` pass through;
+Wisp resolves Provider id, exact Alias, Family route, then Active Provider. Use an Alias to
+pin a specific backend model.
+
+Verified subset: `codex-cli 0.153.4`, visible text/image history, function/custom tools and
+client discovery with namespaced follow-up. Hosted search, opaque reasoning/compaction replay,
+structured output and provider/profile overrides are unsupported and rejected. Image support
+depends on the Provider wire; custom grammar is described but not enforced by generic upstreams.
+Full limits and source invocation: [Codex guide](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-wisp.md).
+
+2.1.4 preparation verifies local Windows artifacts against deterministic mock Providers.
+macOS/Linux release smoke jobs and live-provider acceptance are not claimed as locally run.
+Publication is separate; existing 2.1.3 installations do not include the new launcher.
 
 ## Routing
 
