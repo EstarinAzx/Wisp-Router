@@ -54,7 +54,29 @@ const USAGE = [
   '  wisp routing [--json]',
   '  wisp routing set <row> <providerId>/<model>',
   '  wisp routing unset <row>',
+  '  wisp routing codex [--json]',
+  '  wisp routing codex set <model-id> <providerId>/<model>',
+  '  wisp routing codex unset <model-id>',
+  'Snapshots/revert cover Alias and Claude family rows only, not Codex model routes.',
 ];
+
+describe('Codex routing commands', () => {
+  it('sets independent exact routes, preserving legacy names and snapshot scope', async () => {
+    const one = await run(['codex', 'set', 'gpt-new-mini', 'groq/vendor/model']);
+    expect(one.exitCode).toBe(0);
+    const two = await run(['codex', 'set', 'gpt-new-spark', 'codex/spark'], one.nextMap);
+    expect(two.nextMap?.codexModels).toEqual({ 'gpt-new-mini': { providerId: 'groq', model: 'vendor/model' }, 'gpt-new-spark': { providerId: 'codex', model: 'spark' } });
+    const alias = await run(['set', 'astra', 'groq/alias'], two.nextMap);
+    expect(alias.nextMap?.codexModels).toEqual(two.nextMap?.codexModels);
+    expect((await run(['codex', '--json'], alias.nextMap)).lines).toEqual([JSON.stringify(two.nextMap?.codexModels, null, 2)]);
+    const cleared = await run(['codex', 'unset', 'gpt-new-mini'], alias.nextMap);
+    expect(cleared.nextMap?.codexModels?.['gpt-new-mini']).toBeUndefined();
+    expect(cleared.nextMap?.aliases.some(a => a.name === 'astra')).toBe(true);
+    expect((await run(['codex', 'unset', 'absent'], cleared.nextMap)).nextMap).toBeUndefined();
+    expect((await run(['codex', 'set', 'gpt-new-mini', 'missing/no'])).exitCode).toBe(1);
+    expect((await run(['codex', 'set', 'gpt-new-mini', 'groq/  '])).exitCode).toBe(1);
+  });
+});
 
 // ----------------------------- Snapshots ----------------------------- //
 

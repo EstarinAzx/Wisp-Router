@@ -5,7 +5,7 @@ import { createServer } from 'http';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
-import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS } from '../src/routing';
+import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS, type RoutingMap } from '../src/routing';
 import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE, antigravityImageRefusal } from '../src/catalog';
 import type { Provider } from '../src/catalog';
 import { codexCatalog } from '../src/codexModels';
@@ -51,6 +51,40 @@ const makeDeps = (over: Partial<BridgeDeps>): BridgeDeps => ({
   accessSecret: () => 'secret',
   log: () => {},
   ...over,
+});
+
+describe('exact Codex routes through every public Bridge door', () => {
+  it.each(['/v1/responses', '/v1/messages', '/v1/chat/completions'])('reads independent routes live on %s and fails invalid Targets', async path => {
+    const sent: any[] = [], logs: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => { sent.push(JSON.parse(init.body as string)); return grokSse(); });
+    const second = { ...GROK, id: 'second' };
+    const map: RoutingMap = { families: {}, aliases: [], codexModels: {
+      'native-mini': { providerId: 'xai', model: 'mini-target' },
+      'native-spark': { providerId: 'second', model: 'spark-target' },
+    } };
+    try {
+      await runServer(makeDeps({ providers: [GROK, second], routingMap: () => map, log: line => logs.push(line) }), async port => {
+        const request = (model: string) => post(port, path, { model, stream: true,
+          ...(path === '/v1/responses' ? { input: 'hi', store: false } : { max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }) });
+        for (const model of ['native-mini', 'native-spark']) { const reply = await request(model); expect(reply.status, reply.body).toBe(200); }
+        expect(sent.map(b => b.model)).toEqual(['mini-target', 'spark-target']);
+        expect(logs.some(l => l.includes("route codex-model 'native-spark' -> second model=spark-target"))).toBe(true);
+        map.aliases.push({ name: 'native-mini', target: { providerId: 'second', model: 'alias-target' } });
+        expect((await request('native-mini')).status).toBe(200);
+        expect(sent.at(-1).model).toBe('alias-target');
+        map.aliases = [];
+        delete map.codexModels!['native-mini'];
+        expect((await request('native-mini')).status).toBe(200);
+        expect(sent.at(-1).model).toBe(GROK.defaultModel);
+        map.codexModels!['native-mini'] = { providerId: 'missing', model: 'bad' };
+        expect((await request('native-mini')).status).toBe(404);
+        expect(sent).toHaveLength(4);
+        map.codexModels!['native-mini'] = { providerId: 'xai', model: '' };
+        expect((await request('native-mini')).status).toBe(500);
+        expect(sent).toHaveLength(4);
+      });
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 describe('Codex catalogue capabilities through both Bridge doors', () => {

@@ -63,6 +63,25 @@ describe('status read/write', () => {
 // ----------------------------- read/write config ----------------------------- //
 
 describe('config read/write', () => {
+  test('malformed routing containers cannot fall back or erase explicit Codex bindings (#216)', () => {
+    const h = home();
+    h.writeConfig({});
+    const path = join(dir, '.wisp', 'config.json');
+    const codexModels = { 'native-mini': { providerId: 'custom', model: 'pinned' } };
+    for (const routing of [
+      { codexModels }, { families: [], aliases: [], codexModels },
+      { families: {}, aliases: {}, codexModels }, { families: {}, codexModels },
+    ]) {
+      const raw = JSON.stringify({ routing, future: 'preserved' });
+      writeFileSync(path, raw);
+      expect(() => h.readConfig()).toThrow(/Invalid routing/);
+      expect(() => h.writeConfig({ effort: 'high' })).toThrow(/Invalid routing/);
+      expect(readFileSync(path, 'utf8')).toBe(raw);
+    }
+    writeFileSync(path, JSON.stringify({ routing: { families: [], aliases: [] } }));
+    expect(h.readConfig()).toEqual({}); // Old stores retain their existing lenient behavior.
+  });
+
   test('missing store reads as empty config and configExists() false', () => {
     const h = home();
     expect(h.readConfig()).toEqual({});

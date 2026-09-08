@@ -276,6 +276,25 @@ test('termination handler forwards to the child and preserves signal exit status
   expect(() => process.kill(pid, 0)).toThrow();
 });
 
+test('native route overrides use Target metadata, with Alias and Provider precedence', () => {
+  const catalog = { models: [
+    { slug: 'future-mini', display_name: 'Future Mini', visibility: 'list', base_instructions: 'native', input_modalities: ['text', 'image'] },
+    { slug: 'future-spark', display_name: 'Future Spark', visibility: 'hide' },
+    { slug: 'custom', display_name: 'Provider collision', visibility: 'list' },
+  ] };
+  const target = { providerId: 'custom', model: 'backend-mini' };
+  const config = { routing: { families: {}, aliases: [], codexModels: { 'future-mini': target, 'future-spark': target, custom: target } } };
+  const merged = mergeAliasCatalog(catalog, config, () => undefined);
+  expect(merged.models[0]).toMatchObject({ slug: 'future-mini', display_name: 'Future Mini', input_modalities: ['text'], supported_reasoning_levels: [] });
+  expect(merged.models[0].description).toContain('backend-mini');
+  expect(merged.models[1].visibility).toBe('hide');
+  expect(merged.models[2]).toEqual(catalog.models[2]);
+  const alias = mergeAliasCatalog(catalog, { routing: { ...config.routing, aliases: [{ name: 'future-mini', target: { ...target, model: 'alias-backend' } }] }, bridge: { aliasPickerShowsModel: true } }, () => undefined);
+  expect(alias.models.filter(m => m.slug === 'future-mini')).toHaveLength(1);
+  expect(alias.models[0].description).toContain('Wisp Alias');
+  expect(alias.models[0].description).toContain('alias-backend');
+});
+
 test('catalog arguments preserve ordinary options, honor source overrides and follow the native working directory', () => {
   const args = ['--cd', home, 'exec', '--config=model_catalog_json="first.json"', '-cmodel_catalog_json="last.json"', '-c', 'sandbox_mode="read-only"', '--', '-cmodel_catalog_json="prompt"'];
   expect(catalogArguments(args)).toEqual({

@@ -45,9 +45,40 @@ missing Bridge secret or stopped Bridge produces guidance and a nonzero exit; no
 in the background automatically.
 
 Native model selection is retained. Ordinary arguments, including `-m`, pass through. Wisp
-resolves that model string as a Provider id, exact Alias, Family route, then the live Active
-Provider. An arbitrary backend model string does not pin a Wisp Target; use a configured
-Alias when you need a specific Provider and model.
+resolves that model string as a Provider id, exact Alias, exact Codex model route, Claude
+Family route, then the live Active Provider. An arbitrary backend model string does not pin
+a Wisp Target; use a configured Alias or exact Codex route when you need a specific Target.
+
+## Exact Codex model routing (preparing 2.1.5)
+
+`/routing` has Claude Code, Codex and Custom sections. Codex discovers the installed client's
+selectable models, including older and future choices, without a fixed family list. Each
+choice has an independent Target. Saved routes missing from discovery remain editable and
+clearable, including when Codex is absent or discovery fails. An overriding Alias is shown.
+
+```sh
+wisp routing codex
+wisp routing codex set gpt-5.6-sol codex/gpt-5.6-sol
+wisp routing codex set gpt-6-astra custom/my-backend-model
+wisp routing codex unset gpt-5.6-sol
+wisp routing codex --json
+```
+
+Routes live in optional `routing.codexModels` in Wisp's config. Old stores need no migration.
+These commands do not redefine Aliases: existing `wisp routing set sol ...` and `unset codex`
+keep their existing meanings. Invalid new Targets fail explicitly. A Codex route never uses
+Claude's automatic Anthropic cooldown fallback. Clearing removes only that binding; normal
+precedence resumes, usually the Active Provider. Native selection alone does not select Wisp's
+Codex Provider. Existing snapshot/revert commands cover Alias and Claude family rows only;
+they neither capture nor revert Codex routes.
+
+Bridge requests read routing changes live. Picker descriptions and capabilities refresh when
+`codex-wisp` relaunches. A native row with an explicit route uses the same conservative Target
+policy as an Alias below, and its description always names the pinned Target. Updating only
+the launcher is insufficient: an extension-hosted Bridge must also be rebuilt/updated with
+the shared resolver before it can honor Codex routes.
+
+## Picker aliases and capability policy
 
 The source launcher preparing 2.1.5 also adds Wisp Aliases to Codex's model picker. It exports
 the complete catalog from the executable it launches (`debug models`), with a four-second

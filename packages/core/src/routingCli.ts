@@ -10,7 +10,7 @@
 
 import type { Provider } from './catalog';
 import {
-  FAMILY_KEYS, withAlias, withFamilyRoute, withoutAlias,
+  FAMILY_KEYS, withAlias, withFamilyRoute, withoutAlias, withCodexModelRoute,
   type FamilyKey, type RoutingMap, type Target,
 } from './routing';
 
@@ -23,6 +23,10 @@ const USAGE = [
   '  wisp routing [--json]',
   '  wisp routing set <row> <providerId>/<model>',
   '  wisp routing unset <row>',
+  '  wisp routing codex [--json]',
+  '  wisp routing codex set <model-id> <providerId>/<model>',
+  '  wisp routing codex unset <model-id>',
+  'Snapshots/revert cover Alias and Claude family rows only, not Codex model routes.',
 ];
 
 const usage = (): RoutingCliResult => ({ lines: [...USAGE], exitCode: 1 });
@@ -54,6 +58,7 @@ const setCommand = async (
   map: RoutingMap,
   providers: Provider[],
   hasCredentials: (provider: Provider) => Promise<boolean>,
+  codex = false,
 ): Promise<RoutingCliResult> => {
   if (args.length !== 3) return usage();
   const [, row, rawTarget] = args;
@@ -67,11 +72,11 @@ const setCommand = async (
   if (!provider) return failure(`Unknown Provider '${target.providerId}'.`);
 
   const family = familyFor(row);
-  if (!family && providers.some((candidate) => candidate.id === row)) {
+  if (!codex && !family && providers.some((candidate) => candidate.id === row)) {
     return failure(`Alias '${row}' would shadow a Provider id.`);
   }
 
-  const nextMap = family
+  const nextMap = codex ? withCodexModelRoute(map, providers, row, target) : family
     ? withFamilyRoute(map, providers, family, target)
     : withAlias(map, providers, row, target);
   if (!nextMap) return failure('Routing edit was refused.');
@@ -84,10 +89,17 @@ const unsetCommand = (
   args: string[],
   map: RoutingMap,
   providers: Provider[],
+  codex = false,
 ): RoutingCliResult => {
   if (args.length !== 2) return usage();
   const [, row] = args;
   if (!row) return failure('Row name cannot be empty.');
+
+  if (codex) {
+    if (!Object.prototype.hasOwnProperty.call(map.codexModels ?? {}, row)) return { lines: [], exitCode: 0 };
+    const nextMap = withCodexModelRoute(map, providers, row, undefined);
+    return nextMap ? { nextMap, lines: [], exitCode: 0 } : failure('Routing edit was refused.');
+  }
 
   const family = familyFor(row);
   if (family) {
@@ -110,6 +122,14 @@ export const runRoutingCommand = async (
   providers: Provider[],
   hasCredentials: (provider: Provider) => Promise<boolean>,
 ): Promise<RoutingCliResult> => {
+  if (args[0] === 'codex') {
+    const rest = args.slice(1);
+    if (rest[0] === 'set') return setCommand(rest, map, providers, hasCredentials, true);
+    if (rest[0] === 'unset') return unsetCommand(rest, map, providers, true);
+    if (rest.length === 1 && rest[0] === '--json') return { lines: [JSON.stringify(map.codexModels ?? {}, null, 2)], exitCode: 0 };
+    if (rest.length === 0) return { lines: ['Codex model routes:', ...Object.entries(map.codexModels ?? {}).map(([name, target]) => `  ${name}: ${target.providerId}/${target.model}`)], exitCode: 0 };
+    return usage();
+  }
   if (args.length === 1 && args[0] === '--json') {
     // Serialize the live map itself so snapshots retain alias order and exact stored fields.
     return { lines: [JSON.stringify(map, null, 2)], exitCode: 0 };
