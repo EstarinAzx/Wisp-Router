@@ -1,11 +1,15 @@
 ---
 type: api
 project: wisp
-updated: 2026-07-29
+updated: 2026-09-08
 tags: [context, api, vscode]
 ---
 
 # Surface
+
+## Native Codex source surface (#209)
+
+`POST /v1/responses` shares the Bridge access secret, routing and Provider execution. `codex-wisp` is a source launcher, not an upstream Provider. Supported native request shapes, explicit refusals and source commands are documented in `docs/codex-wisp.md`; see [[active-work]] for the remaining #210 fidelity and #211 packaging slices.
 
 The project's surface is a VS Code extension: the Inquire command, other commands, a webview side panel, and (since #59) the shared **Wisp home** store `~/.wisp/` (config.json + owner-only auth.json — ADR-0002) that holds all state except the two editor-local tuning settings. It consumes one external API.
 

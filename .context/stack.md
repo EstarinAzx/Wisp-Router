@@ -1,11 +1,13 @@
 ﻿---
 type: stack
 project: wisp
-updated: 2026-07-17
+updated: 2026-09-08
 tags: [context, stack]
 ---
 
 # Stack
+
+The native Codex source launcher uses Bun's TOML parser and Node process/TCP APIs, with no new dependency. Its child-only credential variable is `WISP_CODEX_BRIDGE_SECRET`; no saved provider/authentication settings are changed. See `docs/codex-wisp.md` and [[active-work]] for the verified Windows/Bun scope and remaining packaging work.
 
 ## Languages & runtime
 - TypeScript: `^7.0.2` (native Go compiler, "Project Corsa"; ships `bin/tsc`). devDep in all 3 packages. **Every tsconfig here must set `"types": ["node"]`** — TS 7 dropped auto-inclusion of `@types/*` (see [[gotchas]]).

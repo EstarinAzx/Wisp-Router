@@ -28,6 +28,8 @@ Bun-workspaces **monorepo** since #58 / PR #70 (ADR-0001): three packages, one r
 
 ## How to run
 
+Since source commit `da6bc5a` (#209), `bridgeResponses.ts` adds the native Codex `/v1/responses` subset and `packages/tui/src/codex-wisp.ts` supplies its launcher. See `docs/codex-wisp.md` for source commands, routing, compatibility limits and the retained installed-CLI check. Terminal packaging is still assigned to #211; [[active-work]] tracks #210 fidelity work.
+
 Codex discovery since **wisp-router 2.1.1 / extension 1.13.5** is account-backed in
 `packages/core/src/codexModels.ts`, with a 15-minute cache, explicit refresh, and manual entry.
 Its model/effort/capability choices no longer use models.dev name filters or static Codex lists.

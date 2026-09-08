@@ -9,11 +9,11 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Next: codex-wisp for 2.1.4 under [spec #208](https://github.com/EstarinAzx/Wisp-Router/issues/208).** The user authorized autonomous `vibe init` and optional relay. Planning and 14 native protocol probes passed; feature implementation is next.
+**Next: [#210 — content and Provider fidelity](https://github.com/EstarinAzx/Wisp-Router/issues/210), under [spec #208](https://github.com/EstarinAzx/Wisp-Router/issues/208).** The user authorized autonomous `vibe init` and relay. #209 landed through [PR #212](https://github.com/EstarinAzx/Wisp-Router/pull/212), squash `da6bc5a`.
 
 Read `.claude/relay/codex-wisp-2.1.4.traycer.json` in the main checkout before spawning. Resume its recorded run/worker; historical `.claude/relay/*.md` files are unrelated stopped Claude runs.
 
-First slice: [#209](https://github.com/EstarinAzx/Wisp-Router/issues/209), followed by #210 and #211 through native dependencies. Skip parent #208 when selecting implementation work. Worktree/probe paths are in [[active-work]]. The worktree already has scoped tracker/glossary setup changes owned by this task.
+Read `docs/codex-wisp.md` and the full #210 contract. The source path, tool registry, strict stream statuses and launcher are working; images/non-text parts remain explicitly rejected for #210 to extend. Baseline: 1,093 core +85 terminal tests, both typechecks, extension build, six native CLI cases and independent review pass. #211 follows; skip parent #208 as a work item. Worktree/evidence pointers are in [[active-work]].
 
 ## Landmines
 
