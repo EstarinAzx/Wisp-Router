@@ -7,6 +7,8 @@ tags: [context, overview]
 
 # Overview
 
+**Current publication:** Wisp 2.1.5 and companion VSIX 1.13.8 were published through workflow 34199792853 and verified from downloaded assets/npm metadata. Installation was explicitly excluded. See [[active-work]] for published-byte evidence; any earlier preparation-only status below is historical.
+
 **Current source:** terminal 2.1.5 / companion VSIX 1.13.8 prepared locally, with #215–#218 merged and the relay complete. Native picker Aliases and exact routes for every discovered Codex choice are implemented; publication/install are pending. `packages/tui/src/codexCatalog.ts` owns full native catalog export and child overlays, `codexRouting.ts` supplies discovered/saved routing rows, and `routing.ts` resolves optional exact `codexModels`. Read [[active-work]] for final evidence and `docs/investigations/traycer-codex-compatibility.md` before claiming Traycer GUI integration. The older release references below are historical.
 
 **Project:** wisp
