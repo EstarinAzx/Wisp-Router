@@ -36,6 +36,8 @@ export type BridgeChatRequest = {
   system: string;
   turns: NormalizedTurn[];
   tools: ToolSpec[];
+  // Present only on the native Responses door; other doors retain their established defaults.
+  responses?: { parallelToolCalls?: boolean; effort?: string; context?: 'auto' | 'current_turn' | 'all_turns'; verbosity?: 'low' | 'medium' | 'high' };
 };
 
 // Split a data URI ("data:<mime>;base64,<payload>") into the mimeType + base64 payload the normalized

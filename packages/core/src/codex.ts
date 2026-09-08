@@ -77,6 +77,7 @@ export type CodexResponsesBody = {
   tools?: CodexResponsesTool[];
   tool_choice?: 'auto' | 'required';
   parallel_tool_calls?: boolean;
+  text?: { verbosity: 'low' | 'medium' | 'high' };
 };
 
 // Recursively coerce a JSON schema into Codex strict mode: every object closes (additionalProperties:false)
@@ -146,6 +147,8 @@ export const buildCodexResponsesBody = (args: {
   toolChoice?: 'auto' | 'required';
   // Codex accepts ordered developer input; other Responses providers retain their existing folding.
   preserveSystemMessages?: boolean;
+  parallelToolCalls?: boolean;
+  verbosity?: 'low' | 'medium' | 'high';
 }): CodexResponsesBody => {
   const instructions: string[] = [];
   const input: CodexInputItem[] = [];
@@ -177,7 +180,8 @@ export const buildCodexResponsesBody = (args: {
     model: args.model, instructions: instructions.join('\n\n') || CODEX_DEFAULT_INSTRUCTIONS, input,
     ...(args.reasoning ? { reasoning: args.reasoning } : {}),
     store: false, stream: true,
-    ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: args.toolChoice ?? 'auto', parallel_tool_calls: true } : {}),
+    ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: args.toolChoice ?? 'auto', parallel_tool_calls: args.parallelToolCalls ?? true } : {}),
+    ...(args.verbosity ? { text: { verbosity: args.verbosity } } : {}),
   };
 };
 
@@ -355,13 +359,13 @@ export const classifyCodexErrorMessage = (message: string): CodexErrorClass | un
 export const reduceResponsesToolCalls = (events: CodexResponsesEvent[]): AssembledToolCall[] => {
   const byItemId = new Map<string, AssembledToolCall>();
   for (const ev of events) {
-    if (ev.event === 'response.output_item.added' && ev.data?.item?.type === 'function_call') {
+    if ((ev.event === 'response.output_item.added' || ev.event === 'response.output_item.done') && ev.data?.item?.type === 'function_call') {
       const item = ev.data.item;
       const itemId = String(item.id ?? item.call_id ?? '');
       const call = byItemId.get(itemId) ?? { id: '', name: '', argsJson: '' };
       call.id = item.call_id ?? item.id ?? call.id;
       if (typeof item.name === 'string') call.name = item.name;
-      if (typeof item.arguments === 'string') call.argsJson += item.arguments;
+      if (typeof item.arguments === 'string') call.argsJson = ev.event === 'response.output_item.done' ? item.arguments : call.argsJson + item.arguments;
       byItemId.set(itemId, call);
     } else if (ev.event === 'response.function_call_arguments.delta') {
       const itemId = String(ev.data?.item_id ?? '');

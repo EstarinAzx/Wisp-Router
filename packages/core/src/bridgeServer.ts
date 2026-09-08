@@ -37,6 +37,7 @@ import {
   type QuotaMeter, type WispStatus,
 } from './catalog';
 import { codexStream } from './codexClient';
+import { parseResponsesRequest, createResponsesEncoder } from './bridgeResponses';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import { antigravityStream } from './antigravityClient';
@@ -310,11 +311,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // chunk type (not the SDK's) keeps this in the module's hand-rolled-shape style.
   // #169: `usage` rides the stream's FINAL chunk, and only when the request opted in. That chunk carries an
   // EMPTY choices array, so the delta reads below already skip it — the mapping is purely additive.
-  type KeyedChunk = { choices?: { delta?: { content?: string | null; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[]; usage?: unknown };
-  const mapKeyedStream = async function* (upstream: AsyncIterable<KeyedChunk>): AsyncGenerator<BridgeStreamEvent> {
+  type KeyedChunk = { choices?: { finish_reason?: string | null; delta?: { content?: string | null; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[]; usage?: unknown };
+  const mapKeyedStream = async function* (upstream: AsyncIterable<KeyedChunk>, strict = false): AsyncGenerator<BridgeStreamEvent> {
     const toolDeltas: ToolCallDelta[] = [];
+    let terminal = false;
     for await (const chunk of upstream) {
       const choice = chunk.choices?.[0];
+      if (choice?.finish_reason) {
+        terminal = true;
+        if (strict && ['length', 'content_filter'].includes(choice.finish_reason)) yield { type: 'truncation', reason: choice.finish_reason === 'length' ? 'max_tokens' : 'content_filter' };
+      }
       const delta = choice?.delta?.content ?? '';
       if (delta) yield { type: 'text', text: delta };
       for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
@@ -323,6 +329,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const usage = chatCompletionsUsage(chunk);
       if (usage) yield { type: 'usage', usage };
     }
+    if (strict && !terminal) throw new Error('Provider stream ended before completion');
     for (const call of assembleToolCalls(toolDeltas)) yield { type: 'tool_call', call };
   };
 
@@ -380,10 +387,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // #169: stream_options is the opt-in — a chat-completions stream reports NO usage without it. The door
       // always streams upstream (even when the client asked stream:false), so the flag is unconditional too.
       const upstream = await client.chat.completions.create(
-        { model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
+        { model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
+          ...(parsed.responses?.parallelToolCalls !== undefined ? { parallel_tool_calls: parsed.responses.parallelToolCalls } : {}),
+          ...(parsed.responses?.verbosity ? { verbosity: parsed.responses.verbosity } : {}) },
         { signal },
       );
-      return { ok: true, events: mapKeyedStream(upstream) };
+      return { ok: true, events: mapKeyedStream(upstream, !!parsed.responses) };
     },
   };
 
@@ -401,7 +410,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        const upstream = codexStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
+        const upstream = codexStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toCodexResponsesTools(parsed.tools, !parsed.responses), toolChoice: 'auto', signal, responses: parsed.responses });
         return { ok: true, events: mapOAuthStream(upstream) };
       },
     },
@@ -418,7 +427,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // door (its Anthropic arm always has been — the /v1/messages door is where vision is wired).
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        const upstream = anthropicStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal });
+        const upstream = anthropicStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal, strictCompletion: !!parsed.responses, parallelToolCalls: parsed.responses?.parallelToolCalls });
         return { ok: true, events: mapOAuthStream(upstream) };
       },
     },
@@ -434,7 +443,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // Images ride along (grok-4.5 is multimodal).
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        const upstream = xaiStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
+        const upstream = xaiStream({ creds, baseUrl, model, messages, effort: parsed.responses?.effort ?? deps.effort(), tools: toCodexResponsesTools(parsed.tools, !parsed.responses), toolChoice: 'auto', signal, responses: parsed.responses });
         return { ok: true, events: mapOAuthStream(upstream) };
       },
     },
@@ -461,7 +470,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // as inlineData parts — #186 confirmed this upstream accepts vision input.
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        return { ok: true, events: antigravityStream({ creds, baseUrl, model, messages, tools: parsed.tools, signal }) };
+        return { ok: true, events: antigravityStream({ creds, baseUrl, model, messages, tools: parsed.tools, signal, strictCompletion: !!parsed.responses }) };
       },
     },
     keyedExecutor,
@@ -495,6 +504,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const wait = retryDelayMs(n, Math.random);
         deps.log(`[bridge] provider ${provider.id} transient failure — retrying in ${Math.round(wait)}ms (attempt ${n + 1}/${MAX_PROVIDER_ATTEMPTS}): ${message} (#168)`);
         await sleep(wait);
+        controller.signal.throwIfAborted();
       }
     }
   };
@@ -591,6 +601,47 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       failProviderRequest(res, provider, err, controller, executor);
     }
+  };
+
+  const handleResponses = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    // IncomingMessage.close also fires when reading the body finishes. Only the response socket closing
+    // before end is cancellation; install this before reading or resolving any upstream credentials.
+    const controller = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+    let parsed: ReturnType<typeof parseResponsesRequest>;
+    try { parsed = parseResponsesRequest(JSON.parse(await readBody(req))); }
+    catch (err) { if (!controller.signal.aborted) sendError(res, 400, String(err)); return; }
+    if (controller.signal.aborted) return;
+    const route = routeFor(parsed.model);
+    if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    const { provider, pinnedModel } = route;
+    const executor = executorFor(provider);
+    const encoder = createResponsesEncoder(parsed, `resp_${crypto.randomBytes(12).toString('hex')}`);
+    if (isAntigravityProvider(provider)) {
+      const firstConversation = parsed.turns.findIndex(t => t.role !== 'system');
+      if (firstConversation >= 0 && parsed.turns.slice(firstConversation).some(t => t.role === 'system')) {
+        return sendError(res, 400, 'Antigravity cannot preserve positioned developer messages; choose a Responses, Messages or Chat Completions Provider');
+      }
+    }
+    try {
+      const started = await openPrimed(provider, executor, controller, async () => {
+        controller.signal.throwIfAborted();
+        return executor.open({ parsed, provider, model: pinnedModel ?? resolveModel(deps.modelMap(), provider), baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()), signal: controller.signal });
+      });
+      if (controller.signal.aborted) return;
+      if (!started.ok) return sendError(res, started.status, started.message);
+      if (parsed.stream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write(encoder.start());
+      }
+      for await (const event of started.events) {
+        controller.signal.throwIfAborted();
+        const frames = encoder.push(event); if (parsed.stream && frames) res.write(frames);
+      }
+      controller.signal.throwIfAborted();
+      const final = encoder.finish();
+      if (parsed.stream) { res.end(final.frames); } else sendJson(res, 200, final.response);
+    } catch (err) { failProviderRequest(res, provider, err, controller, executor, encoder.fail); }
   };
 
   // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
@@ -917,6 +968,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     }
     // Exact path only — /v1/messages/count_tokens must fall through to the 404, not the messages door.
     if (req.method === 'POST' && (url === '/v1/messages' || url.startsWith('/v1/messages?'))) return handleAnthropicMessages(req, res);
+    if (req.method === 'POST' && (url === '/v1/responses' || url.startsWith('/v1/responses?'))) return handleResponses(req, res);
     if (req.method === 'POST' && url.startsWith('/v1/chat/completions')) return handleChat(req, res);
     return sendError(res, 404, `no route for ${req.method} ${url}`);
   };

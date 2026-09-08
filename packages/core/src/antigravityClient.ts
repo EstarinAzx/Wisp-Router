@@ -38,6 +38,7 @@ import type { BridgeStreamEvent } from './bridge';
 import { sseBlocks } from './codexClient';
 
 type AntigravityRequestArgs = {
+  strictCompletion?: boolean;
   creds: AntigravityCreds;
   baseUrl: string;
   model: string;
@@ -171,7 +172,7 @@ const antigravityChunks = async function* (body: ReadableStream<Uint8Array>): As
 export const antigravityStream = async function* (args: AntigravityRequestArgs): AsyncGenerator<BridgeStreamEvent> {
   const res = await antigravityFetch(args, true);
   if (!res.body) return;
-  yield* antigravityStreamEvents(antigravityChunks(res.body));
+  yield* antigravityStreamEvents(antigravityChunks(res.body), args.strictCompletion);
 };
 
 // ----------------------------- Non-streaming ----------------------------- //

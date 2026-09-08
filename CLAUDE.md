@@ -125,3 +125,17 @@ when arrow semantics break the code:
 
 When in doubt, arrow. Switch to `function` only for the cases above.
 
+## Agent skills
+
+### Issue tracker
+
+GitHub issues on `EstarinAzx/Wisp-Router`; read `docs/agents/issue-tracker.md` for tracker operations and queue selection.
+
+### Triage labels
+
+Canonical triage roles; see `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+One shared glossary and root ADRs; see `docs/agents/domain.md` before exploring domain behavior.
+

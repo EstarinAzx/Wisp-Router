@@ -1,3 +1,4 @@
+import type { BridgeChatRequest } from './bridge';
 // ----------------- xaiClient.ts — Wisp: Grok (xAI) Responses request + SSE→text/tool calls ----------------- //
 
 /*
@@ -29,7 +30,7 @@ import { sseBlocks, type CodexStreamEvent } from './codexClient';
 // stays uniform: user/assistant/system text, optional images, and (agent mode) tool calls + results.
 type XaiMessage = { role: 'system' | 'user' | 'assistant'; content: string; images?: { mimeType: string; dataBase64: string }[]; toolCalls?: { id: string; name: string; argsJson: string }[]; toolResults?: { callId: string; content: string }[] };
 
-type XaiRequestArgs = { creds: XaiCreds; baseUrl: string; model: string; messages: XaiMessage[]; effort?: EffortLevel; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
+type XaiRequestArgs = { responses?: BridgeChatRequest['responses']; creds: XaiCreds; baseUrl: string; model: string; messages: XaiMessage[]; effort?: EffortLevel; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
 
 // What xaiStream yields — an answer-text fragment or a fully-assembled tool call. Aliased to the Codex
 // stream event: Grok's Responses stream carries the identical events, so the consumer glue is shared.
@@ -46,8 +47,8 @@ const xaiResponsesRequest = async (args: XaiRequestArgs): Promise<Response> => {
   if (!bearer) throw new Error('Not signed in to Grok.');
 
   const rawBody = buildCodexResponsesBody({
-    model: args.model, messages: args.messages,
-    reasoning: xaiReasoning(args.model, args.effort), tools: args.tools, toolChoice: args.toolChoice,
+    model: args.model, messages: args.messages, preserveSystemMessages: !!args.responses,
+    reasoning: xaiReasoning(args.model, args.effort), tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity,
   });
   const body = rewriteXaiResponsesPayload(rawBody as unknown as Record<string, unknown>, { proxy: isGrokCliProxyModel(args.model) });
 
@@ -101,10 +102,16 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
     }
     if (ev.event === 'response.output_text.delta') {
       if (typeof ev.data?.delta === 'string') { sawDelta = true; yield { type: 'text', value: ev.data.delta }; }
-    } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta') {
+    } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta' || (args.responses && ev.event === 'response.output_item.done')) {
       toolEvents.push(ev);
     } else if (ev.event === 'response.completed' || ev.event === 'response.incomplete') {
       sawTerminal = true;
+      if (args.responses) {
+        if (ev.event === 'response.incomplete') incompleteReason = 'max_output_tokens';
+        for (const item of ev.data?.response?.output ?? []) {
+          if (item.type === 'function_call') toolEvents.push({ event: 'response.output_item.done', data: { item } });
+        }
+      }
       const text = extractResponsesText(ev.data?.response);
       if (text) completed = text;
       incompleteReason = responsesIncompleteReason(ev.data?.response) ?? incompleteReason;
@@ -116,7 +123,9 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
     }
   }
   if (!sawDelta && completed) yield { type: 'text', value: completed };
-  if (incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
+  if (args.responses && (streamError || !sawTerminal)) throw new Error(streamError ?? 'Provider stream ended before completion');
+  if (args.responses && incompleteReason) yield { type: 'truncation', reason: incompleteReason === 'content_filter' ? 'content_filter' : 'max_tokens' };
+  if (!args.responses && incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
   const toolCalls = reduceResponsesToolCalls(toolEvents);
   for (const call of toolCalls) yield { type: 'toolCall', call };
   if (!sawTerminal) {
