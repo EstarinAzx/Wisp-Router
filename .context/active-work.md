@@ -18,12 +18,12 @@ Codex Wisp terminal 2.1.4 source and local Windows artifacts are complete. The a
 
 - **Done:** #209 via PR #212 (`da6bc5a`), #210 via PR #213 (`169a8c7`), #211 via [PR #214](https://github.com/EstarinAzx/Wisp-Router/pull/214) (`e23f1033602d00e4ea688c4aade8b4f233cea093`). #211 implementation: `cdebd96f6d7ae86aa26874486ccb6ba1e894b2b0`.
 - **Gate:** 1,139 core tests, 86 terminal tests, both typechecks, extension compilation, compiled/npm smoke and 21 native cases passed. Independent reviewer `8425ae9b-8678-4cc8-bd33-32b638775ca7` returned PASS after a local staging UTF-8 correction.
-- **In flight:** coordinator verification and parent #208 closure. Coordinator owns the existing relay control file; no next worker or ticket is needed.
+- **In flight:** none. Coordinator verification passed, parent #208 is closed, and the relay is stopped as completed. All workers and reviewers are archived.
 - **Pending decision:** release tag, GitHub/npm publication, global installation and extension version/publication. None was performed.
 
 ## Pick up here
 
-No further implementation ticket in this run. Coordinator `336389d0-782b-423f-bd29-5e41237dabdb` verifies the final report and closes [#208](https://github.com/EstarinAzx/Wisp-Router/issues/208). Check live `.claude/relay/codex-wisp-2.1.4.traycer.json` before acting; workers never own control updates.
+No further implementation ticket in this run. [#208](https://github.com/EstarinAzx/Wisp-Router/issues/208) and all three child tickets are closed. The stopped relay state is `.claude/relay/codex-wisp-2.1.4.traycer.json`; do not restart completed units. Next work requires a separate release instruction or a new task.
 
 Read `docs/codex-wisp.md` for supported behavior and release surfaces. Preparation evidence and exact SHA-256 inventory:
 `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/codex-wisp-2-1-4/ticket-211/index.md`.

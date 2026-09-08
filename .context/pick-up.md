@@ -11,7 +11,7 @@ Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the 
 
 **queue empty** for Codex Wisp 2.1.4: #209, #210 and #211 are closed. Final [PR #214](https://github.com/EstarinAzx/Wisp-Router/pull/214) merged as `e23f1033602d00e4ea688c4aade8b4f233cea093`. Source and local Windows binary/npm artifacts are complete; release publication and installation remain pending.
 
-Coordinator verifies the final evidence and closes parent [#208](https://github.com/EstarinAzx/Wisp-Router/issues/208). Read the live relay control file before acting; no successor worker is needed. Artifact paths/checksums and review are linked from [[active-work]].
+Coordinator verified the final artifacts and closed parent [#208](https://github.com/EstarinAzx/Wisp-Router/issues/208). The relay is stopped as completed and all workers are archived. No successor is needed. Artifact paths/checksums and review are linked from [[active-work]]; release publication remains a separate instruction.
 
 ## Landmines
 
