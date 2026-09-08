@@ -1,10 +1,22 @@
 ---
 type: happy-path
 project: wisp
-updated: 2026-07-20
+updated: 2026-09-08
 tags: [happy-path, mvd]
 ---
 # Happy Paths (MVD)
+
+## Codex Wisp — complete a native Codex task through Wisp
+- **Idea:** launch the installed Codex CLI against Wisp's existing Bridge. **Mode:** ux+beat **Actor:** Wisp user **Goal:** complete a coding task using a configured Wisp Target.
+- **Updated:** 2026-09-08
+
+```mermaid
+flowchart LR
+  selected[Provider and model selected in Wisp] -->|start Bridge| running[Bridge running]
+  running -->|run codex-wisp| session[Native Codex session]
+  session -->|submit coding task| working[Wisp routes Responses request]
+  working -->|Codex runs tools and returns results| done[Task completed in Codex]
+```
 
 ## Bridge — drive Copilot CLI through a Wisp provider
 - **Idea:** Wisp exposes a local OpenAI-compatible endpoint (the **Bridge**) so the GitHub Copilot CLI can run a coding task through any Wisp provider — including a Claude.ai or ChatGPT subscription sign-in.  **Mode:** ux+beat  **Actor:** Wisp user (developer in VS Code)  **Goal:** Copilot CLI completes a task using the user's Claude.ai subscription, no API key.

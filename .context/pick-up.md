@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-09-07
+updated: 2026-09-08
 tags: [context, pick-up]
 ---
 
@@ -9,23 +9,23 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Wisp 2.1.3 is released, verified, and installed.** Release source `12e638f`, tag `v2.1.3`; workflow `34105343246` passed all five jobs. The terminal logging, rotation, follower, and Antigravity-readiness fixes are live in the installed binary. VS Code remains 1.13.6; wisp-slot is unchanged.
+**Next: codex-wisp for 2.1.4 under [spec #208](https://github.com/EstarinAzx/Wisp-Router/issues/208).** The user authorized autonomous `vibe init` and optional relay. Planning and 14 native protocol probes passed; feature implementation is next.
 
-## Next task
+Read `.claude/relay/codex-wisp-2.1.4.traycer.json` in the main checkout before spawning. Resume its recorded run/worker; historical `.claude/relay/*.md` files are unrelated stopped Claude runs.
 
-None queued at the cut. Re-query `gh issue list --label ready-for-agent --state open`. If empty, get the user's next task; [[release-follow-ups]] preserves the remaining held candidates. The two previously held terminal bugs are shipped and should not be re-opened.
+First slice: [#209](https://github.com/EstarinAzx/Wisp-Router/issues/209), followed by #210 and #211 through native dependencies. Skip parent #208 when selecting implementation work. Worktree/probe paths are in [[active-work]]. The worktree already has scoped tracker/glossary setup changes owned by this task.
 
 ## Landmines
 
-- Keep unrelated `.context/flows.md` edits and `.context/Untitled.canvas` out of automatic commits.
-- Node's fallback downloader failed certificate-chain validation. Installation used the checksum-verified GitHub binary in `~/.wisp/bin/v2.1.3/wisp.exe` and the integrity-verified published npm archive. TLS settings were preserved. See [[active-work]] for evidence.
-- npm's ordinary version-list cache still showed 2.1.2 at the final check; the exact 2.1.3 endpoint, tarball, and fresh metadata endpoint confirm publication. The installed package is verified as 2.1.3.
-- No Wisp process or Bridge listener on 41184 remained after the checks. The next Wisp launch uses the new version.
-- The previously observed saved Codex bearer 401 remains uninvestigated. Use normal sign-in if it persists; do not copy or rotate shared tokens blindly.
-- Before another ticket branch, verify `git rev-list --left-right --count origin/main...main` is `0 0`.
+- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` outside commits.
+- Prepare reviewed source and local 2.1.4 artifacts; no release tag, npm publication, global installation or credential repair.
+- Preserve native model metadata. Assert visible output and complete output items; exit zero is insufficient.
+- Wisp 2.1.3 remains installed; VS Code remains 1.13.6. Saved bearer 401 and TLS-chain problems are held separately.
+- Context commits belong on main. Synchronize main/origin before subsequent ticket branches; do not sweep unrelated history into a squash.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
 - [[release-follow-ups]]
+- [[2026-09-08-codex-wisp-native-contract-before-implementation]]

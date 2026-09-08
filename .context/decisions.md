@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-09-07
+updated: 2026-09-08
 tags: [context, decisions]
 ---
 
@@ -10,6 +10,8 @@ tags: [context, decisions]
 Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
+
+- [[2026-09-08-codex-wisp-native-contract-before-implementation]] — 2.1.4 planning follows native Codex evidence; preserve model metadata and require visible tool/text completion.
 
 - [[2026-09-07-codex-cache-identity-and-ordered-notes]] ? Codex conversation identity and ordered late notes preserve cache continuity; missing identities remain isolated and xAI keeps its mapping (Wisp 2.1.2 / VS Code 1.13.6).
 - [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]] — **Codex models and capabilities come from the authenticated account catalogue, without model-name filters** (`6d39522`, wisp-router 2.1.1 + vsix 1.13.5). Refreshable account cache, manual entry, and dynamically discovered client version prevent the old Astra omission from recurring for new families. Claude Code max remains max when supported; Ultra is Codex orchestration and is rejected as a literal Responses effort. Live text/tool/max probes plus previous-version controls establish the discovery fix and wire translations.
