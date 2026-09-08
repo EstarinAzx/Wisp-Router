@@ -4,6 +4,23 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.8] - 2026-09-08
+
+### Added
+
+- The extension-hosted Bridge includes exact Codex model routes from the shared Routing map.
+  Provider ids and Aliases take precedence; missing Targets fail explicitly and Codex routes
+  do not use Claude's cooldown fallback. Routes update live from the shared Wisp home.
+
+### Surfaces
+
+- **VS Code: 1.13.8**, a locally prepared companion to **wisp-router 2.1.5**. The terminal
+  package supplies `codex-wisp`, additive picker Aliases and the Codex routing commands/TUI.
+- Updating the extension-hosted Bridge requires installing this VSIX and reloading the host.
+  Bundle inspection and compilation do not establish installed VS Code acceptance.
+- **wisp-slot: unchanged.** Traycer GUI integration remains **NOT VERIFIED**; this VSIX does
+  not add Wisp Aliases to Traycer. Publication and installation are separate actions.
+
 ## [1.13.7] - 2026-09-08
 
 ### Added
