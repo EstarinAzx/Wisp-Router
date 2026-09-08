@@ -17,7 +17,8 @@ import type { Provider, FamilyKey } from '@wisp/core';
 // ----------------------------------------- Route rows ----------------------------------------- //
 
 // Which Routing-map row a picker chain is editing — a fixed Family or a named Alias (#65).
-export type RouteRow = { kind: 'family'; family: FamilyKey } | { kind: 'alias'; name: string };
+export type RouteRow = { kind: 'family'; family: FamilyKey } | { kind: 'alias'; name: string } | { kind: 'codex-model'; name: string };
+export type RoutingSection = 'families' | 'codex' | 'aliases';
 
 // ----------------------------------------- Mode union ----------------------------------------- //
 
@@ -49,7 +50,7 @@ export type Mode =
   // in place (Target kept) — reached from the row's Provider picker. The families section also
   // carries the one-tap "Bind Claude subscription models" row (sign in first if needed).
   | { kind: 'routing' }
-  | { kind: 'routing-section'; section: 'families' | 'aliases' }
+  | { kind: 'routing-section'; section: RoutingSection }
   | { kind: 'alias-name' }
   | { kind: 'alias-rename'; name: string }
   | { kind: 'route-provider'; row: RouteRow }

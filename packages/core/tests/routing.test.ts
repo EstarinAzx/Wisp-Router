@@ -2,15 +2,61 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  resolveRoute, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias, EMPTY_ROUTING_MAP, type RoutingMap,
+  resolveRoute, withFamilyRoute, withAlias, withAliasRenamed, withoutAlias, withCodexModelRoute, withCooldownFallback, EMPTY_ROUTING_MAP, type RoutingMap,
 } from '../src/routing';
 import type { Provider } from '../src/catalog';
+import { parseWispConfig } from '../src/home';
+import { runSnapshotCommand } from '../src/snapshotCli';
 
 // Minimal Provider builder — the resolver only reads `id`; the rest is filler.
 const p = (id: string): Provider => ({ id, label: id, baseUrl: '', defaultModel: `default-${id}`, apiKeyEnv: '' });
 
 // A small catalog: `active` is the Active Provider in every test; the others are route targets.
 const providers = [p('active'), p('codex'), p('go'), p('anthropic')];
+
+describe('exact Codex model routes', () => {
+  const target = { providerId: 'go', model: 'pinned' };
+  const map: RoutingMap = { families: { opus: target }, aliases: [], codexModels: {
+    'gpt-future-mini': target, 'gpt-future-spark': { providerId: 'codex', model: 'spark' },
+    'claude-opus-future': target, go: target,
+  } };
+  it('preserves old stores and Codex bindings through legacy edits and snapshot/revert', () => {
+    expect(parseWispConfig('{"routing":{"families":{},"aliases":[]}}').routing).toEqual(EMPTY_ROUTING_MAP);
+    const parsed = parseWispConfig(JSON.stringify({ routing: map, future: { retained: true } }));
+    expect(parsed).toMatchObject({ routing: map, future: { retained: true } });
+    const snap = runSnapshotCommand([], map, {});
+    expect(snap.nextStore).not.toHaveProperty('gpt-future-mini');
+    const edited = withFamilyRoute(withAlias(map, providers, 'sol', target)!, providers, 'haiku', target)!;
+    expect(edited.codexModels).toEqual(map.codexModels);
+    expect(runSnapshotCommand(['revert'], edited, snap.nextStore!).nextMap?.codexModels).toEqual(map.codexModels);
+    for (const codexModels of [null, [], 'bad', { bad: null }, { bad: { providerId: 'go', model: '' } }]) {
+      expect(() => parseWispConfig(JSON.stringify({ routing: { ...map, codexModels } }))).toThrow(/routing.codexModels/);
+    }
+  });
+  it('keeps independent exact Targets between Alias and Claude family matching', () => {
+    const resolve = (name: string, current = map) => resolveRoute(current, providers, 'active', name);
+    expect(resolve('gpt-future-mini')).toEqual({ provider: providers[2], pinnedModel: 'pinned', matched: 'codex-model' });
+    expect(resolve('gpt-future-spark')?.pinnedModel).toBe('spark');
+    expect(resolve('GPT-future-mini')?.matched).toBe('active');
+    expect(resolve('go')?.matched).toBe('provider-id');
+    expect(resolve('claude-opus-future')?.matched).toBe('codex-model');
+    expect(resolve('gpt-future-mini', withAlias(map, providers, 'gpt-future-mini', { providerId: 'codex', model: 'alias' })!)?.matched).toBe('alias');
+    const cleared = withCodexModelRoute(map, providers, 'gpt-future-mini', undefined)!;
+    expect(resolve('gpt-future-mini', cleared)?.matched).toBe('active');
+    expect(cleared.codexModels?.['gpt-future-spark']).toEqual(map.codexModels?.['gpt-future-spark']);
+    const route = resolve('gpt-future-mini');
+    expect(withCooldownFallback(route, 'gpt-future-mini', providers, () => true, p => p.id === 'anthropic')).toBe(route);
+  });
+  it('refuses malformed edits, fails dangling routes, and never resolves inherited names', () => {
+    expect(withCodexModelRoute(map, providers, '', target)).toBeUndefined();
+    expect(withCodexModelRoute(map, providers, 'new', { ...target, model: '  ' })).toBeUndefined();
+    expect(withCodexModelRoute(map, providers, 'new', { ...target, providerId: 'missing' })).toBeUndefined();
+    expect(resolveRoute({ ...map, codexModels: { bad: { ...target, providerId: 'missing' } } }, providers, 'active', 'bad')).toBeUndefined();
+    expect(resolveRoute(map, providers, 'active', 'toString')?.matched).toBe('active');
+    const proto = withCodexModelRoute(map, providers, '__proto__', target)!;
+    expect(resolveRoute(proto, providers, 'active', '__proto__')?.pinnedModel).toBe('pinned');
+  });
+});
 
 // A map with every row kind populated, so precedence tests exercise real competition.
 const fullMap: RoutingMap = {

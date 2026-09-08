@@ -31,13 +31,13 @@ import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
-  FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
+  FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias, withCodexModelRoute,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
 import { fetchEffortOptions } from './modelFetch';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
-import type { Mode, RouteRow } from './modes';
+import type { Mode, RouteRow, RoutingSection } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
 import { wrapWords } from './widgets';
 import {
@@ -176,7 +176,7 @@ export const App = () => {
   // The /routing sub-screens step back one level on Esc/apply — to the SECTION they came from
   // (#79), not the palette: editing several rows in a row is the normal flow. Origin is derivable
   // (family rows → Claude Code section, alias screens → Custom), so no extra mode state.
-  const backToSection = (section: 'families' | 'aliases', message?: string) => {
+  const backToSection = (section: RoutingSection, message?: string) => {
     if (message) setStatus(message);
     setMode({ kind: 'routing-section', section });
   };
@@ -187,6 +187,7 @@ export const App = () => {
     const map = routingMap();
     const next = row.kind === 'family'
       ? withFamilyRoute(map, PROVIDERS, row.family, target)
+      : row.kind === 'codex-model' ? withCodexModelRoute(map, PROVIDERS, row.name, target)
       : withAlias(map, PROVIDERS, row.name, target);
     if (next) home.writeConfig({ routing: next });
     backToSection(sectionOf(row), next ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
@@ -199,6 +200,9 @@ export const App = () => {
       // Clearing can't be refused — withFamilyRoute only refuses a dangling Target.
       home.writeConfig({ routing: withFamilyRoute(map, PROVIDERS, row.family, undefined)! });
       backToSection('families', `${row.family} route cleared.`);
+    } else if (row.kind === 'codex-model') {
+      home.writeConfig({ routing: withCodexModelRoute(map, PROVIDERS, row.name, undefined)! });
+      backToSection('codex', `${row.name} route cleared.`);
     } else {
       home.writeConfig({ routing: withoutAlias(map, row.name) });
       backToSection('aliases', `Alias ${row.name} removed.`);

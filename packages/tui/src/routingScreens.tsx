@@ -24,7 +24,9 @@ import {
   type Provider, type RoutingMap, type FamilyKey, type Target,
 } from '@wisp/core';
 import { home } from './store';
-import type { RouteRow } from './modes';
+import type { RouteRow, RoutingSection } from './modes';
+import { useEffect, useState } from 'react';
+import { codexRoutingRows, loadCodexRoutingCatalog, type CodexRoutingCatalog } from './codexRouting';
 import { PANEL, DIM, SELECT_COLORS } from './theme';
 import { wrapWords, WrapSelect, onSubmitText, SELECT_MOUSE } from './widgets';
 
@@ -39,11 +41,13 @@ export const rowLabel = (row: RouteRow): string => (row.kind === 'family' ? row.
 const titleLabel = (row: RouteRow): string => rowLabel(row).replace(/[^\x20-\x7e]/g, '?');
 
 const rowTarget = (map: RoutingMap, row: RouteRow): Target | undefined =>
-  row.kind === 'family' ? map.families[row.family] : map.aliases.find((a) => a.name === row.name)?.target;
+  row.kind === 'family' ? map.families[row.family] : row.kind === 'codex-model'
+    ? (Object.hasOwn(map.codexModels ?? {}, row.name) ? map.codexModels![row.name] : undefined)
+    : map.aliases.find((a) => a.name === row.name)?.target;
 
 // The /routing sub-screens step back one level on Esc/apply — to the SECTION they came from
 // (#79). Origin is derivable (family rows → Claude Code section, alias screens → Custom).
-export const sectionOf = (row: RouteRow): 'families' | 'aliases' => row.kind === 'family' ? 'families' : 'aliases';
+export const sectionOf = (row: RouteRow): RoutingSection => row.kind === 'family' ? 'families' : row.kind === 'codex-model' ? 'codex' : 'aliases';
 
 // The one-tap "bind Claude subscription models" mapping: each Family route's natural Claude.ai
 // model. TUI-local data — promote to core if the side panel ever grows the same button.
@@ -63,33 +67,42 @@ export const CLAUDE_FAMILY_MODELS: Record<FamilyKey, string> = {
 // The /routing overview — two sections: Claude Code's Family routes, and the named Aliases.
 export const RoutingScreen = ({ cols, onPick }: {
   cols: number;
-  onPick: (section: 'families' | 'aliases') => void;
+  onPick: (section: RoutingSection) => void;
 }) => (
   <box {...PANEL} title="Routing map" marginTop={1} flexDirection="column">
     {/* hand-wrapped into per-line rows — opentui's own wrap garbles everything below it */}
-    {wrapWords("Points incoming model names at your Providers — Claude Code's claude-* ids via Family routes, your own names via Aliases.", cols)
+    {wrapWords("Points incoming model names at your Providers — Claude families, exact Codex models, and your own Aliases.", cols)
       .map((l, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{l}</text>)}
     <WrapSelect
       cols={cols}
       maxRows={12}
       options={[
         { name: 'Claude Code', description: `the Family routes (${FAMILY_KEYS.join(' / ')})`, value: 'families' },
+        { name: 'Codex', description: 'route each native model independently', value: 'codex' },
         { name: 'Custom', description: `your named Aliases (${routingMap().aliases.length}) + add`, value: 'aliases' },
       ]}
-      onSelect={(_i, opt) => onPick(opt.value as 'families' | 'aliases')}
+      onSelect={(_i, opt) => onPick(opt.value as RoutingSection)}
     />
   </box>
 );
 
 // One section's rows — Family routes with the one-tap bind, or Aliases with add.
 export const RoutingSectionScreen = ({ section, cols, onAddAlias, onBind, onPickRow }: {
-  section: 'families' | 'aliases';
+  section: RoutingSection;
   cols: number;
   onAddAlias: () => void;
   onBind: () => void;
   onPickRow: (row: RouteRow) => void;
-}) => (
-  <box {...PANEL} title={section === 'families' ? 'Routing — Claude Code' : 'Routing — Custom'} marginTop={1} flexDirection="column">
+}) => {
+  const [catalog, setCatalog] = useState<CodexRoutingCatalog>({ models: [], error: 'Discovering native Codex models…' });
+  useEffect(() => {
+    if (section !== 'codex') return;
+    let active = true;
+    void loadCodexRoutingCatalog().then(result => { if (active) setCatalog(result); });
+    return () => { active = false; };
+  }, [section]);
+  return <box {...PANEL} title={section === 'families' ? 'Routing — Claude Code' : section === 'codex' ? 'Routing — Codex' : 'Routing — Custom'} marginTop={1} flexDirection="column">
+    {section === 'codex' && catalog.error && wrapWords(`${catalog.error} Saved routes remain editable.`, cols).map((line, i) => <text key={i} wrapMode="none" flexShrink={0} fg={DIM}>{line}</text>)}
     {/* value encodes the row as kind:key — split at the FIRST colon, alias names may contain more */}
     {/* keyed by section so toggling families ↔ aliases can't reuse a stale selection */}
     <WrapSelect
@@ -106,7 +119,7 @@ export const RoutingSectionScreen = ({ section, cols, onAddAlias, onBind, onPick
             // never collide with a family:/alias: row key.
             { name: 'Bind Claude subscription models', description: 'route all four families to Anthropic (Claude.ai) in one go', value: ' bind' },
           ]
-        : [
+        : section === 'codex' ? codexRoutingRows(routingMap(), catalog).map(row => ({ name: row.name, description: `${row.id} — ${row.description}`, value: `codex-model:${row.id}` })) : [
             ...routingMap().aliases.map((a) => ({ name: a.name, description: `alias — ${a.target.providerId} (${a.target.model})`, value: `alias:${a.name}` })),
             { name: 'Add alias', description: 'name a new bridged model', value: 'add' },
           ]}
@@ -115,11 +128,11 @@ export const RoutingSectionScreen = ({ section, cols, onAddAlias, onBind, onPick
         if (v === 'add') { onAddAlias(); return; }
         if (v === ' bind') { onBind(); return; }
         const key = v.slice(v.indexOf(':') + 1);
-        onPickRow(v.startsWith('family:') ? { kind: 'family', family: key as FamilyKey } : { kind: 'alias', name: key });
+        onPickRow(v.startsWith('family:') ? { kind: 'family', family: key as FamilyKey } : { kind: v.startsWith('codex-model:') ? 'codex-model' : 'alias', name: key });
       }}
     />
-  </box>
-);
+  </box>;
+};
 
 // Name a new alias — precheck the Provider-id shadow rule while the name is still editable.
 export const AliasNameScreen = ({ onBack, onStatus, onNamed }: {
@@ -192,8 +205,8 @@ export const RouteProviderScreen = ({ row, cols, onClear, onRename, onPick }: {
           : []),
         ...PROVIDERS.map((p) => ({ name: p.label, description: p.id, value: p.id })),
         // A Family route is cleared, never renamed — its picker keeps clear at the bottom.
-        ...(row.kind === 'family'
-          ? [{ name: 'Clear route', description: 'family falls back to the Active Provider', value: ' clear' }]
+        ...(row.kind !== 'alias'
+          ? [{ name: 'Clear route', description: row.kind === 'family' ? 'family falls back to the Active Provider' : 'remove this binding; Alias precedence still applies', value: ' clear' }]
           : []),
       ]}
       onSelect={(_i, opt) => {

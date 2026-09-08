@@ -122,8 +122,9 @@ export const WrapSelect = ({ options, cols, maxRows, onSelect }: {
   const [idx, setIdx] = useState(0);
   const top = useRef(0); // first visible item — persisted across renders, adjusted below
   // sel clamps a stale index (options can shrink under a reused instance) — used everywhere.
-  const sel = Math.min(idx, options.length - 1);
+  const sel = Math.max(0, Math.min(idx, options.length - 1));
   useKeyboard((key) => {
+    if (!options.length) return;
     if (key.name === 'up') setIdx((options.length + sel - 1) % options.length);
     else if (key.name === 'down') setIdx((sel + 1) % options.length);
     else if (key.name === 'return' || key.name === 'enter') onSelect(sel, options[sel]);

@@ -18,6 +18,7 @@
 
 import type { AnthropicCreds, CodexCreds, XaiCreds, KimiCreds, AntigravityCreds, EffortLevel } from './catalog';
 import type { RoutingMap, SnapshotEntry, SnapshotStore } from './routing';
+import { validateCodexRoutes } from './routing';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -139,7 +140,11 @@ export const parseWispConfig = (raw: string | undefined | null): WispConfig => {
   if ('effort' in cfg && !validEffort(cfg.effort)) delete cfg.effort;
   if ('routing' in cfg) {
     const r = cfg.routing;
-    if (!(isRecord(r) && isRecord(r.families) && Array.isArray(r.aliases))) delete cfg.routing;
+    if (isRecord(r)) validateCodexRoutes(r.codexModels);
+    if (!(isRecord(r) && isRecord(r.families) && Array.isArray(r.aliases))) {
+      if (isRecord(r) && 'codexModels' in r) throw new Error('Invalid routing: Codex routes require families and aliases containers. Repair config.json.');
+      delete cfg.routing;
+    }
   }
   if ('snapshots' in cfg) {
     const cleaned = snapshotStore(cfg.snapshots);

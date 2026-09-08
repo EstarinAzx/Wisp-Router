@@ -14,6 +14,7 @@ import {
   type Provider,
 } from '@wisp/core';
 import { home, anthropicAuth, codexAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
+import { codexRoutingRows, loadCodexRoutingCatalog } from './codexRouting';
 
 // ----------------------------- Credential readiness ----------------------------- //
 
@@ -36,6 +37,15 @@ const hasCredentials = async (provider: Provider): Promise<boolean> => {
 // Keep filesystem and console effects at this outer edge; core owns every output decision.
 export const runRoutingCli = async (args: string[]): Promise<number> => {
   const map = home.readConfig().routing ?? EMPTY_ROUTING_MAP;
+  if (args.length === 1 && args[0] === 'codex') {
+    const catalog = await loadCodexRoutingCatalog();
+    if (catalog.error) console.log(`${catalog.error} Saved routes remain editable.`);
+    console.log('Codex model routes:');
+    const rows = codexRoutingRows(map, catalog);
+    for (const row of rows) console.log(`  ${row.name} (${row.id}): ${row.description}`);
+    if (!rows.length) console.log('  (none discovered or saved)');
+    return 0;
+  }
   const result = await runRoutingCommand(args, map, PROVIDERS, hasCredentials);
   if (result.nextMap) home.writeConfig({ routing: result.nextMap });
   for (const line of result.lines) console.log(line);

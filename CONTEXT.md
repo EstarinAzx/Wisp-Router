@@ -168,8 +168,8 @@ external tool ever sees your keys or sign-in tokens — they never do.
 The **Bridge**'s user-configured table deciding which **Provider** (and which of
 its models) answers a request whose model name is not a Provider id. Consulted
 after the Provider-id match and before the **Active Provider** fallback; all
-Bridge dialects share the one map. Holds two kinds of rows — four fixed **Family
-routes** and any number of user-added **Aliases** — each pointing at a
+Bridge dialects share the one map. Holds three kinds of rows — four fixed **Family
+routes**, exact **Codex model routes**, and user-added **Aliases** — each pointing at a
 **Target**. A name matching no row falls back to the **Active Provider**,
 exactly as before the map existed. _Avoid_: wildcard/pattern language — rows
 match a family or an exact name, never a user-written pattern.
@@ -191,6 +191,12 @@ list; an external tool typing the Alias gets the Target, no panel visit needed.
 An Alias may not collide with a Provider id. _Avoid_: expecting an Alias to
 appear inside Claude Code's own model menu — that menu is Claude Code's; the
 Alias is typed, then sticks.
+
+**Codex model route**:
+An exact native Codex model id in the **Routing map**, independently bound to a **Target**.
+It matches after Provider ids and Aliases, before Claude Family routes and Active fallback.
+It is not a fuzzy model family or a new Alias. Discovery lists native choices; saved routes
+remain meaningful even when their id is absent from the current catalog.
 
 **Slot**:
 A **Family route** worn as an assignable handle rather than a family match: the

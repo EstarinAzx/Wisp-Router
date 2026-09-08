@@ -12,9 +12,9 @@ let home: string;
 beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'wisp-terminal-cli-')); });
 afterEach(() => { rmSync(home, { recursive: true, force: true }); });
 
-const run = (args: string[]) => {
+const run = (args: string[], cwd = root) => {
   const result = Bun.spawnSync([process.execPath, ...args], {
-    cwd: root, env: { ...process.env, WISP_HOME: home }, timeout: 10_000,
+    cwd, env: { ...process.env, WISP_HOME: home }, timeout: 10_000,
   });
   return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
@@ -32,6 +32,79 @@ test('routing set recognizes Antigravity sign-in and still warns after sign-out'
   const signedOut = run(args);
   expect(signedOut.code).toBe(0);
   expect(signedOut.out).toContain("Provider 'antigravity' is not signed in");
+});
+
+test('Codex CLI writes preserve aliases, snapshots and unknown fields, without requiring discovery', () => {
+  const config = { future: 'keep', routing: { families: {}, aliases: [
+    { name: 'codex', target: { providerId: 'custom', model: 'legacy' } },
+  ] }, snapshots: { codex: { providerId: 'custom', model: 'old' } } };
+  writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+  for (const [name, model] of [['future-mini', 'mini'], ['future-spark', 'spark']]) {
+    expect(run([entry, 'routing', 'codex', 'set', name, `custom/${model}`]).code).toBe(0);
+  }
+  expect(run([entry, 'routing', 'set', 'sol', 'custom/alias']).code).toBe(0);
+  expect(run([entry, 'routing', 'unset', 'codex']).code).toBe(0);
+  const saved = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
+  expect(saved.future).toBe('keep');
+  expect(saved.snapshots).toEqual(config.snapshots);
+  expect(saved.routing.codexModels).toEqual({ 'future-mini': { providerId: 'custom', model: 'mini' }, 'future-spark': { providerId: 'custom', model: 'spark' } });
+  expect(run([entry, 'routing', 'codex', 'unset', 'future-mini']).code).toBe(0);
+  const before = readFileSync(join(home, 'config.json'), 'utf8');
+  expect(run([entry, 'routing', 'codex', 'set', 'future-mini', 'missing/model']).code).toBe(1);
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe(before);
+  const listed = run(['--eval', `process.env.PATH = ''; process.env.Path = ''; const { runRoutingCli } = await import('./packages/tui/src/routingCli'); await runRoutingCli(['codex']);`]);
+  expect(listed.code).toBe(0);
+  expect(listed.out).toContain('Could not find Codex');
+  expect(listed.out).toContain('future-spark');
+  expect(listed.out).toContain('custom/spark');
+});
+
+test('TUI Codex saved rows remain editable and clear/Esc return to Codex', () => {
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ routing: { families: {}, aliases: [], codexModels: { 'saved:missing': { providerId: 'custom', model: 'saved' } } } }));
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    import { readFileSync } from 'fs';
+    import { join } from 'path';
+    process.env.PATH = ''; process.env.Path = '';
+    globalThis.fetch = async () => { throw new Error('No networking in TUI navigation checks'); };
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: 100, height: 40 });
+    const keys = async (...keys) => { for (const key of keys) { await act(async () => ui.mockInput.pressKeys([key], key === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); } };
+    try {
+      await ui.renderOnce();
+      await act(async () => ui.mockInput.typeText('/routing')); await keys('RETURN');
+      assert(ui.captureCharFrame().includes('Claude Code'), ui.captureCharFrame());
+      assert(ui.captureCharFrame().includes('Codex'));
+      assert(ui.captureCharFrame().includes('Custom'));
+      await keys('ARROW_DOWN', 'RETURN');
+      await act(async () => { await new Promise(r => setTimeout(r, 30)); }); await ui.renderOnce();
+      assert(ui.captureCharFrame().includes('saved:missing'));
+      await keys('RETURN');
+      await keys('ESCAPE');
+      assert(ui.captureCharFrame().includes('saved:missing'));
+      await keys('RETURN');
+      assert(ui.captureCharFrame().includes('via...'), ui.captureCharFrame());
+      await keys('ARROW_UP', 'ARROW_UP', 'RETURN'); // Custom is the last Provider, before Clear.
+      await act(async () => { await new Promise(r => setTimeout(r, 30)); }); await ui.renderOnce();
+      assert(ui.captureCharFrame().includes('type an id'), ui.captureCharFrame());
+      await act(async () => ui.mockInput.typeText('edited-model')); await keys('RETURN');
+      assert(ui.captureCharFrame().includes('saved:missing'), ui.captureCharFrame());
+      assert.equal(JSON.parse(readFileSync(join(process.env.WISP_HOME, 'config.json'), 'utf8')).routing.codexModels['saved:missing'].model, 'edited-model');
+      await keys('RETURN');
+      await keys('ARROW_UP');
+      assert(ui.captureCharFrame().includes('Clear route'), ui.captureCharFrame());
+      await keys('RETURN');
+      assert(ui.captureCharFrame().includes('route cleared'), ui.captureCharFrame());
+      assert(!JSON.parse(readFileSync(join(process.env.WISP_HOME, 'config.json'), 'utf8')).routing.codexModels['saved:missing']);
+      await keys('ARROW_DOWN', 'RETURN'); // Empty discovery must be safe to navigate.
+      await keys('ESCAPE');
+      assert(ui.captureCharFrame().includes('Claude Code'));
+    } finally { await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe('');
+  expect(result.code).toBe(0);
 });
 
 test('the TUI Bridge persists its log once it starts, preserving the previous run', () => {

@@ -29,16 +29,34 @@ export type FamilyKey = 'opus' | 'sonnet' | 'haiku' | 'fable';
 export type RoutingMap = {
   families: { [K in FamilyKey]?: Target };
   aliases: Array<{ name: string; target: Target }>;
+  codexModels?: Record<string, Target>;
 };
 
 export type RouteMatch = {
   provider: Provider;
   pinnedModel?: string; // set on alias/family hits only — overrides the Provider's panel model
-  matched: 'provider-id' | 'alias' | 'family' | 'active';
+  matched: 'provider-id' | 'alias' | 'codex-model' | 'family' | 'active';
 };
 
 // The default map: nothing routed, everything falls back to the Active Provider (today's behavior).
 export const EMPTY_ROUTING_MAP: RoutingMap = { families: {}, aliases: [] };
+
+const validRouteName = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0 && !/[\x00-\x1f\x7f]/.test(value);
+const validTarget = (value: unknown): value is Target => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const target = value as Target;
+  return validRouteName(target.providerId) && validRouteName(target.model);
+};
+
+// Never drop a malformed explicit binding and silently send its traffic to the Active Provider.
+export const validateCodexRoutes = (routes: unknown): void => {
+  if (routes === undefined) return;
+  if (!routes || typeof routes !== 'object' || Array.isArray(routes)
+    || Object.entries(routes).some(([name, target]) => !validRouteName(name) || !validTarget(target))) {
+    throw new Error('Invalid routing.codexModels: expected model ids mapped to nonempty Provider/model Targets. Repair config.json.');
+  }
+};
 
 // Snapshot store (#127): what each held row pointed at when it was snapshotted — a Target, or null
 // for a Family route that was unset. Keyed by row name (Family key or Alias name). Presence = held.
@@ -66,7 +84,7 @@ export const resolveRoute = (
   const byId = (id: string): Provider | undefined => providers.find((p) => p.id === id);
 
   // A Target resolves to a match only if its Provider exists — a dangling id is a loud undefined.
-  const fromTarget = (target: Target, matched: 'alias' | 'family'): RouteMatch | undefined => {
+  const fromTarget = (target: Target, matched: 'alias' | 'codex-model' | 'family'): RouteMatch | undefined => {
     const provider = byId(target.providerId);
     return provider && { provider, pinnedModel: target.model, matched };
   };
@@ -76,6 +94,11 @@ export const resolveRoute = (
 
   const alias = map.aliases.find((a) => a.name === requestedModel);
   if (alias) return fromTarget(alias.target, 'alias');
+
+  validateCodexRoutes(map.codexModels);
+  if (map.codexModels && Object.prototype.hasOwnProperty.call(map.codexModels, requestedModel)) {
+    return fromTarget(map.codexModels[requestedModel], 'codex-model');
+  }
 
   // Family fuzzy fires only on claude-* ids: 'claude-opus-4-8', 'claude-3-5-sonnet-20241022', … — a
   // bare family word ('opus-magnum') is NOT a bridged Claude id and falls through to Active.
@@ -243,6 +266,17 @@ export const withCooldownFallback = (
 
 // Pure map edits (#65) — each returns the next map, or undefined when the edit is refused. Both
 // faces persist only a returned map, so a malformed edit can never write a broken route.
+
+// Set or clear one exact Codex route without changing any Alias or Family binding.
+export const withCodexModelRoute = (
+  map: RoutingMap, providers: Provider[], model: string, target: Target | undefined,
+): RoutingMap | undefined => {
+  if (!validRouteName(model) || (target !== undefined && (!validTarget(target) || !providers.some(p => p.id === target.providerId)))) return undefined;
+  const codexModels = { ...map.codexModels };
+  if (target === undefined) delete codexModels[model];
+  else Object.defineProperty(codexModels, model, { value: target, enumerable: true, configurable: true, writable: true });
+  return { ...map, codexModels };
+};
 
 // Set or clear one Family route. Refused when the Target names a Provider outside the catalog.
 export const withFamilyRoute = (

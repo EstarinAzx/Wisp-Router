@@ -41,7 +41,7 @@ const toolCall = (res: ServerResponse, name: string, args: unknown, index: numbe
   res.end('data: [DONE]\n\n');
 };
 type Step = { tool: string; args: unknown };
-type Case = { name: string; model?: string; steps: Step[]; followup?: boolean; dispatch?: boolean; vision?: boolean; alias?: boolean; knownCaps?: boolean; effort?: string; rejected?: boolean };
+type Case = { name: string; model?: string; steps: Step[]; followup?: boolean; dispatch?: boolean; vision?: boolean; alias?: boolean; route?: boolean; liveEdit?: boolean; knownCaps?: boolean; effort?: string; rejected?: boolean };
 const cases: Case[] = [
   { name: 'default-text', steps: [], followup: true },
   { name: 'vision-followup', steps: [], followup: true, vision: true },
@@ -60,6 +60,11 @@ cases.push(
   { name: 'alias-image-effort', model: 'wisp-image-alias', alias: true, knownCaps: true, vision: true, effort:'high', steps: [{tool:'get_goal (function).',args:{}}], followup:true },
   { name: 'alias-collision', model: 'gpt-6-astra', alias: true, steps: [{tool:'get_goal (function).',args:{}}] },
   { name: 'alias-effort-rejection', model: 'wisp-unknown-alias', alias: true, effort:'max', rejected:true, steps:[] },
+  { name: 'route-one', model: 'gpt-5.6-sol', route: true, steps: [{tool:'get_goal (function).',args:{}}] },
+  { name: 'route-two-image-effort', model: 'gpt-6-astra', route: true, knownCaps: true, vision: true, effort: 'high', followup: true, steps: [{tool:'get_goal (function).',args:{}}] },
+  { name: 'route-live-edit', model: 'gpt-5.6-sol', route: true, liveEdit: true, steps: [{tool:'get_goal (function).',args:{}}] },
+  { name: 'route-alias-collision', model: 'gpt-6-astra', route: true, alias: true, steps: [{tool:'get_goal (function).',args:{}}] },
+  { name: 'route-effort-rejection', model: 'gpt-5.6-sol', route: true, effort:'max', rejected:true, steps:[] },
 );
 assert(requested.every(name => cases.some(c => c.name === name)), 'Unknown case name');
 const selected = cases.filter(c => requested.length === 0 || requested.includes(c.name));
@@ -81,6 +86,7 @@ const isolated = mkdtempSync(join(tmpdir(), 'wisp-native-%literal%-'));
 save('environment.json', { version: version.stdout.trim(), platform: process.platform, arch: process.arch, runtime, installed, isolated, packaged, childPath: env.PATH ?? env.Path });
 
 let current: Case, seen: any[] = [], routeLog: string[] = [], serverErrors: string[] = [], proxyHits = 0, blockedExternalConnects = 0;
+let routingFile: string | undefined;
 const proxyRequests: unknown[] = [];
 const proxy = createServer((req, res) => { proxyHits++; proxyRequests.push({ method: req.method, url: req.url }); res.writeHead(502); res.end('External networking is disabled by this check.'); });
 proxy.on('connect', (req, socket) => {
@@ -98,6 +104,11 @@ const upstream = createServer(async (req, res) => {
     save(`${current.name}-upstream.json`, seen);
     const step = current.steps[seen.length - 1];
     if (!step) return answer(res, `NATIVE_${current.name}_VISIBLE_FINAL`);
+    if (current.liveEdit && seen.length === 1) {
+      const config = JSON.parse(readFileSync(routingFile!, 'utf8'));
+      config.routing.codexModels[current.model!].model = 'fixture-route-edited';
+      writeFileSync(routingFile!, JSON.stringify(config));
+    }
     const tool = body.tools.find((t: any) => t.function.description.startsWith(step.tool));
     assert(tool, `Missing native tool declaration: ${step.tool}`);
     toolCall(res, tool.function.name, step.args, seen.length);
@@ -113,7 +124,10 @@ const provider = { id: 'native-fixture', label: 'Deterministic local fixture', b
 // The local Chat Completions fixture implements the advertised image/effort features. Known
 // capabilities come from a synthetic Wisp account cache; no real Codex account is contacted.
 const aliasProvider = () => current.knownCaps ? 'codex' : 'custom';
-const routing = () => ({families:{},aliases:current.alias ? [{name:current.model!,target:{providerId:aliasProvider(),model:'fixture-alias-backend'}}] : []});
+const routing = () => routingFile ? JSON.parse(readFileSync(routingFile, 'utf8')).routing : ({families:{},aliases:current.alias ? [{name:current.model!,target:{providerId:aliasProvider(),model:'fixture-alias-backend'}}] : [],
+  ...(current.route ? { codexModels: { 'gpt-5.6-sol': { providerId: 'custom', model: 'fixture-route-one' }, 'gpt-6-astra': { providerId: 'codex', model: 'fixture-route-two' } } } : {}),
+});
+const pinnedModel = () => current.alias ? 'fixture-alias-backend' : current.route ? (current.model === 'gpt-6-astra' ? 'fixture-route-two' : 'fixture-route-one') : 'fixture-backend';
 const bridge = createBridgeServer({ providers: [provider,{...provider,id:'custom'},{...provider,id:'codex'}], modelMap: () => ({}), customBaseUrl: () => '', keyFor: async () => 'synthetic-upstream',
   clientFor: async () => new OpenAI({ apiKey: 'synthetic-upstream', baseURL: provider.baseUrl, maxRetries: 0 }),
   codexSignedIn: async () => false, codexCreds: async () => undefined, anthropicSignedIn: async () => false, anthropicCreds: async () => undefined,
@@ -185,6 +199,7 @@ try {
   for (current of selected) {
     const started = Date.now();
     seen = []; routeLog = []; serverErrors = [];
+    routingFile = undefined;
     const folder = join(isolated, current.name), workspace = join(folder, 'workspace'), codexHome = join(folder, 'codex'), wispHome = join(folder, 'wisp');
     for (const dir of [workspace, codexHome, wispHome]) mkdirSync(dir, { recursive: true });
     const poison = `http://127.0.0.1:${proxyPort}/poison`;
@@ -196,11 +211,12 @@ try {
       const scope = createHash('sha256').update('https://chatgpt.com/backend-api/codex\nfixture-account').digest('hex');
       mkdirSync(join(wispHome,'cache'));
       writeFileSync(join(wispHome,'cache',`codex-${scope}.json`),JSON.stringify({schema:1,fetchedAt:Date.now(),clientVersion:'0.153.4',models:[
-        {id:'fixture-alias-backend',name:'Fixture backend',visible:true,inputModalities:['text','image'],contextWindow:65536,reasoningEfforts:['high'],defaultEffort:'high'},
+        {id:pinnedModel(),name:'Fixture backend',visible:true,inputModalities:['text','image'],contextWindow:65536,reasoningEfforts:['high'],defaultEffort:'high'},
       ]}));
     }
     writeFileSync(join(codexHome, 'config.toml'), config); writeFileSync(join(codexHome, 'auth.json'), auth);
     writeFileSync(join(wispHome, 'config.json'), wispConfig); writeFileSync(join(wispHome, 'auth.json'), wispAuth);
+    routingFile = join(wispHome, 'config.json');
     const childEnv = { ...env, HOME: folder, USERPROFILE: folder, CODEX_HOME: codexHome, WISP_HOME: wispHome,
       WISP_CODEX_BRIDGE_SECRET: 'synthetic-stale', WRONG_TOKEN: 'synthetic-wrong',
       HTTP_PROXY: `http://127.0.0.1:${proxyPort}`, HTTPS_PROXY: `http://127.0.0.1:${proxyPort}`,
@@ -228,9 +244,10 @@ try {
       assert.equal(seen.length, current.steps.length + 1, 'Unexpected number of upstream turns');
       assert.deepEqual(serverErrors, []);
       assert.equal(proxyHits, 0, 'Proxy or inherited hostile endpoint received a request');
-      assert(routeLog.some(line => line.includes(`'${current.model ?? 'gpt-6-astra'}' -> ${current.alias ? aliasProvider() : 'native-fixture'}`)), 'Native model selection did not survive the launcher');
-      assert(seen.every(body => body.model === (current.alias ? 'fixture-alias-backend' : 'fixture-backend')), 'Pinned/Active Provider model routing changed');
-      if (current.alias) assert(seen.every(body => body.reasoning_effort === (current.knownCaps ? 'high' : undefined)), 'Alias effort metadata does not match the upstream request');
+      assert(routeLog.some(line => line.includes(`'${current.model ?? 'gpt-6-astra'}' -> ${current.alias || current.route ? aliasProvider() : 'native-fixture'}`)), 'Native model selection did not survive the launcher');
+      assert(seen.every((body, index) => body.model === (current.liveEdit && index > 0 ? 'fixture-route-edited' : pinnedModel())), 'Pinned/Active Provider model routing changed');
+      if (current.route && !current.alias) assert(routeLog.some(line => line.includes('route codex-model')), 'Wrong match category');
+      if (current.alias || current.route) assert(seen.every(body => body.reasoning_effort === (current.knownCaps ? 'high' : undefined)), 'Target effort metadata does not match the upstream request');
       if (current.vision) assert(seen[0].messages.some((m: any) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p: any) => p.type === 'image_url' && p.image_url.url.startsWith('data:image/png;base64,'))), 'Native attached image lost');
       assert(seen.every(body => body.tools.every((t: any) => !t.function.description.startsWith('web_search '))), 'Hosted search was declared');
       if (!current.model) assert(seen.every(body => body.parallel_tool_calls === false), 'Default model false parallelism lost');
@@ -261,20 +278,22 @@ try {
         if (current.vision) assert(history.includes('data:image/png;base64,'), 'Native image lost on resumed turn');
       }
       }
-      if (current.alias && !current.rejected) {
+      if ((current.alias || current.route) && !current.rejected) {
         const models = await listModels(workspace,childEnv);
         save(`${current.name}-model-list.json`,models);
         assert(models.some(m => m.id === 'gpt-5.6-sol'),'Native choices disappeared');
         const aliases = models.filter(m => m.id === current.model);
         assert.equal(aliases.length,1,'Alias missing or collision duplicated');
-        assert(aliases[0].description.includes('fixture-alias-backend'),'Pinned Target description missing');
+        assert(aliases[0].description.includes(current.liveEdit ? 'fixture-route-edited' : pinnedModel()),'Pinned Target description missing after relaunch');
         assert.deepEqual(aliases[0].supportedReasoningEfforts.map((e:any) => e.reasoningEffort),current.knownCaps ? ['high'] : []);
         assert.deepEqual(aliases[0].inputModalities,current.knownCaps ? ['text','image'] : ['text']);
         assert.deepEqual(aliases[0].serviceTiers,[]);
       }
       assert.equal(readFileSync(join(codexHome, 'config.toml'), 'utf8'), config);
       assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), auth);
-      assert.equal(readFileSync(join(wispHome, 'config.json'), 'utf8'), wispConfig);
+      const expectedConfig = JSON.parse(wispConfig);
+      if (current.liveEdit) expectedConfig.routing.codexModels[current.model!].model = 'fixture-route-edited';
+      assert.equal(readFileSync(join(wispHome, 'config.json'), 'utf8'), JSON.stringify(expectedConfig));
       assert.equal(readFileSync(join(wispHome, 'auth.json'), 'utf8'), wispAuth);
     } catch (err) { failure = String(err); }
     const report = { case: current.name, passed: !failure, seconds: Math.round((Date.now() - started) / 10) / 100, upstreamTurns: seen.length, childPid: result.pid, proxyHits, blockedExternalConnects, ...(failure ? { failure } : {}) };

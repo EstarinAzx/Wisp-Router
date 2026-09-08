@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
-  PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps,
+  PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
   anthropicThinkingEffort, xaiReasoning,
   type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
@@ -95,6 +95,19 @@ export const mergeAliasCatalog = (
   providers: Provider[] = PROVIDERS,
 ): NativeCatalog => {
   const models = new Map(catalog.models.map(m => [m.slug, m]));
+  validateCodexRoutes(config.routing?.codexModels);
+  for (const [name, target] of Object.entries(config.routing?.codexModels ?? {})) {
+    // These rows lose to Provider ids and Aliases at request time too.
+    if (providers.some(p => p.id === name) || config.routing?.aliases.some(a => a.name === name)) continue;
+    const provider = providers.find(p => p.id === target.providerId);
+    if (!provider) throw new Error('Invalid Wisp Codex route Target. Repair the routing map before launching Codex.');
+    const native = models.get(name);
+    if (!native) continue; // Saved missing rows stay editable, but are not invented native picker choices.
+    const caps = capabilities(target);
+    models.set(name, { ...aliasDescriptor(name, `Wisp Codex route → ${provider.label} / ${target.model}. ${caps ? 'Capabilities limited to Target metadata and the Bridge.' : 'Capabilities unknown: text only; no advertised effort or context limit.'}`, caps),
+      display_name: native.display_name ?? name, visibility: native.visibility, priority: native.priority,
+    });
+  }
   const names = new Set<string>();
   for (const { name, target } of config.routing?.aliases ?? []) {
     const provider = providers.find(p => p.id === target.providerId);
@@ -110,7 +123,7 @@ export const mergeAliasCatalog = (
 };
 
 export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth): Promise<(target: Target) => TargetCapabilities | undefined> => {
-  const targets = config.routing?.aliases.map(a => a.target) ?? [];
+  const targets = [...(config.routing?.aliases.map(a => a.target) ?? []), ...Object.values(config.routing?.codexModels ?? {})];
   const keyed = targets.some(t => PROVIDERS.find(p => p.id === t.providerId)?.catalogKey || ['anthropic', 'xai'].includes(t.providerId));
   const [publicCatalog, codex] = await Promise.all([
     keyed ? getModelsDevCatalog(AbortSignal.timeout(4000)) : undefined,
