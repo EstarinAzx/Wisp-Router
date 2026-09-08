@@ -37,6 +37,9 @@ if (process.argv[2] === 'serve') {
   // Drop the dispatch token so the launcher's verbatim argv contract (argv.slice(2) → claude) holds.
   process.argv.splice(2, 1);
   await import('./claude-wisp');
+} else if (process.argv[2] === 'codex-wisp') {
+  const { runCodexWisp } = await import('./codex-wisp');
+  process.exitCode = await runCodexWisp(process.argv.slice(3));
 } else {
   const { createCliRenderer } = await import('@opentui/core');
   const { createRoot } = await import('@opentui/react');

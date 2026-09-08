@@ -1,3 +1,4 @@
+import type { BridgeChatRequest } from './bridge';
 // ----------------- codexClient.ts — Wisp: Codex Responses request + SSE→text/tool calls ----------------- //
 
 /*
@@ -26,7 +27,7 @@ type CodexMessage = { role: 'system' | 'user' | 'assistant'; content: string; im
 // onQuota (#171): a side channel for the response's utilization headers. NOT a stream event — quota is
 // telemetry, carries no wire content, and must not widen the union every door narrows on. Fires once per
 // request, the moment the head lands, and only when the backend actually reported meters.
-type CodexRequestArgs = { creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; modelInfo?: CodexModelInfo; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; sessionId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
+type CodexRequestArgs = { responses?: BridgeChatRequest['responses']; creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; modelInfo?: CodexModelInfo; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; sessionId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What codexStream yields: an answer-text fragment, a fully-assembled tool call (emitted once the stream
 // ends), or the turn's real token usage (#165, off the terminal frame). The native-chat consumer maps the
@@ -35,7 +36,8 @@ type CodexRequestArgs = { creds: CodexCreds; baseUrl: string; model: string; mes
 export type CodexStreamEvent =
   | { type: 'text'; value: string }
   | { type: 'toolCall'; call: AssembledToolCall }
-  | { type: 'usage'; usage: BridgeUsage };
+  | { type: 'usage'; usage: BridgeUsage }
+  | { type: 'truncation'; reason: 'max_tokens' | 'content_filter' | 'refusal' };
 
 // ----------------------------- Request ----------------------------- //
 
@@ -64,10 +66,11 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
 
   const info = args.modelInfo ?? (await codexCatalog.get(args)).models.find((m) => m.id === args.model);
   args.signal?.throwIfAborted();
+  const reasoning = codexReasoning(args.model, args.effort, info);
   const res = await fetch(`${args.baseUrl}/responses`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: codexReasoning(args.model, args.effort, info), tools: args.tools, toolChoice: args.toolChoice, preserveSystemMessages: true })),
+    body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: reasoning && { ...reasoning, ...(args.responses?.context ? { context: args.responses.context } : {}) }, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -160,10 +163,16 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
     }
     if (ev.event === 'response.output_text.delta') {
       if (typeof ev.data?.delta === 'string') { sawDelta = true; yield { type: 'text', value: ev.data.delta }; }
-    } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta') {
+    } else if (ev.event === 'response.output_item.added' || ev.event === 'response.function_call_arguments.delta' || (args.responses && ev.event === 'response.output_item.done')) {
       toolEvents.push(ev);
     } else if (ev.event === 'response.completed' || ev.event === 'response.incomplete') {
       sawTerminal = true;
+      if (args.responses) {
+        if (ev.event === 'response.incomplete') incompleteReason = 'max_output_tokens';
+        for (const item of ev.data?.response?.output ?? []) {
+          if (item.type === 'function_call') toolEvents.push({ event: 'response.output_item.done', data: { item } });
+        }
+      }
       const text = extractResponsesText(ev.data?.response);
       if (text) completed = text;
       // Covers both wire shapes: response.incomplete, and response.completed carrying incomplete_details.reason.
@@ -179,7 +188,9 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
     }
   }
   if (!sawDelta && completed) yield { type: 'text', value: completed };
-  if (incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
+  if (args.responses && (streamError || !sawTerminal)) throw new Error(streamError ?? 'Provider stream ended before completion');
+  if (args.responses && incompleteReason) yield { type: 'truncation', reason: incompleteReason === 'content_filter' ? 'content_filter' : 'max_tokens' };
+  if (!args.responses && incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
   const toolCalls = reduceResponsesToolCalls(toolEvents);
   for (const call of toolCalls) yield { type: 'toolCall', call };
   if (!sawTerminal) {

@@ -19,6 +19,7 @@ export * from './snapshotCli';
 export * from './discoveryCli';
 export * from './bridge';
 export * from './bridgeAnthropic';
+export * from './bridgeResponses';
 export * from './bridgeServer';
 export * from './modelsDev';
 export * from './codexClient';

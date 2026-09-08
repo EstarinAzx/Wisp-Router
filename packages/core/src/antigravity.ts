@@ -968,8 +968,9 @@ const antigravityUsage = (metadata: unknown): BridgeUsage | undefined => {
  * THE BINDING RULE: `call.id` is the upstream's own functionCall.id, passed through untouched — absent
  * upstream means an EMPTY id here, never a minted or content-hashed one.
  */
-export const antigravityStreamEvents = async function* (upstream: AsyncIterable<unknown>): AsyncGenerator<BridgeStreamEvent> {
+export const antigravityStreamEvents = async function* (upstream: AsyncIterable<unknown>, strictCompletion = false): AsyncGenerator<BridgeStreamEvent> {
   const pendingCalls: { id: string; name: string; argsJson: string }[] = [];
+  let terminal = false;
 
   for await (const raw of upstream) {
     if (!isObj(raw)) continue;
@@ -1004,11 +1005,13 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
 
     // Terminal chunk only. A chunk with no finishReason is mid-stream, and its usage copy is dropped.
     if (text(candidate.finishReason)) {
+      terminal = true;
       const usage = antigravityUsage(payload.usageMetadata);
       if (usage) yield { type: 'usage', usage };
     }
   }
 
+  if (strictCompletion && !terminal) throw new Error('Antigravity stream ended before completion');
   for (const call of pendingCalls) yield { type: 'tool_call', call };
 };
 

@@ -22,7 +22,7 @@ import { sseBlocks } from './codexClient';
 
 // onQuota (#171): the side channel for the response's utilization headers — see the codexClient twin. Quota
 // is telemetry, not wire content, so it deliberately does NOT join AnthropicStreamEvent.
-type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
+type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; strictCompletion?: boolean; parallelToolCalls?: boolean; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
@@ -174,7 +174,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
     headers: anthropicMessagesHeaders(bearer, args.stream, args.model),
-    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, previousMessageId: args.previousMessageId, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
+    body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.parallelToolCalls, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, previousMessageId: args.previousMessageId, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
     signal: args.signal,
   });
   if (!res.ok) {
@@ -294,6 +294,7 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
       sawTerminal = true;
     }
   }
+  if (args.strictCompletion && (!sawTerminal || openTools.size)) throw new Error('Anthropic stream ended before completion');
   // Dropped-socket fallback: a tool block whose stop frame never arrived still folds at stream end.
   for (const call of openTools.values()) {
     if (call.name) { toolCount++; yield { type: 'toolCall', call }; }

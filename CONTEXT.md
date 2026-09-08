@@ -147,9 +147,10 @@ delete lines), using the **whole file** as context.
 
 **Bridge**:
 A local endpoint Wisp can expose so tools **outside** VS Code reach the
-**Provider catalog** as if it were one ordinary backend. It speaks two
-dialects — **OpenAI** (`/v1/chat/completions`, e.g. the GitHub Copilot CLI) and
-**Anthropic Messages** (`/v1/messages`, e.g. Claude Code) — through the same
+**Provider catalog** as if it were one ordinary backend. It speaks three
+dialects — **OpenAI Chat Completions** (`/v1/chat/completions`, e.g. the GitHub Copilot CLI),
+**Anthropic Messages** (`/v1/messages`, e.g. Claude Code), and the native Codex
+subset of **Responses** (`/v1/responses`) — through the same
 listener and secret. It faces **outward** — the mirror of the **LM Chat
 Provider**, which surfaces Wisp's models *inward* into VS Code's own chat. An
 external tool names a **Provider**; Wisp answers with that Provider's selected
@@ -166,7 +167,7 @@ external tool ever sees your keys or sign-in tokens — they never do.
 **Routing map**:
 The **Bridge**'s user-configured table deciding which **Provider** (and which of
 its models) answers a request whose model name is not a Provider id. Consulted
-after the Provider-id match and before the **Active Provider** fallback; both
+after the Provider-id match and before the **Active Provider** fallback; all
 Bridge dialects share the one map. Holds two kinds of rows — four fixed **Family
 routes** and any number of user-added **Aliases** — each pointing at a
 **Target**. A name matching no row falls back to the **Active Provider**,
@@ -248,7 +249,7 @@ readers.
 
 **wisp serve**:
 The headless way to run the **Bridge** — the same Wisp process with no screen
-drawn. After the split the Bridge (both dialects) lives with the TUI side, never
+drawn. After the split the Bridge (all dialects) lives with the TUI side, never
 the extension. _Avoid_: calling it a daemon — nothing detaches, auto-starts, or
 manages pids; it is just Wisp running without its face.
 
@@ -257,6 +258,10 @@ The launcher command that starts Claude Code pre-wired to the **Bridge**: it set
 the connection environment on the child process only and passes every argument
 through verbatim. _Avoid_: implying it configures anything — it launches; the
 Bridge must already be up (it fails friendly, never auto-starts one).
+
+**codex-wisp**:
+The launcher that starts the native Codex CLI as a client of Wisp's **Bridge**.
+_Avoid_: confusing it with the **Codex Provider**, which is an upstream backend.
 
 ## Relationships
 

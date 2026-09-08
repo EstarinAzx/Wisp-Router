@@ -281,6 +281,7 @@ export const isFableFamilyModel = (model: string): boolean => /fable-5|mythos-5/
 export const buildAnthropicMessagesBody = (args: {
   model: string; messages: AnthropicMessage[]; maxTokens: number; version: string; stream?: boolean;
   tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; cacheTtl?: '5m' | '1h';
+  parallelToolCalls?: boolean;
   // #139: volatile system tail (mid-session <system-reminder> appends) — emitted as a final UNMARKED
   // system block, after the breakpoint, so its churn never busts the stable tools+system prefix.
   systemSuffix?: string;
@@ -449,7 +450,7 @@ export const buildAnthropicMessagesBody = (args: {
     system,
     messages,
     ...(args.stream ? { stream: true as const } : {}),
-    ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: { type: args.toolChoice ?? 'auto' } } : {}),
+    ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: { type: args.toolChoice ?? 'auto', ...(args.parallelToolCalls !== undefined ? { disable_parallel_tool_use: !args.parallelToolCalls } : {}) } } : {}),
     ...(args.userId ? { metadata: { user_id: args.userId } } : {}),
     // #156: rides on every request — the beta header opts in, this field names the compare target. Probe
     // on #152 confirmed the OAuth backend accepts it (null included) and answers on message_start.
