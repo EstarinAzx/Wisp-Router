@@ -8,45 +8,45 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-09-08 by GPT-6 Astra / Codex (auto)_
-_At source commit: `169a8c7` (#210 merged; 2.1.3 remains installed)_
+_At source commit: `e23f103` (#211 merged; 2.1.3 remains installed)_
 
 ## Current focus
 
-Build **codex-wisp for terminal 2.1.4** through the user's autonomous `vibe init`. [Spec #208](https://github.com/EstarinAzx/Wisp-Router/issues/208) is authoritative. Native source and content/Provider fidelity are complete; packaging is next.
+Codex Wisp terminal 2.1.4 source and local Windows artifacts are complete. The assigned feature queue is empty: #209, #210 and #211 are closed. Publication remains pending.
 
 ## State
 
-- **In flight:** self-paced Traycer relay, one ticket per fresh worker. Coordinator owns `D:/.claude/claude projects/autocomplete_extension/.claude/relay/codex-wisp-2.1.4.traycer.json`; check live assignment before starting.
-- **Done:** #209 via PR #212 (`da6bc5a`); #210 via [PR #213](https://github.com/EstarinAzx/Wisp-Router/pull/213), squash `169a8c7`. Worktree: `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/ticket-codex-wisp-2-1-4`, clean on `ticket/210-codex-wisp-fidelity` at implementation `e844649`. Create the next branch from updated `origin/main`.
-- **Gate:** 1,139 core tests, 85 terminal tests, both typechecks, extension build and seven native cases pass. Reviewer `70d14d64-cd04-42be-9d7c-7b6770fbbd2b` returned clean after four reproduced fidelity fixes.
-- **Blocked:** no implementation blocker. Publication/global installation remain separate decisions.
+- **Done:** #209 via PR #212 (`da6bc5a`), #210 via PR #213 (`169a8c7`), #211 via [PR #214](https://github.com/EstarinAzx/Wisp-Router/pull/214) (`e23f1033602d00e4ea688c4aade8b4f233cea093`). #211 implementation: `cdebd96f6d7ae86aa26874486ccb6ba1e894b2b0`.
+- **Gate:** 1,139 core tests, 86 terminal tests, both typechecks, extension compilation, compiled/npm smoke and 21 native cases passed. Independent reviewer `8425ae9b-8678-4cc8-bd33-32b638775ca7` returned PASS after a local staging UTF-8 correction.
+- **In flight:** coordinator verification and parent #208 closure. Coordinator owns the existing relay control file; no next worker or ticket is needed.
+- **Pending decision:** release tag, GitHub/npm publication, global installation and extension version/publication. None was performed.
 
 ## Pick up here
 
-Read live relay state, then [#211: package and verify](https://github.com/EstarinAzx/Wisp-Router/issues/211), `docs/codex-wisp.md` and parent #208. Do only #211 after coordinator dispatch; parent #208 is not an implementation ticket. Packaging/version changes have not started.
+No further implementation ticket in this run. Coordinator `336389d0-782b-423f-bd29-5e41237dabdb` verifies the final report and closes [#208](https://github.com/EstarinAzx/Wisp-Router/issues/208). Check live `.claude/relay/codex-wisp-2.1.4.traycer.json` before acting; workers never own control updates.
 
-Run artifact: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/codex-wisp-2-1-4/index.md`; children `ticket-210` and `review-210` hold evidence.
+Read `docs/codex-wisp.md` for supported behavior and release surfaces. Preparation evidence and exact SHA-256 inventory:
+`C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/codex-wisp-2-1-4/ticket-211/index.md`.
+Independent review is sibling `review-211/index.md`.
 
-Final native report: worktree `out/codex-native-2026-09-08T01-38-16-582Z/REPORT.md`. Reproduce with `bun packages/tui/tests/nativeCodex.check.ts`. Actual `codex-cli 0.153.4`, Windows x64, source launcher/Bridge, isolated synthetic homes and local keyed upstreams. HTTP tests also cover local Anthropic/Codex wires. No live Provider or POSIX claim.
+Retained worktree: `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/ticket-codex-wisp-2-1-4`, clean on `ticket/211-codex-wisp-packaging`. Artifacts live under its `out/release-2.1.4/`: standalone Windows executable, thin npm archive and Windows platform archive. Preserve this directory for separate release review.
 
 ## Skills for next session
 
-- `relay` — recorded Traycer assignment; historical Claude relay files are unrelated.
-- `traycer-implement`, `superpowers:test-driven-development` — scoped implementation.
-- `traycer-review` — independent review before merging.
-- `preset wrap-up` — ticket-loop's gateless handoff; context commits on main.
+- `preset pick-up` — rehydrate this handoff and verify live state.
+- `verification-before-completion` — verify artifacts and the authorized release scope before any future publication.
 
 ## Open questions
 
-No answer required for #211. Publication/installation remain pending. No confirmed quality bar exists, so no gauntlet is chained.
+Release publication and installation need a separate instruction. A rebuilt extension includes new shared core; its unchanged 1.13.6 manifest would yield different code under the same version. Decide its release version before publishing an extension.
 
 ## Recent context
 
-- Unknown-model fallback requires `reasoning.summary: "auto"`; non-auto modes and explicit service tiers are refused. Preserve native model metadata and tool declaration locations.
-- Supported image content and wire/detail limits are documented in `docs/codex-wisp.md`. Native vision checks assert images on both first request and resumed follow-up.
-- Review fixed partial-delta/terminal text loss, provisional Anthropic usage, malformed Antigravity usage and silent control drops.
-- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of commits. Preserve credentials, routes, models, permissions, sandbox, hook trust, notifications and browser settings.
-- Wisp 2.1.3 remains installed; VS Code remains 1.13.6. Saved bearer 401 and TLS-chain concerns remain separate. No credential repair, runtime restart, publication or global installation occurred.
+- Native `codex-cli 0.153.4` passed all seven cases through source, compiled and npm launchers on Windows x64. Compiled/npm PATH excludes Bun and source. Native checks use a source-hosted Bridge and deterministic local keyed upstreams; compiled Bridge HTTP smoke runs separately.
+- No real-provider acceptance or macOS/Linux execution is claimed. The four-platform release matrix is configured but unrun. The HTTP suite also covers local Codex/Anthropic wires.
+- Installed terminal 2.1.3, installed extension 1.13.6 and slot plugin remain untouched. No runtime restart, credential repair or TLS weakening occurred.
+- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of commits. Context commits belong on main; only explicit paths were staged.
+- Saved bearer 401 and TLS-chain concerns remain separate. See [[release-follow-ups]] for held work.
 
 ## Related
 
