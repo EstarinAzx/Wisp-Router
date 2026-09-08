@@ -1,13 +1,14 @@
 // Opt-in installed-CLI integration: bun packages/tui/tests/nativeCodex.check.ts [case ...]
 // Requires codex-cli 0.153.4 and Node.js on PATH. Uses real launcher/Bridge, a deterministic
 // local Chat Completions upstream, synthetic credentials and temporary homes. No live models.
+// WISP_NATIVE_LAUNCH: JSON argv prefix for a compiled/npm launcher; WISP_NATIVE_PATH: its isolated PATH.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type ServerResponse } from 'node:http';
 import { createConnection, type AddressInfo } from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import OpenAI from 'openai';
 import { createBridgeServer, type BridgeDeps } from '../../core/src/bridgeServer';
@@ -54,16 +55,22 @@ const cases: Case[] = [
 const requested = process.argv.slice(2);
 assert(requested.every(name => cases.some(c => c.name === name)), 'Unknown case name');
 const selected = cases.filter(c => requested.length === 0 || requested.includes(c.name));
+const packaged: string[] | undefined = process.env.WISP_NATIVE_LAUNCH ? JSON.parse(process.env.WISP_NATIVE_LAUNCH) : undefined;
+assert(!packaged || (Array.isArray(packaged) && packaged.length > 0 && packaged.every(s => typeof s === 'string') && isAbsolute(packaged[0])), 'WISP_NATIVE_LAUNCH must be an argv array starting with an absolute executable');
 
 // Only basic OS/runtime settings enter the isolated CLI. No provider/auth environment is copied.
 const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
   /^(path|systemroot|windir|comspec|pathext|temp|tmp|lang|lc_all|term|appdata|localappdata)$/i.test(key)));
+if (process.env.WISP_NATIVE_PATH !== undefined) {
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'path') delete env[key];
+  env.PATH = process.env.WISP_NATIVE_PATH;
+}
 const installed = resolveCodex(env);
 const version = spawnSync(installed.file, [...installed.args, '--version'], { env, encoding: 'utf8', windowsHide: true });
 assert.equal(version.status, 0, version.stderr);
 assert.equal(version.stdout.trim(), 'codex-cli 0.153.4', 'This retained contract is pinned to codex-cli 0.153.4');
 const isolated = mkdtempSync(join(tmpdir(), 'wisp-native-%literal%-'));
-save('environment.json', { version: version.stdout.trim(), platform: process.platform, arch: process.arch, runtime, installed, isolated });
+save('environment.json', { version: version.stdout.trim(), platform: process.platform, arch: process.arch, runtime, installed, isolated, packaged, childPath: env.PATH ?? env.Path });
 
 let current: Case, seen: any[] = [], routeLog: string[] = [], serverErrors: string[] = [], proxyHits = 0, blockedExternalConnects = 0;
 const proxyRequests: unknown[] = [];
@@ -105,8 +112,9 @@ const bridge = createBridgeServer({ providers: [provider], modelMap: () => ({}),
 
 const run = async (args: string[], workspace: string, childEnv: NodeJS.ProcessEnv, dispatch = false) => {
   const entry = join(root, 'packages/tui/src', dispatch ? 'index.tsx' : 'codex-wisp.ts');
-  const argv = [entry, ...(dispatch ? ['codex-wisp'] : []), ...args];
-  const child = spawn(process.execPath, argv, { cwd: workspace, env: childEnv, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  const command = packaged ?? [process.execPath, entry, ...(dispatch ? ['codex-wisp'] : [])];
+  const argv = [...command.slice(1), ...args];
+  const child = spawn(command[0], argv, { cwd: workspace, env: childEnv, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '', timedOut = false;
   child.stdout.on('data', data => stdout += data);
   child.stderr.on('data', data => stderr += data);
@@ -117,7 +125,7 @@ const run = async (args: string[], workspace: string, childEnv: NodeJS.ProcessEn
   const timer = setTimeout(() => { timedOut = true; kill(); }, 45_000);
   try {
     const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-    return { code, timedOut, stdout, stderr, argv, pid: child.pid };
+    return { code, timedOut, stdout, stderr, argv: [command[0], ...argv], pid: child.pid };
   } finally { clearTimeout(timer); if (child.exitCode === null && child.signalCode === null) kill(); }
 };
 const reports: Record<string, unknown>[] = [];
@@ -210,6 +218,6 @@ for (const port of [bridgePort, upstreamPort, proxyPort]) {
   assert(closed, `Listener still open: ${port}`);
 }
 const passed = reports.every(r => r.passed);
-save('REPORT.md', `# Native source launcher integration\n\nCLI: ${version.stdout.trim()}; host: ${process.platform}/${process.arch}; runtime: ${runtime}.\n\nReal source launcher, native Codex, real Bridge and deterministic keyed Chat Completions upstream. No live provider was tested. All homes were temporary; config/authentication bytes stayed unchanged on passing cases. Normal native session files were allowed.\n\n${reports.map(r => `- ${r.passed ? 'PASS' : 'FAIL'} ${r.case}: ${r.upstreamTurns} upstream requests, ${r.seconds}s${r.failure ? `; ${r.failure}` : ''}`).join('\n')}\n\nBridge/hostile endpoint requests through proxy: ${proxyHits}. Blocked external CONNECT attempts from native Codex background services: ${blockedExternalConnects}; see proxy-requests.json (no tunnels were opened). Listener sockets closed; temporary homes removed. The hostile inherited provider supplied a wrong URL, auth requirement, WebSocket capability, token, authorization headers, environment headers and query parameters. Successful authenticated local roundtrips prove the replacement transport overrides the hostile settings that would prevent them; extra non-auth headers/query absence is not captured at the Bridge socket.\n\nReproduce: \`bun packages/tui/tests/nativeCodex.check.ts\` (optional case names select a subset).\n`);
+save('REPORT.md', `# Native launcher integration\n\nCLI: ${version.stdout.trim()}; host: ${process.platform}/${process.arch}; runtime: ${runtime}.\n\n${packaged ? 'Packaged launcher (' + JSON.stringify(packaged) + ')' : 'Source launcher'}, native Codex, source-hosted Bridge and deterministic keyed Chat Completions upstream. No live provider was tested. All homes were temporary; config/authentication bytes stayed unchanged on passing cases. Normal native session files were allowed.\n\n${reports.map(r => `- ${r.passed ? 'PASS' : 'FAIL'} ${r.case}: ${r.upstreamTurns} upstream requests, ${r.seconds}s${r.failure ? `; ${r.failure}` : ''}`).join('\n')}\n\nBridge/hostile endpoint requests through proxy: ${proxyHits}. Blocked external CONNECT attempts from native Codex background services: ${blockedExternalConnects}; see proxy-requests.json (no tunnels were opened). Listener sockets closed; temporary homes removed. The hostile inherited provider supplied a wrong URL, auth requirement, WebSocket capability, token, authorization headers, environment headers and query parameters. Successful authenticated local roundtrips prove the replacement transport overrides the hostile settings that would prevent them; extra non-auth headers/query absence is not captured at the Bridge socket.\n\nReproduce: \`bun packages/tui/tests/nativeCodex.check.ts\` (optional case names select a subset). For packaged runs set WISP_NATIVE_LAUNCH (JSON argv prefix) and WISP_NATIVE_PATH as recorded in environment.json.\n`);
 console.log(`Report: ${output}`);
 process.exitCode = passed ? 0 : 1;

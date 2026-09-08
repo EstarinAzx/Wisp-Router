@@ -6,6 +6,31 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.4] - Unreleased
+
+### Added
+
+- `codex-wisp` launches installed native Codex through the Bridge's Responses endpoint. Source,
+  compiled `wisp codex-wisp` and npm commands share the same launcher and binary resolver.
+- The visible-history subset supports ordered text/images, ordinary and custom tools, client
+  discovery, namespaced follow-up, visible final output and honest error/incomplete/usage handling.
+- The launcher preserves saved config/auth, native model selection and tool policy. Provider
+  overrides, hosted search and opaque reasoning/compaction replay fail explicitly. See
+  [the compatibility guide](../../docs/codex-wisp.md) for exact wire and content limits.
+
+### Verification and surfaces
+
+- Local Windows x64 binary and npm archives are prepared for 2.1.4. Native CLI contract:
+  `codex-cli 0.153.4`, isolated homes and deterministic local upstreams; no real-provider
+  acceptance claim. All four existing release runners gain compiled dispatch smoke coverage;
+  macOS/Linux matrix jobs have not run during this local preparation.
+- Shared-core changes enter both terminal builds and newly compiled extension builds. Core and
+  terminal regression suites, typechecks and extension compilation are required gates.
+- Installed terminal 2.1.3 and extension 1.13.6 are unchanged. Extension version/publication is
+  separate; rebuilding its current manifest would bundle new core under the old version.
+- Slot plugin unchanged. Release tag, GitHub release, npm publication and global installation
+  remain pending; this entry records source/artifact preparation only.
+
 ## [2.1.3] - 2026-09-07
 
 ### Fixed

@@ -1,6 +1,24 @@
-# Native Codex through Wisp (source)
+# Native Codex through Wisp
 
-Start the Bridge yourself, then run either source entry from the repository root:
+Terminal 2.1.4 is prepared in source and local Windows artifacts. Publication and installation
+are separate steps; an existing Wisp 2.1.3 installation does not include this launcher.
+
+Configure a Wisp Provider and model, then start a Bridge built from this source (`wisp serve`
+or `/bridge` in the rebuilt TUI). An already installed older Bridge lacks the Responses door.
+Run the matching launcher from another terminal:
+
+```sh
+codex-wisp exec "Explain this project"          # npm command, once 2.1.4 is installed
+wisp codex-wisp exec "Explain this project"     # standalone compiled binary
+codex-wisp -m my-alias exec "Explain this project"
+```
+
+The standalone binary needs neither Bun nor Node.js. npm shims require Node.js >=16 and use
+the existing `wisp.js` resolver: exact-version platform optional dependency first, then the
+same release download and versioned `~/.wisp/bin/v<version>` cache. No separate downloader is
+introduced. Codex itself must be installed independently; an npm Codex installation also needs Node.
+
+For source development, use Bun from the repository root:
 
 ```sh
 bun packages/tui/src/codex-wisp.ts
@@ -11,6 +29,12 @@ Codex must already be installed. The launcher reads Wisp's existing port and Bri
 checks the numeric loopback listener without sending the secret, and starts Codex with a
 child-only Responses provider. It does not start a Bridge or edit either application's
 configuration or authentication. Codex still owns tools, approvals, sandbox policy and sessions.
+
+On Windows, the launcher resolves `codex.exe` or Node plus the installed `codex.js` entry and
+starts it directly without a shell command string. Spaces, quotes, metacharacters and literal
+percent expressions stay arguments. Shell-only Codex shims are unsupported. A missing CLI,
+missing Bridge secret or stopped Bridge produces guidance and a nonzero exit; nothing starts
+in the background automatically.
 
 Native model selection is retained. Ordinary arguments, including `-m`, pass through. Wisp
 resolves that model string as a Provider id, exact Alias, Family route, then the live Active
@@ -65,11 +89,56 @@ Run the installed-CLI contract separately from the default unit suites:
 bun packages/tui/tests/nativeCodex.check.ts
 ```
 
-This check uses isolated homes, synthetic credentials, the actual source launcher and Bridge,
+This check uses isolated homes, synthetic credentials, the actual launcher and source-hosted Bridge,
 and a deterministic local Chat Completions upstream. It asserts visible answers, tool results,
 and an attached image retained across a native resumed turn (`vision-followup`). The public
 HTTP suite also exercises local Codex and Anthropic wire fixtures, including image tool output.
 The fake proxy blocks native background connection attempts and must receive no Bridge or
 inherited-provider destination requests. Passing this check proves local transport and wiring,
 not acceptance by a live Provider. The verified host is Windows; POSIX launch paths are not
-claimed as executed. npm exposure and terminal 2.1.4 packaging are tracked in #211.
+claimed as executed by this local check.
+
+The same native cases can run through compiled or unpacked npm artifacts. Set
+`WISP_NATIVE_LAUNCH` to a JSON argv prefix, for example `["C:/artifacts/wisp.exe","codex-wisp"]`
+or `["C:/Program Files/nodejs/node.exe","C:/artifacts/package/bin/codex-wisp.js"]`.
+Set `WISP_NATIVE_PATH` to an isolated path containing the installed native Codex executable
+and any required Node/OS executables, with Bun and repository source absent. Case names may
+be passed to select a subset. Each run records its exact executable, child PATH, native CLI
+version, commands, upstream captures and visible output under `out/codex-native-<timestamp>`.
+
+Run the artifact smoke check separately:
+
+```sh
+bun build --compile packages/tui/src/index.tsx --outfile out/wisp.exe
+node packages/tui/tests/packagedCodex.check.mjs out/wisp.exe /path/to/unpacked/package
+```
+
+The optional npm directory must come from `npm pack`, with the matching unpacked platform
+package under `node_modules/@tsd47216/wisp-router-<platform>-<arch>`. Stage copies of the npm
+templates, stamp both package versions and every optional dependency to the terminal version,
+and put the compiled binary in the platform package's `bin/` before packing. Source templates
+remain `0.0.0-dev`, matching release workflow stamping. The check copies artifacts outside
+the repository, empties the child PATH, and verifies launcher failures, existing commands,
+the compiled Responses route, config/auth preservation and npm optional-dependency/cache resolution.
+
+## Release surfaces and evidence limits
+
+- **Terminal 2.1.4:** compiled TUI/headless Bridge bundles the new shared core; npm exposes
+  `wisp`, `claude-wisp` and `codex-wisp`. Local Windows x64 artifacts are the verified release
+  candidates. No tag, GitHub release, npm publish or global install is part of preparation.
+- **Shared core:** the Responses endpoint and Provider fidelity changes also enter a newly
+  compiled extension. Full core tests and extension compilation cover regressions; that does
+  not exercise an installed VS Code session. The installed extension remains 1.13.6 and
+  unchanged. Its next version/publication is a separate release decision; rebuilding a 1.13.6
+  VSIX from this source would produce different bundled code under the same version.
+- **Slot plugin:** unchanged and unrelated to this Codex launcher.
+- **Coverage:** native `codex-cli 0.153.4` on Windows x64 exercises text/resume, image/resume,
+  function/custom tools, patch policy rejection, discovery and namespaced follow-up against
+  a deterministic keyed upstream. HTTP suites also cover local Codex and Anthropic wire
+  fixtures. These are mock Provider tests, not real-provider acceptance.
+- **Release matrix:** win32-x64, darwin-arm64, darwin-x64 and linux-x64 retain native builds
+  and now run the compiled smoke check. The matrix is unrun during local preparation; its
+  presence does not prove macOS/Linux native Codex behavior. Existing TLS, resolver cache,
+  version checks and GitHub-before-npm publication ordering are retained. SHA-256 values for
+  local artifacts are recorded with the preparation evidence; no new downloader verification
+  or release checksum mechanism is claimed.
