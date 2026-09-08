@@ -86,6 +86,8 @@ jobs:
       # @wisp/core and its version is its own (a cut that bumps only wisp-router re-attaches the
       # same vsix, harmless); a packaging hiccup must never block the npm release below.
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
       - run: bun install --frozen-lockfile
       - name: Package the VS Code extension (best-effort)
         run: |

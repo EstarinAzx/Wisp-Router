@@ -1,14 +1,16 @@
 # Native Codex through Wisp
 
-`codex-wisp` is available in terminal 2.1.4. Use its Bridge or the Bridge hosted by VS Code
-extension 1.13.7. Older installed packages do not gain the new command or endpoint automatically.
+Terminal 2.1.5 adds picker Aliases and exact Codex model routes to `codex-wisp` (introduced
+in 2.1.4). Use the 2.1.5 Bridge or the Bridge hosted by companion VS Code extension 1.13.8
+for these routes. These versions are prepared locally; publication and installation are separate.
+Older installed packages do not gain the new behavior automatically.
 
 Configure a Wisp Provider and model, then start the updated Bridge (`wisp serve`, `/bridge`
 in the TUI, or the extension's Bridge control). Restart older hosts after updating their package.
 Run the matching launcher from another terminal:
 
 ```sh
-codex-wisp exec "Explain this project"          # npm command, once 2.1.4 is installed
+codex-wisp exec "Explain this project"          # npm command, once the package is installed
 wisp codex-wisp exec "Explain this project"     # standalone compiled binary
 codex-wisp -m my-alias exec "Explain this project"
 ```
@@ -49,7 +51,7 @@ resolves that model string as a Provider id, exact Alias, exact Codex model rout
 Family route, then the live Active Provider. An arbitrary backend model string does not pin
 a Wisp Target; use a configured Alias or exact Codex route when you need a specific Target.
 
-## Exact Codex model routing (preparing 2.1.5)
+## Exact Codex model routing (2.1.5)
 
 `/routing` has Claude Code, Codex and Custom sections. Codex discovers the installed client's
 selectable models, including older and future choices, without a fixed family list. Each
@@ -80,7 +82,7 @@ the shared resolver before it can honor Codex routes.
 
 ## Picker aliases and capability policy
 
-The source launcher preparing 2.1.5 also adds Wisp Aliases to Codex's model picker. It exports
+The 2.1.5 launcher adds Wisp Aliases to Codex's model picker. It exports
 the complete catalog from the executable it launches (`debug models`), with a four-second
 deadline and bundled fallback after a refresh timeout. Invalid source catalogs fail explicitly.
 An effective `model_catalog_json` setting is an input to merging; it cannot replace the final
@@ -201,13 +203,18 @@ the compiled Responses route, config/auth preservation and npm optional-dependen
 
 ## Release surfaces and evidence limits
 
-- **Terminal 2.1.4:** compiled TUI/headless Bridge bundles the new shared core; npm exposes
+- **Terminal 2.1.5:** compiled TUI/headless Bridge bundles the shared exact model resolver;
+  source, compiled and npm launchers include additive picker Aliases. npm exposes
   `wisp`, `claude-wisp` and `codex-wisp` through the same binary resolver.
-- **VS Code 1.13.7:** the release VSIX bundles the Responses endpoint and Provider fidelity
-  changes for the extension-hosted Bridge. Core tests and extension compilation cover
+- **VS Code 1.13.8:** the companion VSIX bundles the Responses endpoint and exact Codex
+  model resolver for the extension-hosted Bridge. Core tests and extension compilation cover
   regressions; they do not exercise an installed VS Code session. Install the VSIX and reload
   the extension before using the updated hosted Bridge.
 - **Slot plugin:** unchanged and unrelated to this Codex launcher.
+- **Traycer GUI:** **NOT VERIFIED**, separately from native launcher acceptance. Traycer must
+  supply both Wisp's catalog and transport to discovery and execution. No supported integration
+  was verified; adding an Alias in Wisp does not make it available in Traycer. See the
+  [compatibility investigation](investigations/traycer-codex-compatibility.md).
 - **Coverage:** native `codex-cli 0.153.4` on Windows x64 exercises text/resume, image/resume,
   function/custom tools, patch policy rejection, discovery and namespaced follow-up against
   a deterministic keyed upstream. HTTP suites also cover local Codex and Anthropic wire

@@ -6,6 +6,32 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.5] - 2026-09-08
+
+### Added
+
+- `codex-wisp` adds Wisp Aliases alongside native Codex picker choices using an isolated
+  per-child catalog. Native-id collisions follow Alias precedence; capabilities reflect the
+  pinned Target, with conservative limits when metadata is unknown.
+- `/routing` adds a Codex section with independent Targets for every discovered native model.
+  `wisp routing codex [set <model-id> <provider>/<model> | unset <model-id>]` edits the same map.
+  Saved models absent from discovery remain editable. Requests follow live route changes;
+  picker names and capabilities refresh when the launcher restarts.
+- Exact Codex routes resolve after Provider ids and Aliases, before Claude Family routes and
+  Active fallback. Existing Claude cooldown and Alias/Family snapshot scope are unchanged.
+
+### Verification and surfaces
+
+- **Terminal / npm / TUI: 2.1.5**, prepared locally. **VS Code: 1.13.8**, separately versioned
+  companion VSIX with the shared resolver. **wisp-slot: unchanged.** Publication and installation
+  are separate; older installed hosts remain unchanged until updated and restarted.
+- Builds and source/native verification use pinned Bun 1.4.2. It fixes the observed Windows
+  listener inheritance problem on Bun 1.3.14; no earliest-fixed-version claim is made.
+- Native acceptance uses `codex-cli 0.153.4` on Windows with isolated homes and local mock
+  Providers. It does not establish macOS/Linux native, live-provider or installed VS Code acceptance.
+- Traycer GUI integration is **NOT VERIFIED**. See the
+  [integration investigation](../../docs/investigations/traycer-codex-compatibility.md).
+
 ## [2.1.4] - 2026-09-08
 
 ### Added
