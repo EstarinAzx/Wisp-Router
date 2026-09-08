@@ -7,6 +7,7 @@ import { createConnection } from 'net';
 import { constants } from 'os';
 import { delimiter, join } from 'path';
 import { DEFAULT_BRIDGE_PORT, WispHome } from '@wisp/core';
+import { catalogArguments, readNativeCatalog, readAliasCapabilities, mergeAliasCatalog, writeChildCatalog } from './codexCatalog';
 
 // This entry and the compiled dispatcher run on Bun. Use its native TOML parser rather than
 // approximating inline tables (quoted/escaped search keys must be checked too).
@@ -116,6 +117,7 @@ export const resolveCodex = (env: NodeJS.ProcessEnv = process.env): { file: stri
 };
 
 export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Promise<number> => {
+  let catalog: ReturnType<typeof writeChildCatalog> | undefined;
   try {
     // Reject dangerous arguments even when the Bridge has not been started yet.
     validateCodexArgs(args);
@@ -124,6 +126,10 @@ export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Prom
     const launch = buildCodexLaunch(port, home.readAuth().bridgeSecret ?? '', args);
     if (!(await probeCodexBridge(port))) throw new Error(`Bridge not reachable at http://127.0.0.1:${port} — start it first: run "wisp serve".`);
     const codex = resolveCodex(launch.env);
+    const config = home.readConfig();
+    const native = await readNativeCatalog(codex, launch.args, launch.env);
+    catalog = writeChildCatalog(mergeAliasCatalog(native, config, await readAliasCapabilities(config, home.readAuth())));
+    launch.args = ['-c', `model_catalog_json=${JSON.stringify(catalog.path)}`, ...catalogArguments(launch.args).child];
     console.error('codex-wisp: Hosted web search is unavailable; client tool search remains available.');
     return await new Promise<number>(resolve => {
       const failed = () => {
@@ -136,7 +142,7 @@ export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Prom
       const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
       const handlers = signals.map(signal => () => { if (!child.killed) child.kill(signal); });
       signals.forEach((signal, i) => process.on(signal, handlers[i]));
-      const cleanup = () => signals.forEach((signal, i) => process.removeListener(signal, handlers[i]));
+      const cleanup = () => { catalog?.cleanup(); signals.forEach((signal, i) => process.removeListener(signal, handlers[i])); };
       child.once('error', () => {
         cleanup();
         failed();
@@ -154,7 +160,7 @@ export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Prom
     // Our validation messages contain no argument values, environment values or credentials.
     console.error(err instanceof Error ? err.message : 'Could not start Codex.');
     return 1;
-  }
+  } finally { catalog?.cleanup(); }
 };
 
 if ((import.meta as ImportMeta & { main?: boolean }).main) process.exitCode = await runCodexWisp();

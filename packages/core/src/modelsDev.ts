@@ -25,9 +25,9 @@ let inflight: Promise<ModelsDevCatalog | undefined> | undefined;
 
 // One network GET, swallowing any failure (offline, 5xx, bad JSON) into undefined so the caller falls
 // back to the table/default. Failures are NOT cached, so the next call retries.
-const fetchCatalog = async (): Promise<ModelsDevCatalog | undefined> => {
+const fetchCatalog = async (signal?: AbortSignal): Promise<ModelsDevCatalog | undefined> => {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { signal });
     if (!res.ok) return undefined;
     return (await res.json()) as ModelsDevCatalog;
   } catch {
@@ -37,10 +37,10 @@ const fetchCatalog = async (): Promise<ModelsDevCatalog | undefined> => {
 
 // The cached catalog, refetching only past the TTL. Concurrent callers share one in-flight request, so
 // VS Code's frequent provideLanguageModelChatInformation calls never fan out duplicate GETs.
-export const getModelsDevCatalog = async (): Promise<ModelsDevCatalog | undefined> => {
+export const getModelsDevCatalog = async (signal?: AbortSignal): Promise<ModelsDevCatalog | undefined> => {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.catalog;
   if (!inflight) {
-    inflight = fetchCatalog().then((catalog) => {
+    inflight = fetchCatalog(signal).then((catalog) => {
       if (catalog) cache = { at: Date.now(), catalog };
       inflight = undefined;
       return catalog;

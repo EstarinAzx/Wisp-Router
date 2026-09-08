@@ -18,12 +18,20 @@ the existing `wisp.js` resolver: exact-version platform optional dependency firs
 same release download and versioned `~/.wisp/bin/v<version>` cache. No separate downloader is
 introduced. Codex itself must be installed independently; an npm Codex installation also needs Node.
 
-For source development, use Bun from the repository root:
+For source development, use Bun >=1.4.2 from the repository root. Repository package-manager
+metadata and release builds pin 1.4.2 as the verified baseline:
 
 ```sh
 bun packages/tui/src/codex-wisp.ts
 bun packages/tui/src/index.tsx codex-wisp exec "Explain this project"
 ```
+
+Bun 1.3.14 on Windows can let child processes inherit unrelated listener sockets. A server can
+report closed while external TCP connections still succeed. Bun's
+[Windows socket-inheritance fix](https://github.com/oven-sh/bun/pull/36938) is included in the
+verified 1.4.2 baseline; this is not a claim that 1.4.2 was the first fixed version. Compiled
+binaries embed their build runtime. Source verification requires the fixed runtime too; updating
+only the launcher cannot repair a listener inherited from an older test/Bridge host.
 
 Codex must already be installed. The launcher reads Wisp's existing port and Bridge secret,
 checks the numeric loopback listener without sending the secret, and starts Codex with a
@@ -40,6 +48,34 @@ Native model selection is retained. Ordinary arguments, including `-m`, pass thr
 resolves that model string as a Provider id, exact Alias, Family route, then the live Active
 Provider. An arbitrary backend model string does not pin a Wisp Target; use a configured
 Alias when you need a specific Provider and model.
+
+The source launcher preparing 2.1.5 also adds Wisp Aliases to Codex's model picker. It exports
+the complete catalog from the executable it launches (`debug models`), with a four-second
+deadline and bundled fallback after a refresh timeout. Invalid source catalogs fail explicitly.
+An effective `model_catalog_json` setting is an input to merging; it cannot replace the final
+overlay. Native rows, including hidden explicit selections, remain present. A native-id/Alias
+collision produces one row governed by the Alias. Claude's alias-only preference does not hide
+native Codex choices.
+
+Each child gets its own temporary UTF-8 catalog, removed on normal exit or launch failure.
+Native configuration, authentication and catalog cache files are not rewritten by Wisp. Alias
+descriptions name the Provider and include the pinned model when the alias-label preference is on.
+Catalog metadata is a startup snapshot: relaunch after adding an Alias or changing a Target's
+capabilities. Routing still resolves the live Wisp map on each request.
+
+Alias client tools use a conservative native profile, separate from backend capability metadata.
+Known Codex Target metadata comes from Wisp's account-scoped model catalog; other known context
+and image facts come from models.dev. Missing metadata means text only, no advertised effort
+choices and no claimed context limit. Native model discovery does not require signing into Wisp's
+Codex Provider. Aliases advertise no service tiers, hosted search, original image detail or
+verbosity controls. Anthropic and Antigravity aliases remain text-only because the native client's
+image detail/order cannot be preserved by those Bridge paths. Unsupported explicit requests still
+fail at the Bridge. These limits do not assert that an arbitrary backend supports native tools.
+
+The launcher groups configuration overrides before the native subcommand. This preserves Wisp's
+transport with Codex 0.153.x when callers write options such as `exec -c model_reasoning_effort=high`.
+When resuming an Alias conversation, select the same Alias again (`exec resume <id> -m <alias>`);
+the native CLI can otherwise use its configured default model and a different client tool profile.
 
 The launcher rejects explicit profiles, provider overrides, remote app-server options and
 hosted-search requests. Hosted web search is disabled for this child; local client tool
@@ -87,12 +123,23 @@ Run the installed-CLI contract separately from the default unit suites:
 
 ```sh
 bun packages/tui/tests/nativeCodex.check.ts
+bun packages/tui/tests/socketInheritance.check.mjs
 ```
+
+The runtime regression closes a server while its child stays alive, then checks for
+`ECONNREFUSED` from a separate Node process. The full native check also verifies all listeners
+with external Node probes, and waits for app-server process/pipe cleanup after model listing.
 
 This check uses isolated homes, synthetic credentials, the actual launcher and source-hosted Bridge,
 and a deterministic local Chat Completions upstream. It asserts visible answers, tool results,
 and an attached image retained across a native resumed turn (`vision-followup`). The public
 HTTP suite also exercises local Codex and Anthropic wire fixtures, including image tool output.
+Alias cases additionally verify additive `model/list`, exact Alias ids, pinned upstream models,
+native-id collisions, a text-only unknown Target, tools and image/resume with known metadata,
+and effort rejection before upstream execution. The known metadata fixture is a synthetic Wisp
+Codex catalog cache; its backend is a deterministic local Chat Completions fixture implementing
+those capabilities, not a real Codex subscription. No real provider capability or macOS/Linux
+native acceptance is inferred from the Windows check.
 The fake proxy blocks native background connection attempts and must receive no Bridge or
 inherited-provider destination requests. Passing this check proves local transport and wiring,
 not acceptance by a live Provider. The verified host is Windows; POSIX launch paths are not

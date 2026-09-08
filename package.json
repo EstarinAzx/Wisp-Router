@@ -1,6 +1,8 @@
 {
   "name": "wisp-monorepo",
   "private": true,
+  "packageManager": "bun@1.4.2",
+  "engines": { "bun": ">=1.4.2" },
   "workspaces": [
     "packages/*"
   ],
