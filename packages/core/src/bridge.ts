@@ -12,6 +12,7 @@
  */
 
 import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage, AnthropicCacheMissReason, AnthropicTruncationReason } from './catalog';
+import { validTokenCounts } from './shared';
 
 // ----------------------------- Inbound: OpenAI request -> Wisp ----------------------------- //
 
@@ -165,12 +166,13 @@ export type BridgeStreamEvent =
 // No usage block, or totals that aren't numbers → undefined, so the caller emits NO event. That is what lets
 // a Provider which IGNORES the opt-in still complete cleanly, and it keeps a synthesized zero — the very bug
 // #165 exists to kill — off the wire.
-export const chatCompletionsUsage = (chunk: any): BridgeUsage | undefined => {
+export const chatCompletionsUsage = (chunk: any, strict = false): BridgeUsage | undefined => {
   const usage = chunk?.usage;
   const prompt = usage?.prompt_tokens;
   const completion = usage?.completion_tokens;
   if (typeof prompt !== 'number' || typeof completion !== 'number') return undefined;
   const cachedDetail = usage?.prompt_tokens_details?.cached_tokens;
+  if (strict && (!validTokenCounts(prompt, completion, cachedDetail === undefined ? 0 : cachedDetail, prompt + completion) || cachedDetail > prompt)) return undefined;
   const cached = typeof cachedDetail === 'number' ? cachedDetail : 0;
   return {
     input_tokens: Math.max(0, prompt - cached),

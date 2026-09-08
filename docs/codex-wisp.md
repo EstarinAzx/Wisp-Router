@@ -30,14 +30,34 @@ required string `input`; their original format/grammar is included in the descri
 Generic upstreams do not enforce that grammar. Codex executes the returned original tool.
 
 Opaque reasoning/compaction replay, stored responses, structured output and hosted search
-fail explicitly. At this first source slice, images and non-text content also fail explicitly;
-content fidelity is tracked in #210. Antigravity cannot preserve a developer note positioned
+fail explicitly. Sessions created elsewhere can resume only if they contain this supported
+visible history; an opaque reasoning or compaction item is refused even after changing routes.
+Antigravity cannot preserve a developer note positioned
 after conversation messages, so that history is refused before upstream execution.
+
+Base64 PNG, JPEG, WebP and GIF user images retain their order among text parts on Chat
+Completions, Codex Responses and Anthropic Messages wires. Function/custom tool results
+can contain those images on Codex and Anthropic; text-only keyed tool messages reject them.
+Remote image URLs, files/documents and image content on assistant/system messages are refused.
+Anthropic accepts default/auto image detail; explicit detail levels need a compatible Responses
+or Chat Completions wire. Original detail requires Responses. This Responses door refuses
+Antigravity image content because its builder cannot preserve interleaved content order.
 
 `reasoning.context` accepts `auto`, `current_turn` and `all_turns`. Visible history stays intact;
 this stateless endpoint has no replayable reasoning history. Effort uses the existing Provider
-validation. Context is forwarded on a compatible Codex wire; verbosity is an advisory preference.
+validation: an explicit effort that would be dropped or changed is rejected. Codex effort
+requires advertised model support; keyed Providers receive `reasoning_effort` and remain
+responsible for their model's acceptance. Antigravity effort is unsupported on this door.
+Context is forwarded on a compatible Codex wire; verbosity is an advisory preference.
 Cache keys and client metadata are not model instructions. No encrypted reasoning is emitted.
+`reasoning.summary: "auto"` is accepted for native unknown-model fallback compatibility:
+automatic selection may produce no summary, and this visible-history door emits no reasoning
+items. Other summary modes and every explicit `service_tier` are rejected before sampling.
+Reported token usage retains totals and cached counts; missing or invalid counts stay absent.
+Anthropic's output-only final usage update is combined with its initial input counts. Truncated
+output remains incomplete for both streaming and JSON responses. Responses Providers' complete
+terminal text supplies any missing suffix; a disagreement with text already streamed fails
+explicitly. Disconnects abort sampling.
 
 Run the installed-CLI contract separately from the default unit suites:
 
@@ -46,7 +66,9 @@ bun packages/tui/tests/nativeCodex.check.ts
 ```
 
 This check uses isolated homes, synthetic credentials, the actual source launcher and Bridge,
-and a deterministic local Chat Completions upstream. It asserts visible answers and tool results.
+and a deterministic local Chat Completions upstream. It asserts visible answers, tool results,
+and an attached image retained across a native resumed turn (`vision-followup`). The public
+HTTP suite also exercises local Codex and Anthropic wire fixtures, including image tool output.
 The fake proxy blocks native background connection attempts and must receive no Bridge or
 inherited-provider destination requests. Passing this check proves local transport and wiring,
 not acceptance by a live Provider. The verified host is Windows; POSIX launch paths are not

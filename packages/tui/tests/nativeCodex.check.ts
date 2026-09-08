@@ -38,9 +38,10 @@ const toolCall = (res: ServerResponse, name: string, args: unknown, index: numbe
   res.end('data: [DONE]\n\n');
 };
 type Step = { tool: string; args: unknown };
-type Case = { name: string; model?: string; steps: Step[]; followup?: boolean; dispatch?: boolean };
+type Case = { name: string; model?: string; steps: Step[]; followup?: boolean; dispatch?: boolean; vision?: boolean };
 const cases: Case[] = [
   { name: 'default-text', steps: [], followup: true },
+  { name: 'vision-followup', steps: [], followup: true, vision: true },
   { name: 'default-custom', steps: [{ tool: 'functions.exec (custom).', args: { input: 'text(await tools.get_goal({}));' } }] },
   { name: 'known-function', model: 'gpt-5.4', steps: [{ tool: 'get_goal (function).', args: {} }], dispatch: true },
   { name: 'unknown-text', model: 'wisp-native-unknown', steps: [] },
@@ -140,7 +141,9 @@ try {
       http_proxy: `http://127.0.0.1:${proxyPort}`, https_proxy: `http://127.0.0.1:${proxyPort}`,
       ALL_PROXY: `http://127.0.0.1:${proxyPort}`, all_proxy: `http://127.0.0.1:${proxyPort}`, NO_PROXY: 'example.internal', no_proxy: 'example.internal',
     };
-    const args = ['exec', '--skip-git-repo-check', '--json', '-C', workspace, ...(current.model ? ['-m', current.model] : []),
+    const imagePath = join(workspace, 'fixture.png');
+    if (current.vision) writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64'));
+    const args = ['exec', '--skip-git-repo-check', '--json', '-C', workspace, ...(current.model ? ['-m', current.model] : []), ...(current.vision ? ['--image', imagePath, '--'] : []),
       'LOCAL_FIRST_USER: deterministic local integration check; follow the supplied tool call and final response.'];
     const result = await run(args, workspace, childEnv, current.dispatch);
     save(`${current.name}-stdout.txt`, result.stdout); save(`${current.name}-stderr.txt`, result.stderr);
@@ -156,6 +159,7 @@ try {
       assert.equal(proxyHits, 0, 'Proxy or inherited hostile endpoint received a request');
       assert(routeLog.some(line => line.includes(`'${current.model ?? 'gpt-6-astra'}' -> native-fixture`)), 'Native model selection did not survive the launcher');
       assert(seen.every(body => body.model === 'fixture-backend'), 'Active Provider model routing changed');
+      if (current.vision) assert(seen[0].messages.some((m: any) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p: any) => p.type === 'image_url' && p.image_url.url.startsWith('data:image/png;base64,'))), 'Native attached image lost');
       assert(seen.every(body => body.tools.every((t: any) => !t.function.description.startsWith('web_search '))), 'Hosted search was declared');
       if (!current.model) assert(seen.every(body => body.parallel_tool_calls === false), 'Default model false parallelism lost');
       const results = seen.at(-1).messages.filter((m: any) => m.role === 'tool');
@@ -182,6 +186,7 @@ try {
         assert.equal(seen.length, before + 1);
         const history = JSON.stringify(seen.at(-1).messages);
         assert(history.includes('LOCAL_FIRST_USER') && history.includes('LOCAL_FOLLOWUP_USER') && history.includes(`NATIVE_${current.name}_VISIBLE_FINAL`), 'Visible history lost on follow-up');
+        if (current.vision) assert(history.includes('data:image/png;base64,'), 'Native image lost on resumed turn');
       }
       assert.equal(readFileSync(join(codexHome, 'config.toml'), 'utf8'), config);
       assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), auth);

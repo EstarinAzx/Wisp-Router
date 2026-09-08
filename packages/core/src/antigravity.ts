@@ -26,6 +26,7 @@ import { createHash } from 'crypto';
 import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
 import type { ToolSpec, BridgeUsage, AntigravityThinkingLevel } from './shared';
+import { validTokenCounts } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
 import type { CodexErrorClass } from './codex';
 
@@ -941,12 +942,17 @@ const truncationFor = (finishReason: unknown): AnthropicTruncationReason | undef
  *    a ~100x under-report on a reasoning turn. The upstream's own totalTokenCount confirms the sum
  *    (3 + 10 + 215 = 228; 1092 + 1 + 1123 = 2216).
  */
-const antigravityUsage = (metadata: unknown): BridgeUsage | undefined => {
+const antigravityUsage = (metadata: unknown, strict = false): BridgeUsage | undefined => {
   if (!isObj(metadata)) return undefined;
+  if (strict && (!validTokenCounts(metadata.promptTokenCount, metadata.candidatesTokenCount,
+    metadata.cachedContentTokenCount === undefined ? 0 : metadata.cachedContentTokenCount,
+    metadata.thoughtsTokenCount === undefined ? 0 : metadata.thoughtsTokenCount)
+    || metadata.cachedContentTokenCount > metadata.promptTokenCount)) return undefined;
   const prompt = Number(metadata.promptTokenCount ?? 0);
   const cached = Number(metadata.cachedContentTokenCount ?? 0);
   const candidates = Number(metadata.candidatesTokenCount ?? 0);
   const thoughts = Number(metadata.thoughtsTokenCount ?? 0);
+  if (strict && !validTokenCounts(prompt + candidates + thoughts)) return undefined;
   if (!prompt && !cached && !candidates && !thoughts) return undefined;
   return {
     input_tokens: Math.max(0, prompt - cached),
@@ -1006,7 +1012,7 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
     // Terminal chunk only. A chunk with no finishReason is mid-stream, and its usage copy is dropped.
     if (text(candidate.finishReason)) {
       terminal = true;
-      const usage = antigravityUsage(payload.usageMetadata);
+      const usage = antigravityUsage(payload.usageMetadata, strictCompletion);
       if (usage) yield { type: 'usage', usage };
     }
   }

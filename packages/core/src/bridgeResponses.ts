@@ -1,6 +1,6 @@
 // Native Codex's visible Responses subset. Tool execution and policy remain in the client.
 import { createHash } from 'node:crypto';
-import type { AssembledToolCall, BridgeUsage, NormalizedTurn } from './catalog';
+import type { AssembledToolCall, BridgeUsage, NormalizedTurn, NormalizedContentPart } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
 type RecordValue = Record<string, any>;
@@ -29,7 +29,7 @@ export type BridgeResponsesRequest = BridgeChatRequest & { registry: Map<string,
 
 export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest => {
   const body = object(value, 'request');
-  fields(body, ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'text', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'service_tier', 'safety_identifier'], 'Responses field');
+  fields(body, ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'text', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'safety_identifier'], 'Responses field');
   const model = nonempty(body.model, 'model');
   if (body.store !== undefined && body.store !== false) throw new Error('Stored responses are unsupported');
   if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new Error('stream must be boolean');
@@ -38,9 +38,10 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
   if (body.include !== undefined && array(body.include, 'include').some(v => v !== 'reasoning.encrypted_content')) throw new Error('Unsupported include');
   const reasoning = body.reasoning === undefined ? {} : object(body.reasoning, 'reasoning');
   fields(reasoning, ['effort', 'context', 'summary'], 'reasoning field');
+  // Native unknown-model metadata requests auto. It allows no summary on this visible-history door.
+  if (reasoning.summary !== undefined && reasoning.summary !== 'auto') throw new Error('Only automatic reasoning summaries are supported; this door emits no reasoning items');
   if (reasoning.context !== undefined && !['auto', 'current_turn', 'all_turns'].includes(reasoning.context)) throw new Error('Unsupported reasoning.context');
   if (reasoning.effort !== undefined) nonempty(reasoning.effort, 'reasoning.effort');
-  if (reasoning.summary !== undefined && !['auto', 'concise', 'detailed', 'none'].includes(reasoning.summary)) throw new Error('Unsupported reasoning.summary');
   const text = body.text === undefined ? {} : object(body.text, 'text');
   fields(text, ['verbosity', 'format'], 'text field');
   if (text.format !== undefined && (object(text.format, 'text.format').type !== 'text' || Object.keys(text.format).length !== 1)) throw new Error('Structured output is unsupported');
@@ -84,22 +85,32 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
   }
   const turns: NormalizedTurn[] = [];
   const turn = (role: NormalizedTurn['role'], text = ''): NormalizedTurn => ({ role, text, toolCalls: [], toolResults: [] });
-  // #210 extends supported image content. Reject it here instead of flattening or silently dropping it.
-  const content = (v: unknown): string => typeof v === 'string' ? v : array(v, 'content').map(part => {
+  const content = (v: unknown, allowImages = false): { text: string; contentParts?: NormalizedContentPart[] } => {
+    if (typeof v === 'string') return { text: v };
+    const parts: NormalizedContentPart[] = array(v, 'content').map(part => {
     const p = object(part, 'content part');
+    if (p.type === 'input_image' && allowImages) {
+      fields(p, ['type', 'image_url', 'detail'], 'image field');
+      const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/.exec(string(p.image_url, 'image_url'));
+      if (!match || Buffer.from(match[2], 'base64').toString('base64') !== match[2]) throw new Error('Only valid base64 PNG, JPEG, WebP and GIF images are supported');
+      if (p.detail !== undefined && !['auto', 'low', 'high', 'original'].includes(p.detail)) throw new Error('Unsupported image detail');
+      return { type: 'image', mimeType: match[1], dataBase64: match[2], ...(p.detail ? { detail: p.detail } : {}) };
+    }
     if (!['input_text', 'output_text'].includes(p.type)) throw new Error(`Unsupported content type: ${p.type}`);
-    return string(p.text, 'content text');
-  }).join('');
+    return { type: 'text', text: string(p.text, 'content text') };
+    });
+    return { text: parts.filter(p => p.type === 'text').map(p => p.text).join(''), ...(parts.some(p => p.type === 'image') ? { contentParts: parts } : {}) };
+  };
   const calls = new Map<string, Tool>();
   const outputs = new Set<string>();
   for (const v of input) {
     const item = object(v, 'input item');
     if (item.type === 'additional_tools') {
       if (item.role !== 'developer') throw new Error('additional_tools must have developer role');
-      if (item.content !== undefined) turns.push(turn('system', content(item.content)));
+      if (item.content !== undefined) turns.push({ ...turn('system'), ...content(item.content) });
     } else if (item.type === 'message' || (!item.type && item.role)) {
       if (!['system', 'developer', 'user', 'assistant'].includes(item.role)) throw new Error('Unsupported message role');
-      turns.push(turn(item.role === 'developer' ? 'system' : item.role, content(item.content)));
+      turns.push({ ...turn(item.role === 'developer' ? 'system' : item.role), ...content(item.content, item.role === 'user') });
     } else if (['function_call', 'custom_tool_call', 'tool_search_call'].includes(item.type)) {
       const kind = item.type === 'function_call' ? 'function' : item.type === 'custom_tool_call' ? 'custom' : 'tool_search';
       const entry = identities.get(key(item.namespace, kind === 'tool_search' ? 'tool_search' : item.name, kind));
@@ -120,7 +131,8 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
       if (!entry || entry.kind !== kind || outputs.has(id)) throw new Error('Unmatched or duplicate tool result');
       outputs.add(id);
       if (kind === 'tool_search' && item.execution !== 'client') throw new Error('Only client tool search is supported');
-      const t = turn('user'); t.toolResults.push({ callId: id, content: kind === 'tool_search' ? JSON.stringify(item) : content(item.output) }); turns.push(t);
+      const result = kind === 'tool_search' ? { text: JSON.stringify(item) } : content(item.output, true);
+      const t = turn('user'); t.toolResults.push({ callId: id, content: result.text, ...(result.contentParts ? { contentParts: result.contentParts } : {}) }); turns.push(t);
     } else throw new Error(`Unsupported input item: ${item.type}; opaque reasoning and compaction history cannot be replayed`);
   }
   if (!turns.length) throw new Error('No messages to send');

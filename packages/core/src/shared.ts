@@ -54,6 +54,7 @@ export const sortByReleaseDesc = (models: Record<string, ModelsDevEntry>, ids: s
 // storage and the UI without a release. Each other provider validates against its own wire vocabulary.
 export type CodexEffort = string;
 export type CodexReasoning = { effort: CodexEffort; summary?: string };
+export const validTokenCounts = (...counts: unknown[]): boolean => counts.every(n => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0);
 export type EffortLevel = string;
 
 // Grok's legacy four-level Responses wire. Codex itself resolves effort through model metadata.

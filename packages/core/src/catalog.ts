@@ -370,6 +370,7 @@ export const toOpenAiTools = (tools: ToolSpec[]): OAToolDef[] =>
 
 // One chat turn flattened to plain data: text, tool calls (assistant turns), tool results (user turns),
 // attached images (user turns). chatProvider.ts builds these from the vscode parts; images is optional.
+export type NormalizedContentPart = { type: 'text'; text: string } | { type: 'image'; mimeType: string; dataBase64: string; detail?: 'auto' | 'low' | 'high' | 'original' };
 export type NormalizedTurn = {
   // 'system' is a POSITIONED mid-conversation system turn (#145, Anthropic-door only today): Claude Code
   // sends hook reminders as role:"system" turns inside messages, and hoisting them to the top-level system
@@ -379,7 +380,9 @@ export type NormalizedTurn = {
   toolCalls: { id: string; name: string; argsJson: string }[];
   // isError carries Anthropic's tool_result.is_error flag (a failed tool call) through the Anthropic door;
   // the OpenAI door has no equivalent field and leaves it unread.
-  toolResults: { callId: string; content: string; isError?: boolean }[];
+  toolResults: { callId: string; content: string; isError?: boolean; contentParts?: NormalizedContentPart[] }[];
+  // Responses preserves interleaved text/images; existing doors retain their flattened defaults.
+  contentParts?: NormalizedContentPart[];
   // #141: pre-split text blocks for the Anthropic body builder (one text block per entry — the advisor
   // reviewer's per-turn transcript, cacheable prefix). text stays the full join; every other backend
   // leaves this field unread.
@@ -397,7 +400,7 @@ export type NormalizedTurn = {
 };
 
 // One OpenAI message-content part for a multimodal (vision) user message.
-type OAContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+type OAContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } };
 
 // One OpenAI chat message. A user message is a plain string unless it has images, then a multimodal
 // content array. Assistant turns may carry tool_calls; a tool result is its own 'tool' message keyed by
@@ -427,7 +430,11 @@ export const buildOpenAiChatMessages = (turns: NormalizedTurn[]): OAChatMessage[
     const images = turn.images ?? [];
     // A bare tool-result turn carries no user prose or image, so don't emit an empty user message.
     if (turn.toolResults.length && !turn.text && !images.length) return toolMsgs;
-    const content: string | OAContentPart[] = images.length
+    const content: string | OAContentPart[] = turn.contentParts ? turn.contentParts.map(p => {
+      if (p.type === 'text') return p;
+      if (p.detail === 'original') throw new Error('Chat Completions does not support original image detail');
+      return { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${p.dataBase64}`, ...(p.detail ? { detail: p.detail } : {}) } };
+    }) : images.length
       ? [
           ...(turn.text ? [{ type: 'text' as const, text: turn.text }] : []),
           ...images.map((img) => ({ type: 'image_url' as const, image_url: { url: `data:${img.mimeType};base64,${img.dataBase64}` } })),
