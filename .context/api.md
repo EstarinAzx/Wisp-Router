@@ -7,9 +7,9 @@ tags: [context, api, vscode]
 
 # Surface
 
-## Native Codex source surface (#209)
+## Native Codex surface (2.1.5)
 
-`POST /v1/responses` shares the Bridge access secret, routing and Provider execution. `codex-wisp` is a source launcher, not an upstream Provider. Supported native request shapes, explicit refusals and source commands are documented in `docs/codex-wisp.md`; see [[active-work]] for the remaining #210 fidelity and #211 packaging slices.
+`POST /v1/responses` shares the Bridge access secret, Routing map and Provider execution. `codex-wisp` is the native-client launcher, not an upstream Provider. It lists Aliases alongside native choices using a child-only catalog. The Routing map optionally stores `codexModels` Targets keyed by exact model id; precedence is Provider id, Alias, Codex route, Claude Family route, Active Provider. `wisp routing codex [set <model-id> <provider>/<model> | unset <model-id>]` and the TUI Codex section edit these routes. Existing snapshot/revert excludes Codex routes. Request routing is live; catalog metadata refreshes on relaunch. Supported request shapes, refusals and commands live in `docs/codex-wisp.md`; [[active-work]] records final local acceptance and pending publication.
 
 The project's surface is a VS Code extension: the Inquire command, other commands, a webview side panel, and (since #59) the shared **Wisp home** store `~/.wisp/` (config.json + owner-only auth.json — ADR-0002) that holds all state except the two editor-local tuning settings. It consumes one external API.
 

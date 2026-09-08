@@ -9,21 +9,20 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Wisp terminal/npm 2.1.4 and Wisp VSIX 1.13.7 are published and verified.** [Release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.4), source `d3fcca682acc3d8e300ba414204977422e66ecca`, workflow `34180770927` passed all five jobs. Exact npm metadata and latest tag confirm 2.1.4.
+**queue empty** for Wisp 2.1.5: #215–#218 are closed, final [PR #222](https://github.com/EstarinAzx/Wisp-Router/pull/222) merged as `e45cc9bd978b9549a792741fb41f1cfbd85034d7`. Relay completed; all workers/reviewers archived.
 
-The implementation queue is empty and its relay is stopped. No further release action is needed. **Installation was not requested:** installed Wisp 2.1.3 and extension 1.13.6 remain unchanged. Install/update only on user instruction.
+Terminal 2.1.5 and VSIX 1.13.8 are locally prepared and independently reviewed. **Not published or installed by this run.** No successor should start without a new task.
 
 ## Next action, if requested
 
-Use published downloads in `out/release-2.1.4-published/` (not the earlier local candidates). GitHub SHA-256 digests and npm SHA-512 integrity are checked; the published Windows/npm launcher passed smoke and native custom/discovery checks. Detailed evidence and paths are in [[active-work]].
+For publication, review `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/ticket-215-codex-picker-aliases/out/release-2.1.5/inventory.json`, candidate bytes and acceptance evidence linked from [[active-work]]. The local matrix covers Windows only; cross-platform release workflow has not run.
 
 ## Landmines
 
-- Preserve user-owned `.context/flows.md` and `.context/Untitled.canvas`. Stage only explicit context paths.
-- Check running Bridge ownership before any update/restart; publication did not replace a loaded process.
-- Native/live-provider acceptance remains limited to the recorded mock checks; four-platform CI validates compiled build/dispatch, not native Codex sessions on macOS/Linux.
-- Saved bearer 401 and Node TLS-chain trouble are separate held concerns. Preserve credentials and TLS settings.
-- Slot plugin is unchanged. Extension 1.13.7 is a GitHub VSIX; Marketplace publication was not performed.
+- Traycer GUI aliases remain **NOT VERIFIED**; use the committed compatibility report, not standalone model/list success, as the current conclusion.
+- Build/test with Bun 1.4.2 (isolated runtime retained in the ticket worktree); global 1.3.14 was not replaced. Keep listener-closure checks intact.
+- Preserve user-owned `.context/flows.md`, `.context/Untitled.canvas`, retained worktrees and previous release artifacts.
+- Installed VS Code, macOS/Linux native and real Provider acceptance remain untested. No credentials/TLS repairs, service restarts, Slot changes or managed Traycer patches.
 
 ## Related
 

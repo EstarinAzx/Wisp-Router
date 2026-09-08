@@ -8,46 +8,46 @@ tags: [context, active-work]
 # Active Work
 
 _Last updated: 2026-09-08 by GPT-6 Astra / Codex (auto)_
-_Release source: `d3fcca682acc3d8e300ba414204977422e66ecca`, tag `v2.1.4`_
+_At source commit: `e45cc9bd978b9549a792741fb41f1cfbd85034d7`_
 
 ## Current focus
 
-**Wisp terminal/npm 2.1.4 and the Wisp 1.13.7 VSIX are published and verified.** Release work is complete. The user requested the release, not installation; installed terminal 2.1.3 and extension 1.13.6 remain unchanged.
+Wisp terminal 2.1.5 and companion VSIX 1.13.8 source and local Windows candidates are complete. The four-ticket relay is finished. Publication and installation were not part of this run.
 
 ## State
 
-- **Published:** [release v2.1.4](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.4), four platform binaries and `wisp-1.13.7.vsix`. [Workflow 34180770927](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34180770927) passed all four native build/smoke jobs and publication.
-- **npm:** exact `wisp-router@2.1.4` metadata and `latest: 2.1.4` confirmed; all four scoped platform packages expose 2.1.4. Published shell contains all three commands and matching platform pins.
-- **Verified:** five downloaded GitHub assets match their SHA-256 digests. npm shell and Windows platform archive match SHA-512 integrity; its binary matches the GitHub Windows asset. VSIX JSON/XML versions are 1.13.7.
-- **Checks:** fresh 1,139 core tests, 86 terminal tests, both typechecks, extension compile/package and release metadata review passed. Downloaded Windows/npm smoke and native custom/discovery roundtrips passed. Earlier seven-case source/compiled/npm coverage remains recorded.
-- **In flight:** none. Implementation spec #208 and #209–#211 are closed; the implementation relay is stopped and all worker/reviewer agents are archived.
-- **Not installed:** no global package/VSIX installation, runtime restart, credential repair or TLS changes were performed.
+- **Done:** #215 picker Aliases (PR #219), #216 exact Codex model routes (PR #220), #217 Traycer compatibility investigation (PR #221), and #218 local package acceptance (PR #222). All four issues are closed and all relay workers/reviewers archived.
+- **Gate:** 1,147 core tests, 96 TUI tests / 335 assertions, both typechecks, extension build, archive checks and 48 source/compiled/npm native cases passed. Independent review repeated the 48-case matrix. Coordinator reverified the four artifact hashes and packaged smoke after merge.
+- **Traycer:** compatibility remains **NOT VERIFIED**. Discovery uses Codex model/list, but a separately isolated catalog/transport connection across GUI discovery and execution was not demonstrated. See `docs/investigations/traycer-codex-compatibility.md`.
+- **In flight:** none. Last published release remains the separately delivered 2.1.4/1.13.7; this run made no global installation or live runtime changes.
 
 ## Pick up here
 
-No further release task is queued. Install the published versions only if the user requests it. Use the published downloads, not the earlier local preparation binaries:
+No active implementation work — queue empty. Publication requires a new instruction. If requested, start with the reviewed candidate inventory and release constraints:
 
-`D:/.claude/claude projects/autocomplete_extension/out/release-2.1.4-published/`
+`C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/ticket-215-codex-picker-aliases/out/release-2.1.5/`
 
-It contains five release assets, npm shell/Windows archives, `metadata.json`, `verification.json`, extracted npm packages and the runnable `verify.py`. Published native-check report: `out/codex-native-2026-09-08T02-51-21-114Z/REPORT.md`.
+Candidates: `wisp-v2.1.5-win32-x64.exe`, `wisp-router-2.1.5.tgz`, `tsd47216-wisp-router-win32-x64-2.1.5.tgz`, `wisp-1.13.8.vsix`. `inventory.json` owns exact byte counts, SHA256 hashes and archive entries. Preserve this directory and its runnable checks.
 
-Release evidence: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/wisp-2-1-4-release/index.md`. The retained source worktree is on `release/2.1.4`; its older local build artifacts remain available for comparison.
+Acceptance/review: `C:/Users/S.D/.traycer/epics/b35873d7-fb18-441e-b64f-5a9613b76895/artifacts/codex-wisp-2-1-5-plan/tickets/04-package-acceptance/evidence/index.md` and sibling `review/index.md`.
+Relay state: `.claude/relay/codex-wisp-2.1.5.traycer.json` (stopped/completed).
 
 ## Skills for next session
 
-- `preset pick-up` — rehydrate and inspect actual installed/runtime state before installation.
-- `verification-before-completion` — verify installed bytes and launcher behavior if installation is requested.
+- `preset pick-up` — resume this handoff and inspect actual release/install state.
+- `verification-before-completion` — verify exact artifacts and release surfaces before any authorized publication.
 
 ## Open questions
 
-No release blocker remains. Installation is pending user instruction. VS Code Marketplace publication was not performed; 1.13.7 is available as a GitHub VSIX.
+2.1.5 publication, cross-platform release workflow execution and installation remain separate actions. Traycer integration needs a supported connection contract or separately authorized investigation; do not advertise it as working.
 
 ## Recent context
 
-- The release workflow rebuilds the extension, so its manifest and workspace lock were bumped to 1.13.7 instead of attaching changed core under 1.13.6. No runtime code or dependencies changed for the release cut.
-- Native Codex tests use Windows and simulated Providers with a source-hosted Bridge; downloaded compiled Bridge HTTP smoke is separate. Native Codex/live-provider acceptance on macOS/Linux is not claimed by their successful build/smoke jobs.
-- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of commits. Saved routes, credentials, permissions, browser settings and TLS were preserved.
-- The saved Wisp Codex bearer 401 and local Node TLS-chain concern remain held separately; do not copy tokens or relax TLS to install. See [[release-follow-ups]].
+- The user wants every discovered native Codex choice independently routable, not four fixed named families. Catalog metadata refreshes on relaunch; Target routing stays live. Existing snapshots still cover Alias/Claude rows only.
+- Windows Bun 1.3.14 leaked inherited listener handles. The repository/builds use verified Bun 1.4.2; global Bun was left unchanged. Use the retained isolated runtime for native checks. Avoid rerunning old-runtime failure diagnostics: historical non-serving kernel listener entries may remain, with no owned live process to stop.
+- Native matrices use a source-hosted Bridge; compiled Bridge smoke is separate. VSIX resolver bytes were executed, but installed VS Code, Traycer GUI, macOS/Linux native and live-provider acceptance are not claimed.
+- Preserve user-owned `.context/flows.md` and `.context/Untitled.canvas`, prior worktrees and old release artifacts. Context updates are committed separately on main.
+- Credentials, TLS, provider settings, permissions and managed Traycer files remain unchanged. Earlier bearer/TLS concerns stay separate in [[release-follow-ups]].
 
 ## Related
 

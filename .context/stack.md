@@ -7,7 +7,7 @@ tags: [context, stack]
 
 # Stack
 
-The native Codex source launcher uses Bun's TOML parser and Node process/TCP APIs, with no new dependency. Its child-only credential variable is `WISP_CODEX_BRIDGE_SECRET`; no saved provider/authentication settings are changed. See `docs/codex-wisp.md` and [[active-work]] for the verified Windows/Bun scope and remaining packaging work.
+The native Codex launcher uses Bun's TOML parser and Node process/TCP APIs. Source/native verification requires Bun >=1.4.2; repository package-manager metadata and release builds pin the verified 1.4.2 baseline because older Windows Bun leaked inherited sockets. Global Bun was not replaced. `codex debug models` supplies complete native descriptors; a per-child `model_catalog_json` adds Wisp Aliases and routed-model metadata. The child-only credential variable remains `WISP_CODEX_BRIDGE_SECRET`; saved native provider/authentication settings remain unchanged. See `docs/codex-wisp.md` and [[active-work]] for completed local package acceptance and limits.
 
 ## Languages & runtime
 - TypeScript: `^7.0.2` (native Go compiler, "Project Corsa"; ships `bin/tsc`). devDep in all 3 packages. **Every tsconfig here must set `"types": ["node"]`** — TS 7 dropped auto-inclusion of `@types/*` (see [[gotchas]]).
