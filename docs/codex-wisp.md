@@ -1,10 +1,10 @@
 # Native Codex through Wisp
 
-Terminal 2.1.4 is prepared in source and local Windows artifacts. Publication and installation
-are separate steps; an existing Wisp 2.1.3 installation does not include this launcher.
+`codex-wisp` is available in terminal 2.1.4. Use its Bridge or the Bridge hosted by VS Code
+extension 1.13.7. Older installed packages do not gain the new command or endpoint automatically.
 
-Configure a Wisp Provider and model, then start a Bridge built from this source (`wisp serve`
-or `/bridge` in the rebuilt TUI). An already installed older Bridge lacks the Responses door.
+Configure a Wisp Provider and model, then start the updated Bridge (`wisp serve`, `/bridge`
+in the TUI, or the extension's Bridge control). Restart older hosts after updating their package.
 Run the matching launcher from another terminal:
 
 ```sh
@@ -124,21 +124,17 @@ the compiled Responses route, config/auth preservation and npm optional-dependen
 ## Release surfaces and evidence limits
 
 - **Terminal 2.1.4:** compiled TUI/headless Bridge bundles the new shared core; npm exposes
-  `wisp`, `claude-wisp` and `codex-wisp`. Local Windows x64 artifacts are the verified release
-  candidates. No tag, GitHub release, npm publish or global install is part of preparation.
-- **Shared core:** the Responses endpoint and Provider fidelity changes also enter a newly
-  compiled extension. Full core tests and extension compilation cover regressions; that does
-  not exercise an installed VS Code session. The installed extension remains 1.13.6 and
-  unchanged. Its next version/publication is a separate release decision; rebuilding a 1.13.6
-  VSIX from this source would produce different bundled code under the same version.
+  `wisp`, `claude-wisp` and `codex-wisp` through the same binary resolver.
+- **VS Code 1.13.7:** the release VSIX bundles the Responses endpoint and Provider fidelity
+  changes for the extension-hosted Bridge. Core tests and extension compilation cover
+  regressions; they do not exercise an installed VS Code session. Install the VSIX and reload
+  the extension before using the updated hosted Bridge.
 - **Slot plugin:** unchanged and unrelated to this Codex launcher.
 - **Coverage:** native `codex-cli 0.153.4` on Windows x64 exercises text/resume, image/resume,
   function/custom tools, patch policy rejection, discovery and namespaced follow-up against
   a deterministic keyed upstream. HTTP suites also cover local Codex and Anthropic wire
   fixtures. These are mock Provider tests, not real-provider acceptance.
 - **Release matrix:** win32-x64, darwin-arm64, darwin-x64 and linux-x64 retain native builds
-  and now run the compiled smoke check. The matrix is unrun during local preparation; its
-  presence does not prove macOS/Linux native Codex behavior. Existing TLS, resolver cache,
-  version checks and GitHub-before-npm publication ordering are retained. SHA-256 values for
-  local artifacts are recorded with the preparation evidence; no new downloader verification
-  or release checksum mechanism is claimed.
+  and run compiled smoke checks for dispatch and authentication. These do not establish
+  macOS/Linux native Codex behavior or real-provider acceptance. Existing TLS, resolver cache,
+  version checks and GitHub-before-npm publication ordering are retained.

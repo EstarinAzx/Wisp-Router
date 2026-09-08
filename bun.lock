@@ -38,7 +38,7 @@
     },
     "packages/vscode": {
       "name": "wisp",
-      "version": "1.13.6",
+      "version": "1.13.7",
       "dependencies": {
         "@wisp/core": "workspace:*",
         "openai": "^4.80.0",

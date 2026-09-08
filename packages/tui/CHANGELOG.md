@@ -6,7 +6,7 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
-## [2.1.4] - Unreleased
+## [2.1.4] - 2026-09-08
 
 ### Added
 
@@ -20,16 +20,12 @@ Changes up to 2.0.10 are folded into the product changelog at
 
 ### Verification and surfaces
 
-- Local Windows x64 binary and npm archives are prepared for 2.1.4. Native CLI contract:
-  `codex-cli 0.153.4`, isolated homes and deterministic local upstreams; no real-provider
-  acceptance claim. All four existing release runners gain compiled dispatch smoke coverage;
-  macOS/Linux matrix jobs have not run during this local preparation.
-- Shared-core changes enter both terminal builds and newly compiled extension builds. Core and
-  terminal regression suites, typechecks and extension compilation are required gates.
-- Installed terminal 2.1.3 and extension 1.13.6 are unchanged. Extension version/publication is
-  separate; rebuilding its current manifest would bundle new core under the old version.
-- Slot plugin unchanged. Release tag, GitHub release, npm publication and global installation
-  remain pending; this entry records source/artifact preparation only.
+- **npm / TUI / terminal-hosted Bridge: 2.1.4.** Includes the new launcher and shared core.
+- **VS Code: 1.13.7.** The release VSIX bundles the same core for the extension-hosted Bridge.
+- **wisp-slot: unchanged.** Already running hosts need restarting after their package is updated.
+- Native CLI checks use `codex-cli 0.153.4` on Windows, isolated homes and deterministic local
+  upstreams. They do not establish real-provider acceptance or macOS/Linux native Codex behavior.
+  The four native release runners validate compiled dispatch and authentication with smoke checks.
 
 ## [2.1.3] - 2026-09-07
 

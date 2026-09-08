@@ -4,6 +4,23 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.7] - 2026-09-08
+
+### Added
+
+- The extension-hosted Bridge accepts native Codex Responses requests, including supported
+  text, images, tools and visible conversation history. Unsupported content and controls
+  fail explicitly; see the [Codex compatibility guide](../../docs/codex-wisp.md).
+- Responses streaming preserves complete final text, real usage, failure and incomplete
+  statuses, and cancellation across supported Provider paths.
+
+### Surfaces
+
+- **VS Code: 1.13.7** - bundles the same shared core as **wisp-router 2.1.4**. Install this
+  VSIX and reload the extension to update its hosted Bridge.
+- The `codex-wisp` launcher is delivered by the terminal/npm package, not by the extension.
+- **wisp-slot: unchanged.**
+
 ## [1.13.6] ? 2026-09-07
 
 ### Fixed

@@ -38,7 +38,7 @@ structured output and provider/profile overrides are unsupported and rejected. I
 depends on the Provider wire; custom grammar is described but not enforced by generic upstreams.
 Full limits and source invocation: [Codex guide](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-wisp.md).
 
-2.1.4 preparation verifies local Windows artifacts against deterministic mock Providers.
+2.1.4 native Codex checks verify Windows artifacts against deterministic mock Providers.
 macOS/Linux release smoke jobs and live-provider acceptance are not claimed as locally run.
 Publication is separate; existing 2.1.3 installations do not include the new launcher.
 

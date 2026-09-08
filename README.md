@@ -29,7 +29,7 @@ Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, y
 
 - **VS Code** — providers show up as native models in Copilot's **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker, with streaming, tool calling, vision, and live per-model context windows.
 - **Claude Code** — the **Bridge** exposes OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`; `claude-wisp` launches Claude Code already wired to it.
-- **Native Codex (2.1.4 preparation)** — `codex-wisp` uses the new `/v1/responses` visible-history subset. [Setup, supported tools/content, packaging and limits](docs/codex-wisp.md). Local source/artifacts are prepared; publication is pending and existing installations are unchanged.
+- **Native Codex (2.1.4)** — `codex-wisp` uses the new `/v1/responses` visible-history subset. [Setup, supported tools/content, packaging and limits](docs/codex-wisp.md). Wisp's VS Code extension includes it in version 1.13.7.
 - **Terminal** — the **Wisp TUI** manages providers, keys, OAuth sign-ins, and routing, and hosts the Bridge headlessly (`wisp serve`).
 
 The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
@@ -83,9 +83,9 @@ wisp serve             # headless Bridge (no UI, Ctrl+C stops)
 claude-wisp            # launch Claude Code routed through the Bridge
 ```
 
-The prepared 2.1.4 package adds `codex-wisp` (`wisp codex-wisp` for a standalone binary).
-Use a rebuilt 2.1.4 Bridge and an independently installed native Codex CLI. See the
-[Codex guide](docs/codex-wisp.md); a current 2.1.3 install does not contain this unreleased command.
+The 2.1.4 package adds `codex-wisp` (`wisp codex-wisp` for a standalone binary).
+Use a 2.1.4 Bridge or Wisp's VS Code extension 1.13.7 and an independently installed native Codex CLI. See the
+[Codex guide](docs/codex-wisp.md); a current 2.1.3 install does not contain this command.
 
 ### VS Code extension
 
@@ -119,7 +119,7 @@ Bun-workspaces monorepo — three packages, one root `bun.lock`.
 |---|---|
 | [`packages/core`](packages/core) | The engine: Provider catalog, routing map, Bridge protocol + server, OAuth managers and clients, the `~/.wisp` home store. vscode-free, private, never published — each face bundles it at build time. Tests live in [`packages/core/tests`](packages/core/tests). |
 | [`packages/vscode`](packages/vscode) | The VS Code extension ([README](packages/vscode/README.md)): native chat provider, side panel (Preact + Tailwind), Inquire, Bridge host. |
-| [`packages/tui`](packages/tui) | The Wisp TUI (opentui + React on Bun), headless Bridge, `claude-wisp` and prepared `codex-wisp` launchers. Ships on npm as [`wisp-router`](https://www.npmjs.com/package/wisp-router). |
+| [`packages/tui`](packages/tui) | The Wisp TUI (opentui + React on Bun), headless Bridge, `claude-wisp` and `codex-wisp` launchers. Ships on npm as [`wisp-router`](https://www.npmjs.com/package/wisp-router). |
 
 ## Development
 
