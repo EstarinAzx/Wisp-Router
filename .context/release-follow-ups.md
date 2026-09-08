@@ -9,15 +9,15 @@ tags: [context, follow-ups, gotchas]
 
 Carried from the September 6 baton so the current pick-up note can stay short. Re-check live state before acting. The cache release left these held; the September 7 terminal bug hunt has since completed the two items named below.
 
-## Codex Wisp 2.1.4 prepared; publication pending
+## Codex Wisp 2.1.4 released; installation pending
 
-#209–211 are complete through PR #214 (`e23f103`). Local Windows binary and npm archives are
-verified; exact paths, SHA-256 values, native/mock coverage and independent review are linked from
-[[active-work]]. Coordinator verification and parent #208 closure finish the run. A separate release
-instruction is needed for tags, GitHub/npm publication or installation. Installed terminal 2.1.3
-and extension 1.13.6 remain untouched. New extension builds bundle changed shared core; decide its
-release version before publishing a rebuilt VSIX. Slot is unchanged. macOS/Linux matrix and live
-Provider acceptance were not executed during preparation.
+#208 and #209–211 are closed. The user authorized the release: tag `v2.1.4` at `d3fcca6`,
+workflow `34180770927`, all five jobs passed. Terminal/npm 2.1.4 and VSIX 1.13.7 are published.
+Downloaded GitHub assets and npm archives pass integrity checks; published Windows/npm commands
+pass smoke and native tool checks. Paths and evidence are in [[active-work]]. Installation remains
+pending: installed terminal 2.1.3 and extension 1.13.6 are untouched, as is the slot plugin.
+macOS/Linux builds and compiled smoke checks passed; native Codex and live Provider acceptance
+on those hosts were not established. VS Code Marketplace publication was not performed.
 
 ## Completed and released in Wisp 2.1.3
 
