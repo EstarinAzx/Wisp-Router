@@ -368,3 +368,71 @@ describe('oauthModelOptions — Grok', () => {
     expect(oauthModelOptions(provider(), catalog)).toEqual(['grok-4.5']);
   });
 });
+
+
+describe('Grok union-schema tool roundtrip', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const schema = {
+    type: 'object', properties: {}, oneOf: [{ $ref: '#/$defs/choice' }],
+    $defs: { choice: { oneOf: [{ type: 'object', properties: { mode: { type: 'string', enum: ['b'] } }, required: ['mode'], additionalProperties: false }] } },
+  };
+  const unionTool = { type: 'function' as const, name: 'select_mode', description: 'Keep description', parameters: schema, strict: false };
+  const plainTool = { ...unionTool, name: 'plain', parameters: { type: 'object', properties: { arguments: { type: 'string' } } } };
+  const args = { creds: { accessToken: 'synthetic' }, baseUrl: 'https://api.x.ai/v1', model: 'grok-4.6', responses: { effort: 'medium' as const }, rejectRedirects: true, tools: [unionTool, plainTool] };
+  const calls = [{ type: 'function_call', id: 'item1', call_id: 'call1', name: 'select_mode', arguments: '{"arguments":{"mode":"b"}}' }, { type: 'function_call', id: 'item2', call_id: 'call2', name: 'plain', arguments: '{"arguments":"literal"}' }];
+  const collect = async (messages: any[]) => { const events = []; for await (const event of xaiStream({ ...args, messages })) events.push(event); return events; };
+
+  it('wraps only union schemas and restores original arguments through tool-result continuation', async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string));
+      return new Response(`event: response.completed\ndata: ${JSON.stringify({ response: { output: bodies.length === 1 ? calls : [{ type: 'message', content: [{ type: 'output_text', text: 'done' }] }] } })}\n\n`);
+    });
+    const original = structuredClone(args.tools);
+    const events = await collect([{ role: 'user', content: 'Choose mode b' }]);
+    expect(events).toEqual([{ type: 'toolCall', call: { id: 'call1', name: 'select_mode', argsJson: '{"mode":"b"}' } }, { type: 'toolCall', call: { id: 'call2', name: 'plain', argsJson: '{"arguments":"literal"}' } }]);
+    const parameters = bodies[0].tools[0].parameters;
+    expect(parameters).toMatchObject({ type: 'object', required: ['arguments'], additionalProperties: false });
+    expect(parameters.properties.arguments.oneOf).toEqual([{ $ref: '#/properties/arguments/$defs/choice' }]);
+    expect(parameters.properties.arguments.additionalProperties).toBe(true);
+    expect(parameters.properties.arguments.$defs.choice.oneOf[0].additionalProperties).toBe(false);
+    expect(bodies[0].tools[1]).toEqual(plainTool);
+    const toolCalls = events.flatMap(e => e.type === 'toolCall' ? [e.call] : []);
+    expect(await collect([{ role: 'user', content: 'Choose mode b' }, { role: 'assistant', content: '', toolCalls }, { role: 'user', content: 'Continue', toolResults: [{ callId: 'call1', content: 'ok' }] }])).toEqual([{ type: 'text', value: 'done' }]);
+    expect(bodies[1].input.filter((item: any) => item.type === 'function_call')).toEqual(calls.map(({ id, ...item }) => item));
+    expect(args.tools).toEqual(original);
+  });
+
+  it('rebases schema references without rewriting enum/example data', async () => {
+    const literal = { $ref: '#/oneOf/0', type: 'object' };
+    const parameters = { ...schema, properties: { child: { $ref: '#%2FoneOf%2F0' }, literal: { enum: [literal] } }, examples: [literal] };
+    let body: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { body = JSON.parse(init.body as string); return new Response('event: response.completed\ndata: {"response":{"output":[]}}\n\n'); });
+    for await (const _ of xaiStream({ ...args, tools: [{ ...unionTool, parameters }], messages: [{ role: 'user', content: 'hi' }] })) { /* drain */ }
+    const inner = body.tools[0].parameters.properties.arguments;
+    expect(inner.properties.child.$ref).toBe('#/properties/arguments%2FoneOf%2F0');
+    expect(inner.properties.literal.enum).toEqual([literal]);
+    expect(inner.examples).toEqual([literal]);
+  });
+
+  it('preserves unevaluated-property constraints instead of changing their annotations', async () => {
+    const parameters = { ...schema, unevaluatedProperties: false };
+    let body: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { body = JSON.parse(init.body as string); return new Response('event: response.completed\ndata: {"response":{"output":[]}}\n\n'); });
+    for await (const _ of xaiStream({ ...args, tools: [{ ...unionTool, parameters }], messages: [{ role: 'user', content: 'hi' }] })) { /* drain */ }
+    expect(body.tools[0].parameters).toEqual(parameters);
+  });
+
+  it.each(['$id', '$dynamicRef', '$recursiveRef'])('preserves resource-scoped schemas with %s', async (keyword) => {
+    const parameters = { ...schema, [keyword]: 'https://example.test/schema' };
+    let body: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { body = JSON.parse(init.body as string); return new Response('event: response.completed\ndata: {"response":{"output":[]}}\n\n'); });
+    for await (const _ of xaiStream({ ...args, tools: [{ ...unionTool, parameters }], messages: [{ role: 'user', content: 'hi' }] })) { /* drain */ }
+    expect(body.tools[0].parameters).toEqual(parameters);
+  });
+
+  it.each(['{}', '{"arguments":null}', '{"arguments":[],"extra":1}', '{"arguments":{},"extra":1}', 'PRIVATE_NOT_JSON'])('refuses malformed wrapped arguments without exposing content: %s', async (argumentsJson) => {
+    vi.stubGlobal('fetch', async () => new Response(`event: response.completed\ndata: ${JSON.stringify({ response: { output: [{ ...calls[0], arguments: argumentsJson }] } })}\n\n`));
+    await expect(collect([{ role: 'user', content: 'Go' }])).rejects.toMatchObject({ code: 'stream_invalid', message: 'Desktop provider request failed' });
+  });
+});
