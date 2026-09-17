@@ -125,6 +125,7 @@ export class CodexModelCatalog {
         url.searchParams.set('client_version', clientVersion);
         const res = await this.request(url, {
           headers: { Authorization: `Bearer ${bearer}`, 'chatgpt-account-id': creds.accountId!, originator: 'codex_cli_rs' },
+          redirect: 'error',
           signal: AbortSignal.timeout(4000),
         });
         if (!res.ok) { await res.arrayBuffer(); throw new Error(`Codex model discovery failed (HTTP ${res.status}).`); }

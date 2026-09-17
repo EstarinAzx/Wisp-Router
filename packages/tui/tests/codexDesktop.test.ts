@@ -90,6 +90,41 @@ test('disable edits the owned statement rather than matching text inside unrelat
   writeFileSync(config, unrelated + readFileSync(config, 'utf8'));
   await desktopAction('disable', opts); expect(readFileSync(config, 'utf8')).toBe(unrelated + original);
 }));
+test('enable refuses unowned catalog output files including original source/output collisions', async () => {
+  for (const sourceIsOutput of [false, true]) await fixture(async (opts, root, config) => {
+    const path = join(opts.wispHome!, 'codex-desktop/models.json'); mkdirSync(join(opts.wispHome!, 'codex-desktop'));
+    const userData = JSON.stringify({ userOwned: true, ...native }); writeFileSync(path, userData);
+    if (sourceIsOutput) writeFileSync(config, `model_catalog_json=${JSON.stringify(path)}\n`);
+    const before = readFileSync(config, 'utf8'); await expect(desktopAction('enable', opts)).rejects.toThrow(/catalog.*exist/i);
+    expect(readFileSync(path, 'utf8')).toBe(userData); expect(readFileSync(config, 'utf8')).toBe(before);
+    expect(existsSync(join(opts.wispHome!, 'codex-desktop/state.json'))).toBe(false);
+  });
+});
+test('enable rechecks unowned output files created during async preflight', async () => fixture(async (opts, root, config) => {
+  const path = join(opts.wispHome!, 'codex-desktop/models.json');
+  opts.probe = async () => { mkdirSync(join(opts.wispHome!, 'codex-desktop')); writeFileSync(path, 'concurrent user file'); };
+  await expect(desktopAction('enable', opts)).rejects.toThrow(/already exists/); expect(readFileSync(path, 'utf8')).toBe('concurrent user file');
+  expect(readFileSync(config, 'utf8')).toBe(original);
+}));
+test('prepared activation recovery preserves unrelated edits made before config installation', async () => {
+  for (const stage of ['probe', 'journal']) await fixture(async (opts, root, config) => {
+    const append = () => writeFileSync(config, readFileSync(config, 'utf8') + '# concurrent unrelated edit\n');
+    if (stage === 'probe') opts.probe = async () => append();
+    else opts.write = (path, text) => { atomicDesktopWrite(path, text); if (path.endsWith('state.json')) append(); };
+    await expect(desktopAction('enable', opts)).rejects.toThrow(/concurrently/); delete opts.write;
+    const before = readFileSync(config, 'utf8'); await desktopAction('disable', opts);
+    expect(readFileSync(config, 'utf8')).toBe(before); expect(existsSync(join(opts.wispHome!, 'codex-desktop/state.json'))).toBe(false);
+  });
+});
+test('restoring recovery tolerates unrelated later edits but refuses an owned edit', async () => {
+  for (const conflict of [false, true]) await fixture(async (opts, root, config) => {
+    await desktopAction('enable', opts); opts.write = (path, text) => { atomicDesktopWrite(path, text); if (path === config) throw new Error('crash after restore'); };
+    await expect(desktopAction('disable', opts)).rejects.toThrow(); delete opts.write;
+    const changed = conflict ? original.replace('model_provider = "openai"', 'model_provider = "changed"') : original + '# unrelated after restore\n'; writeFileSync(config, changed);
+    if (conflict) await expect(desktopAction('disable', opts)).rejects.toThrow(/conflict/); else await desktopAction('disable', opts);
+    expect(readFileSync(config, 'utf8')).toBe(changed);
+  });
+});
 test('activation write failures remain recoverable at every write stage', async () => {
   for (const failAt of [1, 2, 3, 4]) await fixture(async (opts, root, config) => {
     let writes = 0; opts.write = (path, text) => { if (++writes === failAt) throw new Error('injected disk failure'); atomicDesktopWrite(path, text); };

@@ -19,7 +19,7 @@ const answer = (res: ServerResponse) => { res.writeHead(200, { 'Content-Type': '
 
 async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Promise<void>, upstreamReply = answer) {
   const seen: any[] = [];
-  const upstream = createServer(async (req, res) => { let raw = ''; for await (const c of req) raw += c; seen.push({ headers: req.headers, body: JSON.parse(raw), url: req.url }); upstreamReply(res); });
+  const upstream = createServer(async (req, res) => { let raw = ''; for await (const c of req) raw += c; seen.push({ headers: req.headers, body: raw ? JSON.parse(raw) : undefined, url: req.url }); upstreamReply(res); });
   const up = await listen(upstream); const spare = createServer(); const port = await listen(spare); await close(spare);
   const provider = { id: 'external', label: 'External', baseUrl: `http://127.0.0.1:${up}/v1`, defaultModel: 'DEFAULT', apiKeyEnv: '' };
   const map = { families: {}, aliases: [{ name: 'alias', target: { providerId: 'external', model: 'EXACT' } }], codexModels: { 'native-overridden': { providerId: 'external', model: 'OVERRIDE' } } };
@@ -75,6 +75,25 @@ describe('signed desktop production Bridge', () => {
     const reply = await post(port, 'alias'); expect(reply.status).toBe(502);
     expect(reply.text + logs.join('\n')).not.toContain('external-token');
   }, res => { res.writeHead(502, { 'content-type': 'application/json' }); res.end('{"error":{"message":"fetch failed external-token"}}'); }));
+  it('refuses redirects during real cold Codex catalog discovery on the signed adapter', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wisp-cold-catalog-')); const prior = process.env.WISP_HOME; process.env.WISP_HOME = root;
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', (url: string | URL, init?: RequestInit) => {
+      if (String(url) === 'https://registry.npmjs.org/@openai/codex/latest') return Promise.resolve(Response.json({ version: '0.154.0' }));
+      if (!String(url).startsWith('http://127.0.0.1:')) throw new Error('Test refuses non-local network');
+      return realFetch(url, init);
+    });
+    try { await fixture(async (port, seen, deps) => {
+      deps.providers[0].kind = 'codex'; deps.codexCreds = async () => ({ accessToken: 'provider-token', accountId: 'provider-account' });
+      await post(port, 'alias');
+      expect(seen.some(s => s.url.startsWith('/v1/models'))).toBe(true);
+      expect(seen.filter(s => s.url === '/stolen')).toHaveLength(0);
+    }, res => {
+      if (res.req.url?.startsWith('/v1/models')) { res.writeHead(307, { location: '/stolen' }); res.end(); }
+      else if (res.req.url === '/stolen') { res.setHeader('content-type', 'application/json'); res.end('{"models":[]}'); }
+      else { res.setHeader('content-type', 'text/event-stream'); res.end('event: response.completed\ndata: {"response":{"status":"completed","output":[]}}\n\n'); }
+    }); } finally { vi.unstubAllGlobals(); if (prior === undefined) delete process.env.WISP_HOME; else process.env.WISP_HOME = prior; rmSync(root, { recursive: true, force: true }); }
+  });
   it.each([false, true])('rejects external redirects, cross-origin=%s', async cross => {
     let hits = 0; const sink = createServer((_req, res) => { hits++; answer(res); }); const sinkPort = await listen(sink);
     try { await fixture(async (port, seen) => { expect((await post(port, 'alias')).status).toBe(502); expect(hits).toBe(0); expect(seen.every(s => s.url === '/v1/chat/completions')).toBe(true); }, res => { res.writeHead(307, { location: cross ? `http://127.0.0.1:${sinkPort}/stolen` : '/stolen' }); res.end(); }); }

@@ -10,7 +10,7 @@ import { resolveCodex } from './codex-wisp';
 const { TOML } = require('bun') as { TOML: { parse: (text: string) => Record<string, any> } };
 
 type Owned = { before?: string; after: string };
-type State = { schema: 1; phase: 'prepared' | 'active' | 'restoring'; restored?: string; codexHome: string; configExisted: boolean; original: string; source?: string;
+type State = { schema: 1; phase: 'prepared' | 'active' | 'restoring'; codexHome: string; configExisted: boolean; original: string; source?: string;
   fields: Record<string, Owned>; provider: string; nativeModels: string[] };
 export type DesktopOptions = {
   codexHome?: string; wispHome?: string;
@@ -100,17 +100,18 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   }
   if (action === 'disable') {
     if (!state) return status(false);
-    // Prepared journal + unchanged original means activation never reached the config write.
+    // Recovery compares only owned statements: unrelated edits can happen before installation,
+    // or after a restore committed but before its journal was removed.
     let restored = raw;
-    if (state.phase === 'restoring' && raw === state.restored) {
-      // The restore committed before the process stopped; only journal cleanup remains.
-    } else if (raw !== state.original) {
+    const current = parse(raw); const lines = ownedLines(raw);
+    const originalOwned = !current.model_providers?.wisp_desktop && Object.entries(state.fields).every(([key, field]) => lines[key]?.text === field.before);
+    if (raw !== state.original && !(state.phase !== 'active' && originalOwned)) {
       checkOwned(raw, state); restored = raw.replace(state.provider, '');
       for (const [key, field] of Object.entries(state.fields)) { const span = ownedLines(restored)[key]; restored = restored.slice(0, span.start) + (field.before ?? '') + restored.slice(span.end); }
     }
     parse(restored);
     if (readConfig(configFile) !== raw) throw new Error('Codex config changed concurrently; retry disable');
-    write(stateFile, JSON.stringify({ ...state, phase: 'restoring', restored }));
+    write(stateFile, JSON.stringify({ ...state, phase: 'restoring' }));
     if (!state.configExisted && restored === '') { if (existsSync(configFile)) unlinkSync(configFile); }
     else write(configFile, restored);
     unlinkSync(stateFile); if (existsSync(catalogFile)) unlinkSync(catalogFile);
@@ -123,6 +124,7 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
     if (action === 'enable') return status(true, { restartRequired: true });
   } else {
     if (action === 'refresh') throw new Error('Desktop integration is disabled; run wisp codex-desktop enable');
+    if (existsSync(catalogFile)) throw new Error('Unowned desktop catalog file already exists; move it and update any original catalog reference before enabling');
     if (parsed.model_providers?.wisp_desktop || parsed.model_provider === 'wisp_desktop') throw new Error('Reserved wisp_desktop provider already exists; resolve the conflict first');
     ownedLines(raw);
   }
@@ -153,6 +155,7 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   }
   parse(next); checkOwned(next, state);
   state = { ...state, phase: 'prepared', nativeModels: native.models.map(m => m.slug as string) };
+  if (action === 'enable' && (existsSync(stateFile) || existsSync(catalogFile))) throw new Error('Desktop state/catalog already exists after preflight; inspect the files before retrying');
   // Journal first. A crash before/after either following write is repaired by disable.
   write(stateFile, JSON.stringify(state)); write(catalogFile, JSON.stringify(catalog));
   if (readConfig(configFile) !== raw) throw new Error('Codex config changed concurrently; recovery journal retained');
