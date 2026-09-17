@@ -5,14 +5,13 @@ import { tmpdir } from 'node:os';
 import { desktopAction, atomicDesktopWrite, type DesktopOptions } from '../src/codexDesktop';
 
 const native = { models: [{ slug: 'gpt-native', display_name: 'Native', visibility: 'list', future_metadata: { kept: true } }] };
-const original = '# keep every byte\r\nmodel = "my-default" # keep\r\nmodel_provider = "openai" # original\r\nmodel_catalog_json = "original.json"\r\n\r\n[permissions]\r\npolicy = "keep"\r\n[profiles.other]\r\nmodel_provider = "elsewhere"\r\n';
+const original = '# keep every byte\r\nmodel = "my-default" # keep\r\nmodel_provider = "openai" # original\r\n\r\n[permissions]\r\npolicy = "keep"\r\n[profiles.other]\r\nmodel_provider = "elsewhere"\r\n';
 async function fixture(run: (opts: DesktopOptions, root: string, config: string) => Promise<void>) {
   const root = mkdtempSync(join(tmpdir(), 'wisp desktop ')); const codexHome = join(root, 'codex'); const wispHome = join(root, 'wisp');
   mkdirSync(codexHome); mkdirSync(wispHome); const config = join(codexHome, 'config.toml');
   writeFileSync(config, original); writeFileSync(join(codexHome, 'auth.json'), 'NATIVE_UNTOUCHED');
   writeFileSync(join(wispHome, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-local-secret' }));
   writeFileSync(join(wispHome, 'config.json'), JSON.stringify({ routing: { families: {}, aliases: [{ name: 'external-alias', target: { providerId: 'custom', model: 'target' } }] } }));
-  writeFileSync(join(codexHome, 'original.json'), JSON.stringify(native));
   const opts: DesktopOptions = { codexHome, wispHome, probe: async () => {}, catalogs: async () => ({ native, input: native }), capabilities: async () => () => undefined };
   try { await run(opts, root, config); } finally { rmSync(root, { recursive: true, force: true }); }
 }
@@ -39,16 +38,16 @@ test('enable persists signed provider/catalog, restores owned settings and prese
   expect(readFileSync(config, 'utf8')).toBe(original + '\r\n[user_added]\r\nkeep = "yes"\r\n');
   expect((await desktopAction('disable', opts)).enabled).toBe(false);
 }));
-test('refresh reads original source and removes generated aliases; native identity ignores user additions', async () => fixture(async (opts, root, config) => {
+test('refresh uses saved native source and removes aliases without promoting unrelated input', async () => fixture(async (opts, root, config) => {
   const sources: unknown[] = []; opts.catalogs = async source => { sources.push(source); return { native, input: { models: [...native.models, { slug: 'unknown/external', visibility: 'list' }] } }; };
   await desktopAction('enable', opts);
   writeFileSync(join(opts.wispHome!, 'config.json'), JSON.stringify({ routing: { families: {}, aliases: [] } }));
   await desktopAction('refresh', opts);
-  expect(sources).toEqual([join(opts.codexHome!, 'original.json'), join(opts.codexHome!, 'original.json')]);
+  expect(sources).toEqual([undefined]);
   const saved = JSON.parse(readFileSync(join(opts.wispHome!, 'codex-desktop', 'state.json'), 'utf8'));
   expect(saved.nativeModels).toEqual(['gpt-native']);
   const catalog = JSON.parse(readFileSync((Bun.TOML.parse(readFileSync(config, 'utf8')) as any).model_catalog_json, 'utf8'));
-  expect(catalog.models.map((m: any) => m.slug)).toEqual(['gpt-native', 'unknown/external']);
+  expect(catalog.models.map((m: any) => m.slug)).toEqual(['gpt-native']);
 }));
 test('malformed/configured profile/reserved provider and unsupported owned layouts fail without mutation', async () => fixture(async (opts, root, config) => {
   for (const text of ['bad=[', 'model_provider="a"\nmodel_provider="b"', 'profile="x"\n[profiles.x]\nmodel_provider="other"', '[model_providers.wisp_desktop]\nname="user"', 'model_provider = """multi\nline"""']) {
@@ -134,7 +133,7 @@ test('activation write failures remain recoverable at every write stage', async 
 });
 test('missing config remains absent after disable and multiline unrelated TOML stays intact', async () => fixture(async (opts, root, config) => {
   const sources: unknown[] = []; opts.catalogs = async source => { sources.push(source); return { native, input: native }; };
-  rmSync(config); await desktopAction('enable', opts); await desktopAction('refresh', opts); expect(sources).toEqual([undefined, undefined]);
+  rmSync(config); await desktopAction('enable', opts); await desktopAction('refresh', opts); expect(sources).toEqual([undefined]);
   await desktopAction('disable', opts); expect(existsSync(config)).toBe(false);
   const tricky = 'description = """\nmodel_provider = "embedded"\n[model_providers.wisp_desktop]\n"""\nvalues = [\n  "a", "b",\n]\n'; writeFileSync(config, tricky);
   await desktopAction('enable', opts); await desktopAction('disable', opts); expect(readFileSync(config, 'utf8')).toBe(tricky);

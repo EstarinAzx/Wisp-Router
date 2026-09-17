@@ -25,7 +25,7 @@
 import * as http from 'http';
 import * as crypto from 'crypto';
 import OpenAI from 'openai';
-import { forwardDesktopNative, type NativeFetch } from './codexDesktop';
+import { forwardDesktopNative, desktopTargetIssue, DESKTOP_PROTOCOL, type NativeFetch } from './codexDesktop';
 import { codexCatalog } from './codexModels';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
@@ -38,7 +38,7 @@ import {
   type QuotaMeter, type WispStatus,
 } from './catalog';
 import { codexStream } from './codexClient';
-import { parseResponsesRequest, createResponsesEncoder, responsesRejectionDiagnostic } from './bridgeResponses';
+import { parseResponsesRequest, parseDesktopResponsesRequest, createResponsesEncoder, responsesRejectionDiagnostic } from './bridgeResponses';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import { antigravityStream } from './antigravityClient';
@@ -383,7 +383,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     classify: () => undefined,
     open: async ({ parsed, provider, model, signal, baseUrl, signedDesktop }) => {
       const key = signedDesktop ? await deps.keyFor(provider) : '';
-      const client = signedDesktop ? (key ? new OpenAI({ apiKey: key, baseURL: baseUrl, maxRetries: 0,
+      const client = signedDesktop ? (key ? new OpenAI({ apiKey: key, baseURL: baseUrl, organization: null, project: null, maxRetries: 0,
         fetch: (url, init) => fetch(url as string, { ...init, redirect: 'error' } as RequestInit) as any }) : undefined) : await deps.clientFor(provider);
       if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
       // bridge.ts keeps system OUT of the turns; the OpenAI path re-prepends it as the leading system message.
@@ -645,8 +645,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         }
         route = routeFor(body.model);
         if (!route || !['alias', 'codex-model'].includes(route.matched)) return sendError(res, 404, 'Invalid desktop route Target');
+        const issue = desktopTargetIssue(route.provider);
+        if (issue) return sendError(res, 400, issue, 'desktop_target_incompatible');
       }
-      parsed = parseResponsesRequest(body);
+      parsed = signedDesktop ? parseDesktopResponsesRequest(body) : parseResponsesRequest(body);
+      if (parsed.omittedHostedSearch) deps.log(`[bridge] desktop hosted search unavailable; omitted unused declarations count=${parsed.omittedHostedSearch}`);
     }
     catch (err) {
       if (!controller.signal.aborted) {
@@ -663,6 +666,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const executor = executorFor(provider);
     const encoder = createResponsesEncoder(parsed, `resp_${crypto.randomBytes(12).toString('hex')}`);
     const model = pinnedModel ?? resolveModel(deps.modelMap(), provider);
+    // Generic keyed descriptors advertise no effort choices; desktop's neutral none must not
+    // become a provider-specific override. Other explicit controls still fail, never disappear.
+    if (signedDesktop && !isCodexProvider(provider) && !isAnthropicProvider(provider) && !isXaiProvider(provider) && parsed.responses?.effort) {
+      if (parsed.responses.effort !== 'none') return rejectSigned(new Error('Unsupported reasoning effort'));
+      delete parsed.responses.effort;
+    }
     const effort = parsed.responses?.effort;
     const images = parsed.turns.flatMap(t => [...(t.contentParts ?? []), ...t.toolResults.flatMap(r => r.contentParts ?? [])]).filter(p => p.type === 'image');
     if (images.length && (isAntigravityProvider(provider) || (isAnthropicProvider(provider) && images.some(p => p.detail && p.detail !== 'auto'))
@@ -1026,7 +1035,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (req.url?.startsWith('/codex-desktop/') && !req.headers['x-api-key']) return sendError(res, 401, 'Desktop access secret required');
     if (!authOk(req, deps.accessSecret())) return sendError(res, 401, 'invalid or missing access secret');
     const url = req.url ?? '';
-    if (req.method === 'GET' && url === '/codex-desktop/status') return sendJson(res, 200, { protocol: 1 });
+    if (req.method === 'GET' && url === '/codex-desktop/status') return sendJson(res, 200, { protocol: DESKTOP_PROTOCOL });
     if (req.method === 'POST' && url === '/codex-desktop/v1/responses') return handleResponses(req, res, true);
     // Both doors share /v1/models — the Anthropic client's headers select the Anthropic-shaped list.
     if (req.method === 'GET' && url.startsWith('/v1/models')) {

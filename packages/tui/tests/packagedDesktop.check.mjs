@@ -17,9 +17,9 @@ mkdirSync(exporter, { recursive: true });
 const relocatedNode = join(folder, process.platform === 'win32' ? 'relocated-node.exe' : 'relocated-node'); cpSync(process.execPath, relocatedNode);
 const exportLog = join(folder, 'exports.jsonl');
 writeFileSync(join(exporter, 'codex.js'), `const fs=require('fs'), assert=require('assert/strict');
-assert.deepEqual(process.argv.slice(2),['debug','models','--bundled']);
-assert(process.env.CODEX_HOME); assert.equal(fs.existsSync(require('path').join(process.env.CODEX_HOME,'auth.json')),false);
-fs.appendFileSync(${JSON.stringify(exportLog)},JSON.stringify({args:process.argv.slice(2),runtime:process.execPath})+'\\n');
+assert.deepEqual(process.argv.slice(2),['-c','model_provider="openai"','debug','models']);
+assert(process.env.CODEX_HOME); assert.equal(fs.existsSync(require('path').join(process.env.CODEX_HOME,'models_cache.json')),false);
+fs.appendFileSync(${JSON.stringify(exportLog)},JSON.stringify({args:process.argv.slice(2),runtime:process.execPath,home:process.env.CODEX_HOME})+'\\n');
 console.log(JSON.stringify({models:[{slug:'fixture-native',display_name:'Fixture native',visibility:'list',packaging_fixture:true}]}));`);
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(systemroot|windir|temp|tmp)$/i.test(key)));
 // The fixture shim wins discovery; Node stays in its original installation directory.
@@ -36,7 +36,7 @@ const upstreamPort = await listen(upstream); let bridge;
 try {
   const probeHome = join(folder, 'export-preflight'); mkdirSync(probeHome);
   const probe = executable => {
-    const result = spawnSync(executable, [join(exporter, 'codex.js'), 'debug', 'models', '--bundled'], { cwd: folder, env: { ...env, CODEX_HOME: probeHome }, encoding: 'utf8', timeout: 10000, windowsHide: true });
+    const result = spawnSync(executable, [join(exporter, 'codex.js'), '-c', 'model_provider="openai"', 'debug', 'models'], { cwd: folder, env: { ...env, CODEX_HOME: probeHome }, encoding: 'utf8', timeout: 10000, windowsHide: true });
     return { executable, status: result.status, signal: result.signal, error: result.error?.message, stdout: result.stdout, stderr: result.stderr };
   };
   const relocated = probe(relocatedNode), installed = probe(process.execPath);
@@ -59,9 +59,10 @@ try {
   }
   const expected = process.argv[4] ?? manifest?.version; assert(expected, 'Supply expected version or an extracted npm shell');
   if (manifest) assert.equal(manifest.version, expected);
-  let index = 0;
+  let index = 0; const requestedHomes = [];
   for (const command of commands) {
     const codex = join(folder, `codex-${index}`); const wisp = join(folder, `wisp-${index++}`); mkdirSync(codex); mkdirSync(wisp);
+    requestedHomes.push(codex);
     const childEnv = { ...env, CODEX_HOME: codex, WISP_HOME: wisp };
     const run = args => new Promise((yes, no) => {
       const child = spawn(command[0], [...command.slice(1), ...args], { cwd: folder, windowsHide: true, env: childEnv }); let out = '', err = '';
@@ -76,7 +77,7 @@ try {
     writeFileSync(join(wisp, 'config.json'), JSON.stringify({ bridge: { port }, customBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`, routing: { families: {}, aliases: [{ name: 'packaged-alias', target: { providerId: 'custom', model: 'EXACT_PACKAGED_TARGET' } }] } }));
     bridge = spawn(binary, ['serve'], { cwd: folder, windowsHide: true, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] }); bridge.stdout.resume(); bridge.stderr.resume();
     let alive = false;
-    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 1); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 2); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
     assert(alive, 'Compiled signed Bridge failed to start');
     const desktop = args => run(['codex-desktop', ...args]);
     assert((await desktop(['--help'])).includes('Restart Codex'));
@@ -95,7 +96,8 @@ try {
     await stop(bridge); bridge = undefined;
   }
   const exports = readFileSync(exportLog, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(exports.length, commands.length * 2);
+  assert.equal(exports.length, commands.length);
   assert(exports.every(entry => realpathSync(entry.runtime) === realpathSync(process.execPath)), 'Catalog fixture must use the installed Node runtime in place');
+  assert.deepEqual(exports.map(entry => realpathSync(entry.home)), requestedHomes.map(home => realpathSync(home)), 'Native export must use each requested CODEX_HOME');
   console.log(`PASS ${process.platform}/${process.arch}: version ${expected}, copied compiled${manifest ? ' and packed npm' : ''} desktop lifecycle, production signed route and credential separation. Isolated catalog fixture; no installed Codex/Bun or source runtime.`);
 } finally { await stop(bridge); upstream.closeAllConnections(); await new Promise(r => upstream.close(r)); rmSync(folder, { recursive: true, force: true }); }

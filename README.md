@@ -89,6 +89,11 @@ independently installed native Codex CLI. Keep the Bridge running and restart Co
 refresh or disable. Publication, installation and actual desktop acceptance remain separate gates;
 existing installations remain unchanged. See [desktop setup and rollback](docs/codex-desktop.md).
 
+Current desktop candidates require native-mode discovery and protocol 2. Unsupported Antigravity
+Targets are omitted with explicit reasons; stored routes and other clients remain unchanged. Alias
+refresh uses the saved native-client view, while native/account changes require disable/discover/enable.
+Pause other clients sharing CODEX_HOME during setup and inspect disable's model/effort notices.
+
 ### VS Code extension
 
 Not on the Marketplace — download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then **Extensions → ⋯ → Install from VSIX…**. Full walkthrough (quickstart, providers, Bridge, security) in the [extension README](packages/vscode/README.md).

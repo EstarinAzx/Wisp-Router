@@ -10,6 +10,9 @@ Changes up to 2.0.10 are folded into the product changelog at
 
 ### Added
 
+- Signed desktop protocol 2 excludes incompatible Antigravity Targets with actionable reasons, preserves positioned instructions on supported routes, and removes only unused automatic hosted-search declarations. Forced/executed hosted search and opaque history remain unsupported; global native search settings are untouched.
+- Native desktop choices now mirror ordinary native-client export, with no Wisp bundled union. Alias refresh reuses the labeled saved native view; native/account rediscovery requires disable/discover/enable. Original custom overlays fail before mutation rather than becoming native authority.
+- Disable narrowly restores the original model only for a selected Wisp-only Alias, preserving native/colliding choices, profiles and effort; action-required notices cover unverified restored preferences. Old hosts/snapshots are refused on repeated enable/refresh while legacy disable remains usable.
 - Opt-in `wisp codex-desktop enable|status|refresh|disable` preserves ChatGPT sign-in mode and creates a durable mixed native/Wisp Alias catalog. Restart Codex after catalog/config changes; exact route target edits remain live.
 - The signed Bridge path preserves exact Alias/native overrides, passes unoverridden native requests only to the fixed native endpoint, and rejects unknown models. Native credentials, external Provider credentials and the local Bridge secret remain separate; credentialed redirects, including catalog discovery, are refused.
 - Atomic activation/restore journals preserve original settings and unrelated later edits. Owned-field conflicts and unowned catalog output files fail before overwrite. `wisp --version` exposes the baked terminal version.

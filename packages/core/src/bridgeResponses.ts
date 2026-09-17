@@ -25,7 +25,20 @@ const fields = (value: RecordValue, allowed: string[], label: string) => {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new Error(`Unsupported ${label}: ${key}`);
 };
 type Tool = { namespace?: string; name: string; kind: 'function' | 'custom' | 'tool_search'; upstream: string; definition: string };
-export type BridgeResponsesRequest = BridgeChatRequest & { registry: Map<string, Tool> };
+export type BridgeResponsesRequest = BridgeChatRequest & { registry: Map<string, Tool>; omittedHostedSearch?: number };
+
+// Native desktop attaches this prospective declaration even to routes advertising no search.
+// Only signed external callers use this shim. Strict parsing still rejects forced choices,
+// unsupported options/includes and opaque/executed history; ordinary named tools are untouched.
+export const parseDesktopResponsesRequest = (value: unknown): BridgeResponsesRequest => {
+  const body = object(value, 'request');
+  if (Array.isArray(body.input) && body.input.some(item => item?.type === 'web_search_call' || item?.type === 'web_search_result')) throw new Error('Hosted search history is unsupported');
+  const hosted = (tool: any) => tool?.type === 'web_search' || tool?.type === 'web_search_preview';
+  if (!Array.isArray(body.tools) || !body.tools.some(hosted)) return parseResponsesRequest(body);
+  if (body.tool_choice !== undefined && body.tool_choice !== 'auto') throw new Error('Hosted search choice is unsupported');
+  const tools = body.tools.filter((tool: unknown) => !hosted(tool));
+  return { ...parseResponsesRequest({ ...body, tools }), omittedHostedSearch: body.tools.length - tools.length };
+};
 
 // Rejection messages can contain arbitrary keys, tool names or malformed argument contents.
 // Only fixed schema vocabulary and counts may cross this diagnostic boundary.
@@ -51,6 +64,8 @@ export const responsesRejectionDiagnostic = (error: unknown, value: unknown) => 
   else if (message.startsWith('Conflicting tool definition: ')) { reason.code = 'conflicting_tool_definition'; reason.scope = 'tools'; }
   else if (message.startsWith('Only automatic reasoning summaries')) { reason.code = 'unsupported_reasoning_summary'; reason.scope = 'reasoning'; }
   else if (message.startsWith('Unsupported reasoning effort')) { reason.code = 'unsupported_reasoning_effort'; reason.scope = 'reasoning'; }
+  else if (message === 'Hosted search history is unsupported') { reason.code = 'hosted_search_history_unsupported'; reason.scope = 'input'; }
+  else if (message === 'Hosted search choice is unsupported') { reason.code = 'hosted_search_choice_unsupported'; reason.scope = 'tools'; }
   else if (message === 'Stored responses are unsupported') { reason.code = 'stored_responses_unsupported'; }
   else if (message === 'Only automatic tool choice is supported') { reason.code = 'unsupported_tool_choice'; reason.scope = 'tools'; }
   const body = record(value), reasoning = record(body.reasoning), input = Array.isArray(body.input) ? body.input : [], tools = Array.isArray(body.tools) ? body.tools : [];

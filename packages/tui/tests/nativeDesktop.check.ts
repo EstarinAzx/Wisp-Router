@@ -11,6 +11,9 @@ import { desktopAction } from '../src/codexDesktop';
 import { resolveCodex } from '../src/codex-wisp';
 
 assert(Bun.semver.satisfies(process.versions.bun!, '>=1.4.2'), 'Requires pinned Bun >=1.4.2');
+const xai = process.argv.includes('--xai');
+const providerId = xai ? 'xai' : 'opencode-go';
+const aliasTarget = xai ? 'grok-4.6' : 'PINNED_ALIAS', overrideTarget = xai ? 'grok-4.5' : 'PINNED_OVERRIDE';
 const root = resolve(import.meta.dir, '../../..'); const out = join(root, 'out', `desktop-native-${Date.now()}`); mkdirSync(out, { recursive: true });
 const folder = mkdtempSync(join(tmpdir(), 'wisp desktop protocol ')); const codexHome = join(folder, 'codex'); const wispHome = join(folder, 'wisp');
 mkdirSync(codexHome); mkdirSync(wispHome);
@@ -25,25 +28,37 @@ const upstream = createServer(async (req, res) => {
   let raw = ''; for await (const c of req) raw += c; const body = JSON.parse(raw); captures.push({ kind: 'external', body, headers: req.headers });
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   if (mode === 'tool' && !toolSent) {
-    toolSent = true; const tool = body.tools.find((t: any) => t.function.description?.includes('fixture_tool (function)')); assert(tool, 'Native dynamic tool missing at external provider');
+    toolSent = true; const tool = body.tools.find((t: any) => (t.function?.description ?? t.description)?.includes('fixture_tool (function)')); assert(tool, 'Native dynamic tool missing at external provider');
+    if (xai) {
+      const item = { type: 'function_call', id: 'fc_fixture', call_id: 'call_fixture', name: tool.name, arguments: '{"value":"tool-input"}' };
+      res.end(`event: response.output_item.done\ndata: ${JSON.stringify({ item })}\n\nevent: response.completed\ndata: ${JSON.stringify({ response: { status: 'completed', output: [item] } })}\n\n`); return;
+    }
     frame(res, { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_fixture', type: 'function', function: { name: tool.function.name, arguments: '{"value":"tool-input"}' } }] }, finish_reason: 'tool_calls' }] });
-  } else frame(res, { choices: [{ delta: { content: mode === 'tool' ? 'TOOL_FINAL_OK' : 'EXTERNAL_OK' }, finish_reason: 'stop' }] });
+  } else if (xai) { res.end(nativeSse(body.model, mode === 'tool' ? 'TOOL_FINAL_OK' : 'EXTERNAL_OK')); return; }
+  else frame(res, { choices: [{ delta: { content: mode === 'tool' ? 'TOOL_FINAL_OK' : 'EXTERNAL_OK' }, finish_reason: 'stop' }] });
   res.end('data: [DONE]\n\n');
 });
 const up = await listen(upstream); const spare = createServer(); const port = await listen(spare); await close(spare);
 let proxyHits = 0; const proxy = createServer((_req, res) => { proxyHits++; res.writeHead(502); res.end(); }); proxy.on('connect', (_req, socket) => { proxyHits++; socket.end('HTTP/1.1 502 Blocked\r\n\r\n'); }); const proxyPort = await listen(proxy);
-const nativeSse = (model: string) => {
-  const item = { id: 'msg_native', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'NATIVE_OK', annotations: [] }] };
+const nativeSse = (model: string, text = 'NATIVE_OK') => {
+  const item = { id: 'msg_native', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] };
   const response = { id: 'resp_native', object: 'response', created_at: 1, status: 'completed', model, output: [item], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
   return [{ type: 'response.created', response: { ...response, status: 'in_progress', output: [] } }, { type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', content: [] } },
-    { type: 'response.output_text.delta', item_id: item.id, output_index: 0, content_index: 0, delta: 'NATIVE_OK' }, { type: 'response.output_item.done', output_index: 0, item }, { type: 'response.completed', response }]
+    { type: 'response.output_text.delta', item_id: item.id, output_index: 0, content_index: 0, delta: text }, { type: 'response.output_item.done', output_index: 0, item }, { type: 'response.completed', response }]
     .map((event, sequence_number) => `event: ${event.type}\ndata: ${JSON.stringify({ ...event, sequence_number })}\n\n`).join('');
 };
 const routing = () => JSON.parse(readFileSync(join(wispHome, 'config.json'), 'utf8')).routing;
-const provider = { id: 'custom', label: 'Local external', baseUrl: `http://127.0.0.1:${up}/v1`, defaultModel: 'WRONG_ACTIVE', apiKeyEnv: '' };
+const realFetch = globalThis.fetch; let xaiRequests = 0;
+if (xai) globalThis.fetch = ((url: string | URL | Request, init?: RequestInit) => {
+  if (String(url) === 'https://api.x.ai/v1/responses') { xaiRequests++; return realFetch(`http://127.0.0.1:${up}/v1/responses`, init); }
+  if (!String(url).startsWith('http://127.0.0.1:')) throw new Error('Native test refuses non-local network');
+  return realFetch(url, init);
+}) as typeof fetch;
+const provider = { id: providerId, label: `Synthetic ${providerId} wire`, baseUrl: `http://127.0.0.1:${up}/v1`, defaultModel: 'WRONG_ACTIVE', apiKeyEnv: '', ...(xai ? { kind: 'xai-oauth' as const } : {}) };
 const bridge = createBridgeServer({ providers: [provider], modelMap: () => ({}), customBaseUrl: () => provider.baseUrl, keyFor: async () => 'synthetic-external', clientFor: async () => undefined,
   codexSignedIn: async () => false, codexCreds: async () => undefined, anthropicSignedIn: async () => false, anthropicCreds: async () => undefined,
-  effort: () => 'medium', activeProviderId: () => 'custom', routingMap: routing, aliasPickerShowsModel: () => false, aliasOnlyModels: () => false, port: () => port, accessSecret: () => 'synthetic-local', log: () => {},
+  xaiCreds: async () => ({ accessToken: 'synthetic-external' }),
+  effort: () => 'medium', activeProviderId: () => providerId, routingMap: routing, aliasPickerShowsModel: () => false, aliasOnlyModels: () => false, port: () => port, accessSecret: () => 'synthetic-local', log: () => {},
   desktopNativeModels: () => { const s = JSON.parse(readFileSync(join(wispHome, 'codex-desktop/state.json'), 'utf8')); return s.phase === 'active' ? s.nativeModels : undefined; },
   nativeFetch: async (url, init) => {
     const headers = Object.fromEntries(new Headers(init.headers)); const body = JSON.parse(init.body as string); captures.push({ kind: 'native', url, headers, body }); nativeStarted = true;
@@ -57,19 +72,20 @@ const encode = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base
 const token = `${encode({ alg: 'none' })}.${encode({ email: 'fixture@example.invalid', 'https://api.openai.com/auth': { chatgpt_account_id: 'synthetic-account', chatgpt_plan_type: 'plus' } })}.fixture`;
 const auth = JSON.stringify({ auth_mode: 'chatgpt', tokens: { id_token: token, access_token: 'synthetic-native', refresh_token: 'synthetic-refresh', account_id: 'synthetic-account' }, last_refresh: new Date().toISOString() });
 writeFileSync(join(codexHome, 'auth.json'), auth);
-writeFileSync(join(codexHome, 'config.toml'), 'web_search="disabled"\ncli_auth_credentials_store="file"\n[features]\napps=false\n');
+writeFileSync(join(codexHome, 'config.toml'), `web_search="live"\nmodel_reasoning_effort="${xai ? 'medium' : 'none'}"\ncli_auth_credentials_store="file"\n[features]\napps=false\n`);
 writeFileSync(join(wispHome, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-local' }));
-const wispConfig: any = { bridge: { port }, customBaseUrl: provider.baseUrl, routing: { families: {}, aliases: [{ name: 'wisp-external', target: { providerId: 'custom', model: 'PINNED_ALIAS' } }], codexModels: {} } };
+const wispConfig: any = { bridge: { port }, customBaseUrl: provider.baseUrl, routing: { families: {}, aliases: [{ name: 'wisp-external', target: { providerId, model: aliasTarget } }], codexModels: {} } };
 writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
 let child: ReturnType<typeof spawn> | undefined; let stderr = ''; const events: any[] = []; let toolCalls = 0;
 try {
   await bridge.start();
-  await desktopAction('enable', { codexHome, wispHome, capabilities: async () => () => undefined });
+  const capabilities = async () => () => xai ? { efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' } : undefined;
+  await desktopAction('enable', { codexHome, wispHome, env: childEnv, capabilities });
   const catalog = JSON.parse(readFileSync(join(wispHome, 'codex-desktop/models.json'), 'utf8'));
   const natives = catalog.models.filter((m: any) => m.visibility === 'list' && m.slug !== 'wisp-external'); assert(natives.length >= 2);
   const native = natives[0].slug; const overridden = natives[1].slug;
-  wispConfig.routing.codexModels[overridden] = { providerId: 'custom', model: 'PINNED_OVERRIDE' }; writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
-  await desktopAction('refresh', { codexHome, wispHome, capabilities: async () => () => undefined });
+  wispConfig.routing.codexModels[overridden] = { providerId, model: overrideTarget }; writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
+  await desktopAction('refresh', { codexHome, wispHome, env: childEnv, capabilities });
   child = spawn(installed.file, [...installed.args, 'app-server', '--listen', 'stdio://'], { cwd: folder, env: childEnv, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const queue: any[] = []; let waiter: ((value: any) => void) | undefined; let buffer = ''; let id = 0;
   const send = (v: unknown) => child!.stdin!.write(JSON.stringify(v) + '\n');
@@ -93,22 +109,24 @@ try {
     if (desired) assert.equal(final, desired);
   }
   await turn('wisp-external', 'EXTERNAL_OK'); mode = 'tool'; await turn('wisp-external', 'TOOL_FINAL_OK'); assert.equal(toolCalls, 1);
-  assert(captures.some(c => c.kind === 'external' && c.body.messages.some((m: any) => m.role === 'tool' && m.content.includes('TOOL_RESULT_OK'))));
+  assert(captures.some(c => c.kind === 'external' && (xai ? c.body.input.some((m: any) => m.type === 'function_call_output' && m.output.includes('TOOL_RESULT_OK')) : c.body.messages.some((m: any) => m.role === 'tool' && m.content.includes('TOOL_RESULT_OK')))));
   mode = 'text'; await turn(overridden, 'EXTERNAL_OK'); await turn(native, 'NATIVE_OK');
   mode = 'cancel'; nativeStarted = false; await turn(native, ''); await new Promise(r => setTimeout(r, 100)); assert(cancelled);
   for (const c of captures) {
     assert(!c.headers['x-api-key']);
-    if (c.kind === 'external') { assert.equal(c.headers.authorization, 'Bearer synthetic-external'); assert(!c.headers['chatgpt-account-id']); assert(['PINNED_ALIAS', 'PINNED_OVERRIDE'].includes(c.body.model)); }
+    if (c.kind === 'external') { assert.equal(c.headers.authorization, 'Bearer synthetic-external'); assert.equal(c.body.reasoning_effort, undefined); if (xai) assert.equal(c.body.reasoning.effort, 'medium'); assert(!c.headers['chatgpt-account-id']); assert([aliasTarget, overrideTarget].includes(c.body.model)); }
     else { assert.equal(c.headers.authorization, 'Bearer synthetic-native'); assert.equal(c.headers['chatgpt-account-id'], 'synthetic-account'); assert.equal(c.url, 'https://chatgpt.com/backend-api/codex/responses'); }
   }
   assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), auth);
   // Signed Codex probes account/plugin endpoints independently. The refusing proxy blocks those;
   // all six inference requests must instead be accounted for by our two production transports.
   assert.equal(captures.length, 6); assert.equal(captures.filter(c => c.kind === 'native').length, 2);
+  if (xai) assert.equal(xaiRequests, 4);
   await desktopAction('disable', { codexHome, wispHome });
-  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
+  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
   console.log(`PASS native signed production path: ${out}`);
 } finally {
+  globalThis.fetch = realFetch;
   writeFileSync(join(out, 'stderr.txt'), stderr); writeFileSync(join(out, 'events.json'), JSON.stringify(events, null, 2)); writeFileSync(join(out, 'captures.json'), JSON.stringify(captures, null, 2));
   if (child) {
     child.stdin?.end();

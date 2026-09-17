@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
-  anthropicThinkingEffort, xaiReasoning,
+  anthropicThinkingEffort, xaiReasoning, desktopTargetIssue,
   type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
 
@@ -122,6 +122,24 @@ export const mergeAliasCatalog = (
   return { ...catalog, models: [...models.values()] };
 };
 
+export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, capabilities: (target: Target) => TargetCapabilities | undefined) => {
+  const catalog = mergeAliasCatalog(native, config, capabilities);
+  const nativeIds = new Set(native.models.map(model => model.slug));
+  const excludedTargets: { name: string; kind: string; reason: string }[] = [];
+  const models = catalog.models.filter(model => {
+    const name = model.slug as string;
+    const alias = config.routing?.aliases.find(entry => entry.name === name);
+    const target = alias?.target ?? config.routing?.codexModels?.[name];
+    const provider = target && PROVIDERS.find(p => p.id === target.providerId);
+    const issue = provider && desktopTargetIssue(provider);
+    if (!issue) return true;
+    const kind = nativeIds.has(name) ? (alias ? 'native-alias-shadow' : 'native-override') : 'alias';
+    excludedTargets.push({ name, kind, reason: `${nativeIds.has(name) ? 'Native choice omitted because its Wisp override/alias target is incompatible. ' : ''}${issue}` });
+    return false;
+  });
+  return { catalog: { ...catalog, models }, excludedTargets };
+};
+
 export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth): Promise<(target: Target) => TargetCapabilities | undefined> => {
   const targets = [...(config.routing?.aliases.map(a => a.target) ?? []), ...Object.values(config.routing?.codexModels ?? {})];
   const keyed = targets.some(t => PROVIDERS.find(p => p.id === t.providerId)?.catalogKey || ['anthropic', 'xai'].includes(t.providerId));
@@ -137,11 +155,13 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
       return info ? { contextInput: info.contextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
     }
     const caps = lookupModelsDevCaps(publicCatalog, p.catalogKey ?? (p.kind === 'anthropic-oauth' ? 'anthropic' : p.kind === 'xai-oauth' ? 'xai' : ''), target.model);
-    if (!caps) return undefined;
     const efforts = ['low', 'medium', 'high', 'xhigh', 'max'].filter(effort => p.kind === 'anthropic-oauth'
       ? anthropicThinkingEffort(target.model, effort).output_config?.effort === effort
       : p.kind === 'xai-oauth' && xaiReasoning(target.model, effort)?.effort === effort);
-    return { ...caps, vision: p.kind !== 'antigravity-oauth' && p.kind !== 'anthropic-oauth' && caps.vision, efforts };
+    // Grok's implemented wire gate establishes effort independently of optional context metadata.
+    if (!caps && !(p.kind === 'xai-oauth' && efforts.length)) return undefined;
+    return { ...caps, vision: p.kind !== 'antigravity-oauth' && p.kind !== 'anthropic-oauth' && caps?.vision, efforts,
+      ...(p.kind === 'xai-oauth' && efforts.includes('medium') ? { defaultEffort: 'medium' } : {}) };
   };
 };
 

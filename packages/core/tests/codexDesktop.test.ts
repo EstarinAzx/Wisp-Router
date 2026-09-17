@@ -36,11 +36,46 @@ async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Pro
 }
 
 describe('signed desktop production Bridge', () => {
+  it('accepts the captured fresh shape on a supported keyed wire without hosted search or neutral effort', async () => fixture(async (port, seen) => {
+    const input = ['developer', 'user', 'developer', 'developer', 'user', 'developer'].map((role, index) => ({ type: 'message', role, content: `content-${index}` }));
+    const tools = [...Array.from({ length: 11 }, (_, n) => ({ type: 'function', name: `function_${n}`, parameters: { type: 'object', properties: {} } })),
+      { type: 'custom', name: 'custom_tool', format: { type: 'text' } },
+      ...Array.from({ length: 12 }, (_, n) => ({ type: 'namespace', name: `namespace_${n}`, tools: [{ type: 'function', name: 'read', parameters: { type: 'object', properties: {} } }] })), { type: 'web_search' }];
+    const reply = await post(port, 'alias', undefined, undefined, { input, tools, instructions: 'root instructions', tool_choice: 'auto', reasoning: { effort: 'none' } });
+    expect(reply.status).toBe(200); expect(seen).toHaveLength(1);
+    expect(seen[0].body.model).toBe('EXACT'); expect(seen[0].body).not.toHaveProperty('reasoning_effort');
+    expect(seen[0].body.messages.map((m: any) => [m.role, m.content])).toEqual([['system', 'root instructions'], ...input.map(m => [m.role === 'developer' ? 'system' : m.role, m.content])]);
+    expect(seen[0].body.tools).toHaveLength(24); expect(seen[0].body.tools.every((t: any) => t.type === 'function')).toBe(true);
+  }));
+  it('keeps ordinary web_search-named tools and rejects forced/executed hosted search', async () => fixture(async (port, seen) => {
+    const ordinary = [{ type: 'function', name: 'web_search', parameters: { type: 'object', properties: {} } }, { type: 'custom', name: 'web_search_custom' },
+      { type: 'namespace', name: 'web_search', tools: [{ type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } }] }];
+    expect((await post(port, 'alias', undefined, undefined, { tools: [...ordinary, { type: 'web_search_preview' }] })).status).toBe(200);
+    expect(seen[0].body.tools.map((t: any) => t.function.description)).toEqual(expect.arrayContaining([expect.stringContaining('web_search (function)'), expect.stringContaining('web_search_custom (custom)'), expect.stringContaining('web_search.lookup (function)')]));
+    for (const extra of [{ tool_choice: { type: 'web_search' } }, { include: ['web_search_call.action.sources'] }, { web_search_options: {} }, { input: [{ type: 'web_search_call', id: 'history', status: 'completed' }] }, { input: [{ type: 'reasoning', encrypted_content: 'opaque' }] }]) {
+      expect((await post(port, 'alias', undefined, undefined, { tools: [{ type: 'web_search' }], ...extra })).status).toBe(400);
+    }
+    expect(seen).toHaveLength(1);
+  }));
+  it('refuses unsupported Antigravity signed targets before credential lookup and never falls back native', async () => fixture(async (port, seen, deps) => {
+    deps.providers[0].kind = 'antigravity-oauth'; const credentials = vi.fn(async () => undefined); deps.antigravityCreds = credentials;
+    for (const model of ['alias', 'native-overridden']) {
+      const reply = await post(port, model, undefined, undefined, { reasoning: { effort: 'PRIVATE_ANTIGRAVITY_EFFORT' } }); expect(reply.status).toBe(400); expect(JSON.parse(reply.text).error.type).toBe('desktop_target_incompatible'); expect(reply.text).toContain('instruction ordering'); expect(reply.text).not.toContain('PRIVATE_ANTIGRAVITY_EFFORT');
+    }
+    expect(credentials).not.toHaveBeenCalled(); expect(seen).toHaveLength(0);
+  }));
+  it('rejects meaningful unadvertised keyed effort while leaving ordinary Responses control intact', async () => fixture(async (port, seen) => {
+    const request = { reasoning: { effort: 'medium' } };
+    expect((await post(port, 'alias', undefined, undefined, request)).status).toBe(400); expect(seen).toHaveLength(0);
+    expect((await post(port, 'alias', { authorization: 'Bearer local-secret' }, '/v1/responses', request)).status).toBe(200); expect(seen[0].body.reasoning_effort).toBe('medium');
+  }));
   it('keeps native body/status, allowlisted credentials and fixed destination', async () => fixture(async (port, seen) => {
-    expect(await post(port, 'native')).toEqual({ status: 201, text: 'NATIVE_UNCHANGED' });
+    const nativeFields = { tools: [{ type: 'web_search' }], reasoning: { effort: 'none' }, input: [{ type: 'reasoning', encrypted_content: 'native-history' }], service_tier: 'priority' };
+    expect(await post(port, 'native', undefined, undefined, nativeFields)).toEqual({ status: 201, text: 'NATIVE_UNCHANGED' });
     expect(seen).toHaveLength(1); expect(seen[0].url).toBe('https://chatgpt.com/backend-api/codex/responses');
     expect(seen[0].headers).toEqual({ authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account', 'content-type': 'application/json' });
     expect(seen[0].body.metadata).toEqual({ unchanged: true }); expect(seen[0].redirect).toBe('manual');
+    expect(seen[0].body).toMatchObject(nativeFields);
   }));
   it('preserves UTF-8 characters split across native request chunks', async () => fixture(async (port, seen) => {
     const body = Buffer.from(JSON.stringify({ model: 'native', input: '🙂' })); const split = body.indexOf(Buffer.from('🙂')) + 2;
@@ -57,6 +92,12 @@ describe('signed desktop production Bridge', () => {
     deps.routingMap().aliases.push({ name: 'native', target: { providerId: 'external', model: 'COLLISION' } }); await post(port, 'native'); expect(seen.at(-1).body.model).toBe('COLLISION');
     deps.routingMap().aliases[0].target.providerId = 'missing'; expect((await post(port, 'alias')).status).toBe(404); expect(seen).toHaveLength(4);
   }));
+  it('does not inherit OpenAI organization/project headers into a signed external client', async () => {
+    const org = process.env.OPENAI_ORG_ID, project = process.env.OPENAI_PROJECT_ID;
+    process.env.OPENAI_ORG_ID = 'native-org-canary'; process.env.OPENAI_PROJECT_ID = 'native-project-canary';
+    try { await fixture(async (port, seen) => { expect((await post(port, 'alias')).status).toBe(200); expect(seen[0].headers['openai-organization']).toBeUndefined(); expect(seen[0].headers['openai-project']).toBeUndefined(); }); }
+    finally { if (org === undefined) delete process.env.OPENAI_ORG_ID; else process.env.OPENAI_ORG_ID = org; if (project === undefined) delete process.env.OPENAI_PROJECT_ID; else process.env.OPENAI_PROJECT_ID = project; }
+  });
   it('fails closed for unknown IDs, malformed model, missing registry and local auth', async () => fixture(async (port, seen, deps) => {
     for (const headers of [{}, { authorization: 'Bearer native-token' }, { 'x-api-key': 'wrong' }, { 'x-api-key': '', authorization: 'Bearer local-secret' }]) expect((await post(port, 'native', headers)).status).toBe(401);
     for (const id of ['unknown/external', 'external', 'gpt-invented']) expect((await post(port, id)).status).toBe(404);
@@ -97,7 +138,7 @@ describe('signed desktop production Bridge', () => {
     expect(logs.filter(line => line.includes('desktop rejection'))).toHaveLength(4);
     expect(logs.join('\n')).not.toContain(secret); expect(seen).toHaveLength(0);
   }));
-  it.each(['keyed', 'antigravity-oauth', 'codex'] as const)('does not reflect arbitrary effort values from the %s validation path', async kind => {
+  it.each(['keyed', 'codex'] as const)('does not reflect arbitrary effort values from the %s validation path', async kind => {
     const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
     try { await fixture(async (port, seen, deps) => {
       if (kind !== 'keyed') deps.providers[0].kind = kind;
@@ -134,7 +175,7 @@ describe('signed desktop production Bridge', () => {
     try { await fixture(async (port, seen) => { expect((await post(port, 'alias')).status).toBe(502); expect(hits).toBe(0); expect(seen.every(s => s.url === '/v1/chat/completions')).toBe(true); }, res => { res.writeHead(307, { location: cross ? `http://127.0.0.1:${sinkPort}/stolen` : '/stolen' }); res.end(); }); }
     finally { await close(sink); }
   });
-  it.each((['codex', 'anthropic-oauth', 'xai-oauth', 'antigravity-oauth'] as const).flatMap(kind => [false, true].map(cross => ({ kind, cross }))))('refuses OAuth redirects on $kind cross=$cross', async ({ kind, cross }) => {
+  it.each((['codex', 'anthropic-oauth', 'xai-oauth'] as const).flatMap(kind => [false, true].map(cross => ({ kind, cross }))))('refuses OAuth redirects on $kind cross=$cross', async ({ kind, cross }) => {
     let hits = 0; const sink = createServer((_req, res) => { hits++; answer(res); }); const sinkPort = await listen(sink);
     const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
     try { await fixture(async (port, seen, deps) => {
@@ -169,9 +210,10 @@ describe('signed desktop production Bridge', () => {
     try {
       expect(readDesktopNativeModels()).toBeUndefined(); mkdirSync(join(root, 'codex-desktop'));
       const file = join(root, 'codex-desktop/state.json');
-      for (const body of ['{', '{}', '{"schema":1,"phase":"prepared","nativeModels":["native"]}', '{"schema":1,"phase":"active","nativeModels":[42]}']) { writeFileSync(file, body); expect(readDesktopNativeModels()).toBeUndefined(); }
-      writeFileSync(file, JSON.stringify({ schema: 1, phase: 'active', nativeModels: ['first', 'second'] })); expect(readDesktopNativeModels()).toEqual(['first', 'second']);
-      writeFileSync(file, JSON.stringify({ schema: 1, phase: 'active', nativeModels: ['second'] })); expect(readDesktopNativeModels()).toEqual(['second']);
+      for (const body of ['{', '{}', '{"schema":1,"phase":"prepared","nativeModels":["native"]}', '{"schema":1,"phase":"active","nativeModels":[42]}', '{"schema":1,"phase":"active","nativeModels":["legacy-bundled"]}']) { writeFileSync(file, body); expect(readDesktopNativeModels()).toBeUndefined(); }
+      const state = { schema: 1, phase: 'active', nativeSource: 'native-client-export', nativeCapturedAt: new Date().toISOString() };
+      writeFileSync(file, JSON.stringify({ ...state, nativeCatalog: { models: [{ slug: 'first' }, { slug: 'second' }] } })); expect(readDesktopNativeModels()).toEqual(['first', 'second']);
+      writeFileSync(file, JSON.stringify({ ...state, nativeCatalog: { models: [{ slug: 'second' }] } })); expect(readDesktopNativeModels()).toEqual(['second']);
     } finally { if (before === undefined) delete process.env.WISP_HOME; else process.env.WISP_HOME = before; rmSync(root, { recursive: true, force: true }); }
   });
 });

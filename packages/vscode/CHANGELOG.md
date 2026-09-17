@@ -8,6 +8,7 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ### Added
 
+- Updated signed desktop protocol 2 refuses Antigravity Targets before credentials, handles unused ambient hosted-search declarations conservatively, and reads only validated native-client snapshot identities. Existing other Bridge clients are unchanged. Desktop diagnostics redact arbitrary request/error values.
 - The extension-hosted Bridge includes the signed Codex desktop Responses path and reads the live native-ID registry produced by `wisp codex-desktop` in terminal **2.2.0**. Exact routes and unoverridden native transport preserve separate credentials; credentialed redirects are refused.
 - The shared catalog and reversible configuration are managed by the terminal command. Install this companion and reload its host before using an extension-hosted Bridge with desktop integration.
 

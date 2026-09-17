@@ -3,14 +3,19 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { wispHomeDir } from './homeStore';
+import type { Provider } from './catalog';
+import { parseCodexModels } from './codexModels';
+
+export const DESKTOP_PROTOCOL = 2;
+export const desktopTargetIssue = (provider: Provider): string | undefined => provider.kind === 'antigravity-oauth'
+  ? 'Antigravity cannot preserve signed desktop instruction ordering. Select a supported Provider for desktop; the existing Wisp route is unchanged for other clients.' : undefined;
 
 export const desktopStatePath = (home = wispHomeDir()): string => join(home, 'codex-desktop', 'state.json');
 export const readDesktopNativeModels = (): string[] | undefined => {
   try {
     const state = JSON.parse(readFileSync(desktopStatePath(), 'utf8'));
-    return state.schema === 1 && state.phase === 'active' && Array.isArray(state.nativeModels)
-      && state.nativeModels.every((s: unknown) => typeof s === 'string' && s.length > 0)
-      ? state.nativeModels : undefined;
+    if (state.schema !== 1 || state.phase !== 'active' || state.nativeSource !== 'native-client-export' || !Number.isFinite(Date.parse(state.nativeCapturedAt))) return undefined;
+    return parseCodexModels(state.nativeCatalog).map(model => model.id);
   } catch { return undefined; }
 };
 
