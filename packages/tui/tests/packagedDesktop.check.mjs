@@ -1,26 +1,29 @@
 // node packagedDesktop.check.mjs <compiled-wisp> <extracted npm shell or -> <expected version>
 // Hermetic packaging check on every native runner; actual-client evidence is nativeDesktop.check.ts.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 
 assert(process.argv[2], 'Supply a compiled binary');
 const folder = mkdtempSync(join(tmpdir(), 'wisp packaged desktop '));
 const binaryName = process.platform === 'win32' ? 'wisp.exe' : 'wisp'; const binary = join(folder, binaryName);
 const runtime = join(folder, 'fixture-runtime'); const exporter = join(runtime, 'node_modules/@openai/codex/bin');
-mkdirSync(exporter, { recursive: true }); cpSync(process.execPath, join(runtime, process.platform === 'win32' ? 'node.exe' : 'node'));
+mkdirSync(exporter, { recursive: true });
+// Keep a relocated copy only as a diagnostic control: macOS Node may load adjacent libraries.
+const relocatedNode = join(folder, process.platform === 'win32' ? 'relocated-node.exe' : 'relocated-node'); cpSync(process.execPath, relocatedNode);
 const exportLog = join(folder, 'exports.jsonl');
 writeFileSync(join(exporter, 'codex.js'), `const fs=require('fs'), assert=require('assert/strict');
 assert.deepEqual(process.argv.slice(2),['debug','models','--bundled']);
 assert(process.env.CODEX_HOME); assert.equal(fs.existsSync(require('path').join(process.env.CODEX_HOME,'auth.json')),false);
-fs.appendFileSync(${JSON.stringify(exportLog)},JSON.stringify(process.argv.slice(2))+'\\n');
+fs.appendFileSync(${JSON.stringify(exportLog)},JSON.stringify({args:process.argv.slice(2),runtime:process.execPath})+'\\n');
 console.log(JSON.stringify({models:[{slug:'fixture-native',display_name:'Fixture native',visibility:'list',packaging_fixture:true}]}));`);
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(systemroot|windir|temp|tmp)$/i.test(key)));
-Object.assign(env, { PATH: runtime, HOME: folder, USERPROFILE: folder });
+// The fixture shim wins discovery; Node stays in its original installation directory.
+Object.assign(env, { PATH: [runtime, dirname(process.execPath)].join(delimiter), HOME: folder, USERPROFILE: folder });
 const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 const listen = server => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)));
 const stop = async child => { if (child && child.exitCode === null && child.signalCode === null) { const closed = new Promise(r => child.once('close', r)); child.kill(); await closed; } };
@@ -31,6 +34,18 @@ const upstream = createServer(async (req, res) => {
 });
 const upstreamPort = await listen(upstream); let bridge;
 try {
+  const probeHome = join(folder, 'export-preflight'); mkdirSync(probeHome);
+  const probe = executable => {
+    const result = spawnSync(executable, [join(exporter, 'codex.js'), 'debug', 'models', '--bundled'], { cwd: folder, env: { ...env, CODEX_HOME: probeHome }, encoding: 'utf8', timeout: 10000, windowsHide: true });
+    return { executable, status: result.status, signal: result.signal, error: result.error?.message, stdout: result.stdout, stderr: result.stderr };
+  };
+  const relocated = probe(relocatedNode), installed = probe(process.execPath);
+  const libraries = process.platform === 'darwin' ? spawnSync('/usr/bin/otool', ['-L', process.execPath], { encoding: 'utf8', timeout: 10000, windowsHide: true }) : undefined;
+  console.log(`Catalog fixture preflight: ${JSON.stringify({ platform: process.platform, arch: process.arch, node: process.version, relocated, installed,
+    ...(libraries ? { linkedLibraries: { status: libraries.status, error: libraries.error?.message, stdout: libraries.stdout, stderr: libraries.stderr } } : {}) })}`);
+  assert.equal(installed.status, 0, `Installed Node fixture export failed: ${installed.error ?? installed.stderr}`);
+  assert.equal(JSON.parse(installed.stdout).models[0].slug, 'fixture-native');
+  writeFileSync(exportLog, ''); // The assertions below count only production-triggered exports.
   cpSync(resolve(process.argv[2]), binary); const commands = [[binary]];
   let manifest;
   if (process.argv[3] && process.argv[3] !== '-') {
@@ -79,6 +94,8 @@ try {
     assert.equal(readFileSync(join(codex, 'config.toml'), 'utf8'), 'model="preserved-default"\n'); assert.equal(readFileSync(join(codex, 'auth.json'), 'utf8'), 'unchanged-native-auth');
     await stop(bridge); bridge = undefined;
   }
-  assert.equal(readFileSync(exportLog, 'utf8').trim().split('\n').length, commands.length * 2);
+  const exports = readFileSync(exportLog, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(exports.length, commands.length * 2);
+  assert(exports.every(entry => realpathSync(entry.runtime) === realpathSync(process.execPath)), 'Catalog fixture must use the installed Node runtime in place');
   console.log(`PASS ${process.platform}/${process.arch}: version ${expected}, copied compiled${manifest ? ' and packed npm' : ''} desktop lifecycle, production signed route and credential separation. Isolated catalog fixture; no installed Codex/Bun or source runtime.`);
 } finally { await stop(bridge); upstream.closeAllConnections(); await new Promise(r => upstream.close(r)); rmSync(folder, { recursive: true, force: true }); }
