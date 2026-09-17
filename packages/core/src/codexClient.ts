@@ -1,4 +1,5 @@
 import type { BridgeChatRequest } from './bridge';
+import { DesktopUpstreamError } from './desktopUpstream';
 // ----------------- codexClient.ts — Wisp: Codex Responses request + SSE→text/tool calls ----------------- //
 
 /*
@@ -27,7 +28,7 @@ type CodexMessage = Parameters<typeof buildCodexResponsesBody>[0]['messages'][nu
 // onQuota (#171): a side channel for the response's utilization headers. NOT a stream event — quota is
 // telemetry, carries no wire content, and must not widen the union every door narrows on. Fires once per
 // request, the moment the head lands, and only when the backend actually reported meters.
-type CodexRequestArgs = { responses?: BridgeChatRequest['responses']; creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; modelInfo?: CodexModelInfo; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; sessionId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
+type CodexRequestArgs = { rejectRedirects?: boolean; responses?: BridgeChatRequest['responses']; creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; modelInfo?: CodexModelInfo; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; sessionId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What codexStream yields: an answer-text fragment, a fully-assembled tool call (emitted once the stream
 // ends), or the turn's real token usage (#165, off the terminal frame). The native-chat consumer maps the
@@ -69,12 +70,14 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
   const reasoning = codexReasoning(args.model, args.effort, info);
   const res = await fetch(`${args.baseUrl}/responses`, {
     method: 'POST',
+    ...(args.rejectRedirects ? { redirect: 'error' as const } : {}),
     headers,
     body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: args.responses?.context ? { ...reasoning, context: args.responses.context } : reasoning, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true })),
     signal: args.signal,
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (args.rejectRedirects) throw DesktopUpstreamError.fromResponse(res, body);
     throw new Error(`Codex API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
   }
   // #171: the quota meters ride the response HEAD, so they are readable here — before a single SSE byte is

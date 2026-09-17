@@ -1,3 +1,4 @@
+import { readDesktopNativeModels } from '@wisp/core';
 // ----------------- extension.ts — Wisp: Inquire inline editor ----------------- //
 
 /*
@@ -1051,6 +1052,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // The Bridge listener — the outward mirror of the LM Chat Provider. Reuses the same key/client resolvers
   // and model memory; keyed Providers only this slice (Codex #39 / Anthropic #40 later). OFF until toggled.
   bridge = createBridgeServer({
+    desktopNativeModels: readDesktopNativeModels,
     providers: PROVIDERS,
     modelMap: () => home.readConfig().models ?? {},
     customBaseUrl: () => home.readConfig().customBaseUrl ?? '',

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawn } from 'child_process';
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { createServer } from 'net';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
@@ -18,6 +18,13 @@ const run = (args: string[], cwd = root) => {
   });
   return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
+
+test('version reports the bundled package without renderer or home writes', () => {
+  const version = JSON.parse(readFileSync(join(root, 'packages/tui/package.json'), 'utf8').replace(/^\uFEFF/, '')).version;
+  const result = Bun.spawnSync([process.execPath, entry, '--version'], { cwd: home, env: { ...process.env, WISP_HOME: home, CODEX_HOME: home }, timeout: 1000 });
+  expect(result.exitCode).toBe(0); expect(result.stdout.toString()).toBe(`wisp-router ${version}\n`); expect(result.stderr.toString()).toBe('');
+  expect(readdirSync(home)).toEqual([]);
+});
 
 test('routing set recognizes Antigravity sign-in and still warns after sign-out', () => {
   writeFileSync(join(home, 'auth.json'), JSON.stringify({

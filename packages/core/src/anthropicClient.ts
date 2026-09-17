@@ -19,10 +19,11 @@
 import { randomUUID } from 'node:crypto';
 import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, parseAnthropicQuota, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason, type AnthropicTruncationReason, type QuotaMeter } from './catalog';
 import { sseBlocks } from './codexClient';
+import { DesktopUpstreamError } from './desktopUpstream';
 
 // onQuota (#171): the side channel for the response's utilization headers — see the codexClient twin. Quota
 // is telemetry, not wire content, so it deliberately does NOT join AnthropicStreamEvent.
-type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; strictCompletion?: boolean; parallelToolCalls?: boolean; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
+type AnthropicRequestArgs = { rejectRedirects?: boolean; creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; strictCompletion?: boolean; parallelToolCalls?: boolean; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
@@ -173,12 +174,14 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   // #149: real claude posts to /v1/messages?beta=true (the query flag rides every Messages request).
   const res = await fetch(`${args.baseUrl}/v1/messages?beta=true`, {
     method: 'POST',
+    ...(args.rejectRedirects ? { redirect: 'error' as const } : {}),
     headers: anthropicMessagesHeaders(bearer, args.stream, args.model),
     body: JSON.stringify(buildAnthropicMessagesBody({ model: args.model, messages: args.messages, maxTokens: args.maxTokens, version: CLAUDE_CODE_VERSION, stream: args.stream, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.parallelToolCalls, effort: args.effort, cacheTtl: args.cacheTtl, systemSuffix: args.systemSuffix, previousMessageId: args.previousMessageId, userId: anthropicUserId({ deviceId: args.creds.deviceId ?? FALLBACK_DEVICE_ID, accountUuid: args.creds.accountUuid, sessionId: CLAUDE_CODE_SESSION_ID }) })),
     signal: args.signal,
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (args.rejectRedirects) throw DesktopUpstreamError.fromResponse(res, body);
     throw new Error(`Anthropic API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
   }
   // #171: utilization rides the response HEAD — readable before any SSE byte. No meters reported → no call,

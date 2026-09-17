@@ -1,5 +1,9 @@
 # wisp-router
 
+**2.2.0:** `wisp codex-desktop enable|status|refresh|disable` adds reversible persistent signed-in Codex configuration. Start a 2.2.0 Bridge (or companion VSIX 1.14.0), enable, then restart Codex. Aliases/exact overrides use their pinned target; unoverridden native models keep the native transport. Refresh updates the catalog; disable restores prior owned settings. `wisp --version` reports the baked version. [Setup, limits and rollback](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md). Grok desktop text, follow-up and tool execution are verified on Windows; other external providers are not individually desktop-verified. Slot is unchanged.
+
+Desktop integration requires signed desktop protocol 2 and initial native-mode discovery without a custom catalog override. Alias refresh uses a labeled saved native-client view; native/account refresh requires disable/discover/enable. Antigravity Targets are excluded with an explicit reason, preserving stored routes and other clients. Unused ambient hosted-search declarations are omitted on supported external routes, but forced/executed search and opaque history still fail. Pause other clients sharing CODEX_HOME during setup; inspect disable's model/effort action-required notices.
+
 **Wisp** — a BYOK model router, in your terminal.
 
 - `wisp` — the TUI: pick a Provider (OpenCode Go, Codex/ChatGPT, Anthropic/Claude.ai, OpenAI, Groq, Mistral, OpenRouter, Ollama, and more), set keys or OAuth sign-in, edit the Routing map, host the Bridge.

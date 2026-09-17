@@ -4,6 +4,22 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] - 2026-09-18
+
+### Fixed
+
+- Grok root-union tool schemas no longer reject the desktop request: the xAI adapter wraps supported schemas internally, preserves local references/open-object defaults, restores original tool arguments and rewraps tool history. Unsafe scoped/dynamic-reference and unevaluated-property schemas remain unchanged rather than weakened.
+
+### Added
+
+- Updated signed desktop protocol 2 refuses Antigravity Targets before credentials, handles unused ambient hosted-search declarations conservatively, and reads only validated native-client snapshot identities. Existing other Bridge clients are unchanged. Desktop diagnostics redact arbitrary request/error values.
+- The extension-hosted Bridge includes the signed Codex desktop Responses path and reads the live native-ID registry produced by `wisp codex-desktop` in terminal **2.2.0**. Exact routes and unoverridden native transport preserve separate credentials; credentialed redirects are refused.
+- The shared catalog and reversible configuration are managed by the terminal command. Install this companion and reload its host before using an extension-hosted Bridge with desktop integration.
+
+### Verification scope
+
+- Companion **1.14.0** for terminal/npm **2.2.0**; **wisp-slot unchanged**. Packaging and bundle checks do not establish installed VS Code acceptance. Grok desktop acceptance used the standalone terminal Bridge, not an installed extension host. Existing installations are unchanged until explicitly updated.
+
 ## [1.13.8] - 2026-09-08
 
 ### Added

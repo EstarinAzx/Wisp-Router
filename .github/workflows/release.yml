@@ -1,10 +1,12 @@
-# Release pipeline (#67, ADR-0003): tag v* → compile the TUI on four native runners
+# Release pipeline (#67, ADR-0003): PRs and tag v* compile on four native runners;
+# only matching version-tag pushes may publish after all builds pass.
 # (opentui ships per-platform native libs — no cross-compiling), attach the binaries to a
 # GitHub release, and publish npm `wisp-router` as a thin shell over four platform packages
 # (the esbuild/biome optionalDependencies pattern). Bins: wisp + claude-wisp + codex-wisp.
 name: Release
 
 on:
+  pull_request:
   push:
     tags: ['v*']
 
@@ -35,17 +37,20 @@ jobs:
         with:
           bun-version: '1.4.2'
 
-      # The tag is the single version source — a binary whose baked-in package.json version
-      # disagrees would lie on the splash screen, so fail loud here.
-      - name: Verify tag matches packages/tui version
+      # Smoke always uses the baked package version; release tags must also match it.
+      - name: Resolve and verify package version
+        id: version
         shell: bash
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
           PKG_VERSION=$(bun -e "console.log((await Bun.file('packages/tui/package.json').json()).version)")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "Tag $TAG_VERSION != packages/tui version $PKG_VERSION" >&2
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+              echo "Tag $TAG_VERSION != packages/tui version $PKG_VERSION" >&2
+              exit 1
+            fi
           fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
 
       - run: bun install --frozen-lockfile
 
@@ -59,6 +64,12 @@ jobs:
         working-directory: packages/tui
         run: node tests/packagedCodex.check.mjs dist/${{ matrix.binary }}
 
+      # Hermetic local catalog fixture; actual CLI and desktop acceptance are separate gates.
+      - name: Signed desktop smoke test
+        working-directory: packages/tui
+        shell: bash
+        run: node tests/packagedDesktop.check.mjs dist/${{ matrix.binary }} - "${{ steps.version.outputs.version }}"
+
       - uses: actions/upload-artifact@v6
         with:
           name: wisp-${{ matrix.target }}
@@ -66,6 +77,7 @@ jobs:
           if-no-files-found: error
 
   publish:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -82,17 +94,18 @@ jobs:
           path: artifacts
 
       # The VS Code extension rides the same release page (the repo keeps no vsix — *.vsix is
-      # gitignored — so the release is the only copy). BEST-EFFORT: the extension bundles its own
-      # @wisp/core and its version is its own (a cut that bumps only wisp-router re-attaches the
-      # same vsix, harmless); a packaging hiccup must never block the npm release below.
+      # gitignored — so the release is the only copy). The companion is required: it bundles
+      # the same signed Bridge, and a missing/stale VSIX must block publication.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
       - run: bun install --frozen-lockfile
-      - name: Package the VS Code extension (best-effort)
+      - name: Package the exact VS Code companion
         run: |
-          bun run --cwd packages/vscode compile && bun run --cwd packages/vscode package \
-            || echo "WARN: vsix packaging failed — this release ships without the extension"
+          VSIX_VERSION=$(node -p "require('./packages/vscode/package.json').version")
+          VSIX="$GITHUB_WORKSPACE/packages/vscode/wisp-$VSIX_VERSION.vsix"
+          bun run --cwd packages/vscode package --out "$VSIX"
+          test -s "$VSIX"
 
       # Stage each platform package: drop its compiled binary into bin/ and stamp the version.
       - name: Stage platform packages
@@ -133,18 +146,15 @@ jobs:
           cp artifacts/wisp-darwin-arm64/wisp "release/wisp-v$VERSION-darwin-arm64"
           cp artifacts/wisp-darwin-x64/wisp "release/wisp-v$VERSION-darwin-x64"
           cp artifacts/wisp-linux-x64/wisp "release/wisp-v$VERSION-linux-x64"
-          NOTES="Wisp TUI + Bridge + Claude Code and Codex launchers. Install: \`npm i -g wisp-router\` (Node.js required for npm shims), or grab the standalone binary below. Launch with \`wisp claude-wisp …\` or \`wisp codex-wisp …\`. Start the Bridge first. Codex requires an installed native CLI; hosted search and opaque history replay are unsupported. See docs/codex-wisp.md and packages/tui/CHANGELOG.md at this tag for compatibility and release surfaces. A newly built extension bundles this tag's shared core; an already installed extension is unchanged."
-          # The vsix is present only when the best-effort packaging step above succeeded.
-          VSIX=$(ls packages/vscode/*.vsix 2>/dev/null | head -1)
-          if [ -n "$VSIX" ]; then
-            cp "$VSIX" release/
-            NOTES="$NOTES
-
-          VS Code extension: \`$(basename "$VSIX")\` below — install with \`code --install-extension $(basename "$VSIX")\`."
-          fi
+          VSIX_VERSION=$(node -p "require('./packages/vscode/package.json').version")
+          VSIX="packages/vscode/wisp-$VSIX_VERSION.vsix"
+          test -s "$VSIX"
+          cp "$VSIX" release/
+          NOTES_FILE="docs/releases/v$VERSION.md"
+          test -s "$NOTES_FILE"
           gh release create "$GITHUB_REF_NAME" release/* \
             --title "wisp-router $VERSION" \
-            --notes "$NOTES"
+            --notes-file "$NOTES_FILE"
 
       # Platform packages are BEST-EFFORT: npm's spam filter has 403'd and post-publish removed
       # them before — the shim's release-download fallback covers installs either way. The thin

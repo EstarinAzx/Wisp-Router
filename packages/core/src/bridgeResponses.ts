@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import type { AssembledToolCall, BridgeUsage, NormalizedTurn, NormalizedContentPart } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
+export class EmptyResponsesOutputError extends Error {
+  constructor() { super('Provider returned no visible output'); }
+}
+
 type RecordValue = Record<string, any>;
 const object = (v: unknown, label: string): RecordValue => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${label} must be an object`);
@@ -25,7 +29,67 @@ const fields = (value: RecordValue, allowed: string[], label: string) => {
   for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new Error(`Unsupported ${label}: ${key}`);
 };
 type Tool = { namespace?: string; name: string; kind: 'function' | 'custom' | 'tool_search'; upstream: string; definition: string };
-export type BridgeResponsesRequest = BridgeChatRequest & { registry: Map<string, Tool> };
+export type BridgeResponsesRequest = BridgeChatRequest & { registry: Map<string, Tool>; omittedHostedSearch?: number };
+
+// Native desktop attaches this prospective declaration even to routes advertising no search.
+// Only signed external callers use this shim. Strict parsing still rejects forced choices,
+// unsupported options/includes and opaque/executed history; ordinary named tools are untouched.
+export const parseDesktopResponsesRequest = (value: unknown): BridgeResponsesRequest => {
+  const body = object(value, 'request');
+  if (Array.isArray(body.input) && body.input.some(item => item?.type === 'web_search_call' || item?.type === 'web_search_result')) throw new Error('Hosted search history is unsupported');
+  const hosted = (tool: any) => tool?.type === 'web_search' || tool?.type === 'web_search_preview';
+  if (!Array.isArray(body.tools) || !body.tools.some(hosted)) return parseResponsesRequest(body);
+  if (body.tool_choice !== undefined && body.tool_choice !== 'auto') throw new Error('Hosted search choice is unsupported');
+  for (const tool of body.tools) if (hosted(tool)) {
+    const declaration = object(tool, 'hosted search declaration');
+    fields(declaration, declaration.type === 'web_search' ? ['type', 'external_web_access'] : ['type'], 'hosted search field');
+    // CLI0.154.0 emits this boolean for live/cached mode even on unsupported routes.
+    if (Object.prototype.hasOwnProperty.call(declaration, 'external_web_access') && typeof declaration.external_web_access !== 'boolean') throw new Error('Unsupported hosted search field: external_web_access');
+  }
+  const tools = body.tools.filter((tool: unknown) => !hosted(tool));
+  return { ...parseResponsesRequest({ ...body, tools }), omittedHostedSearch: body.tools.length - tools.length };
+};
+
+// Rejection messages can contain arbitrary keys, tool names or malformed argument contents.
+// Only fixed schema vocabulary and counts may cross this diagnostic boundary.
+export const responsesRejectionDiagnostic = (error: unknown, value: unknown) => {
+  const knownFields = ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'text', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'safety_identifier',
+    'service_tier', 'temperature', 'top_p', 'max_output_tokens', 'truncation', 'previous_response_id', 'background', 'conversation', 'stream_options', 'prompt_cache_retention', 'effort', 'context', 'summary', 'verbosity', 'format', 'type', 'image_url', 'detail',
+    'filters', 'user_location', 'search_context_size', 'external_web_access', 'indexed_web_access', 'search_content_types'];
+  const toolTypes = ['function', 'custom', 'namespace', 'tool_search', 'web_search', 'web_search_preview', 'image_generation', 'computer', 'computer_use_preview', 'code_interpreter', 'file_search', 'mcp', 'shell', 'local_shell'];
+  const inputTypes = ['message', 'additional_tools', 'reasoning', 'compaction', 'function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output', 'tool_search_call', 'tool_search_output'];
+  const record = (v: unknown): RecordValue => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  const tag = (v: unknown, allowed: string[]): string => v === undefined ? 'absent' : v === null ? 'null' : typeof v === 'string' && allowed.includes(v) ? v : 'unrecognized';
+  const counts = (items: unknown[], allowed: string[]) => {
+    const result: Record<string, number> = {};
+    for (const item of items) { const type = tag(record(item).type, allowed); result[type] = (result[type] ?? 0) + 1; }
+    return result;
+  };
+  const reason: { code: string; scope: string; field?: string; type?: string } = { code: error instanceof SyntaxError ? 'invalid_json' : 'validation_failed', scope: 'request' };
+  const message = error instanceof Error ? error.message : '';
+  const field = /^Unsupported (Responses|reasoning|text|image|hosted search) field: ([\s\S]*)$/.exec(message);
+  if (field) { reason.code = field[1] === 'hosted search' ? 'unsupported_hosted_search_option' : 'unsupported_field'; reason.scope = field[1] === 'Responses' ? 'request' : field[1] === 'hosted search' ? 'tools' : field[1]; reason.field = tag(field[2], knownFields); }
+  else if (message.startsWith('Unsupported tool type: ')) { reason.code = 'unsupported_tool_type'; reason.scope = 'tools'; reason.type = tag(message.slice('Unsupported tool type: '.length), toolTypes); }
+  else if (message.startsWith('Unsupported input item: ')) { reason.code = 'unsupported_input_type'; reason.scope = 'input'; reason.type = tag(message.slice('Unsupported input item: '.length).split(';')[0], inputTypes); }
+  else if (message.startsWith('Unsupported content type: ')) { reason.code = 'unsupported_content_type'; reason.scope = 'input'; reason.type = tag(message.slice('Unsupported content type: '.length), ['input_text', 'output_text', 'input_image', 'input_file', 'refusal']); }
+  else if (message.startsWith('Conflicting tool definition: ')) { reason.code = 'conflicting_tool_definition'; reason.scope = 'tools'; }
+  else if (message.startsWith('Only automatic reasoning summaries')) { reason.code = 'unsupported_reasoning_summary'; reason.scope = 'reasoning'; }
+  else if (message.startsWith('Unsupported reasoning effort')) { reason.code = 'unsupported_reasoning_effort'; reason.scope = 'reasoning'; }
+  else if (message === 'Hosted search history is unsupported') { reason.code = 'hosted_search_history_unsupported'; reason.scope = 'input'; }
+  else if (message === 'Hosted search choice is unsupported') { reason.code = 'hosted_search_choice_unsupported'; reason.scope = 'tools'; }
+  else if (message === 'Stored responses are unsupported') { reason.code = 'stored_responses_unsupported'; }
+  else if (message === 'Only automatic tool choice is supported') { reason.code = 'unsupported_tool_choice'; reason.scope = 'tools'; }
+  const body = record(value), reasoning = record(body.reasoning), input = Array.isArray(body.input) ? body.input : [], tools = Array.isArray(body.tools) ? body.tools : [];
+  let conversation = false, developerAfterConversation = 0;
+  for (const raw of input) { const item = record(raw); if (item.role === 'developer' && conversation) developerAfterConversation++;
+    if (item.role === 'user' || item.role === 'assistant' || ['function_call', 'function_call_output', 'custom_tool_call', 'custom_tool_call_output'].includes(item.type)) conversation = true; }
+  return { reason, shape: {
+    fields: Object.keys(body).filter(key => knownFields.includes(key)), unknownFieldCount: Object.keys(body).filter(key => !knownFields.includes(key)).length,
+    serviceTier: tag(body.service_tier, ['default', 'auto', 'priority', 'flex']), reasoningEffort: tag(reasoning.effort, ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
+    reasoningSummary: tag(reasoning.summary, ['auto', 'none', 'concise', 'detailed']),
+    inputCount: typeof body.input === 'string' ? 1 : input.length, inputTypes: counts(input, inputTypes), toolCount: tools.length, toolTypes: counts(tools, toolTypes), developerAfterConversation,
+  } };
+};
 
 export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest => {
   const body = object(value, 'request');
@@ -185,7 +249,7 @@ export const createResponsesEncoder = (parsed: BridgeResponsesRequest, id: strin
       return frames + frame('response.output_text.delta', { ...position, delta: event.text });
     },
     finish: (): { frames: string; response: RecordValue } => {
-      if (!text && !calls.length && !incomplete) throw new Error('Provider returned no visible output');
+      if (!text && !calls.length && !incomplete) throw new EmptyResponsesOutputError();
       if (parsed.responses?.parallelToolCalls === false && calls.length > 1) throw new Error('Provider returned multiple tools with parallel_tool_calls=false');
       if (new Set(calls.map(c => c.id)).size !== calls.length) throw new Error('Duplicate upstream call_id');
       // Validate every call before exposing any executable item, even when parallel calls are allowed.

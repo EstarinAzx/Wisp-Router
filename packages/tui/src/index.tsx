@@ -15,9 +15,15 @@
 // Branch before any renderer work; every side imports lazily so `wisp serve` never touches the
 // native (Zig) renderer and the TUI never pays for the serve path. The compiled release binary
 // is this ONE entry — the npm `claude-wisp` shim invokes it as `wisp claude-wisp …` (#67).
-if (process.argv[2] === 'serve') {
+if (process.argv[2] === '--version') {
+  const { version } = await import('../package.json');
+  console.log(`wisp-router ${version}`);
+} else if (process.argv[2] === 'serve') {
   const { runServe } = await import('./serve');
   await runServe();
+} else if (process.argv[2] === 'codex-desktop') {
+  const { runCodexDesktop } = await import('./codexDesktop');
+  process.exitCode = await runCodexDesktop(process.argv.slice(3));
 } else if (process.argv[2] === 'routing') {
   const { runRoutingCli } = await import('./routingCli');
   process.exitCode = await runRoutingCli(process.argv.slice(3));
