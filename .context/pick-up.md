@@ -7,24 +7,25 @@ tags: [context, pick-up]
 
 # Pick up
 
-Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
+Start: read `.context/overview.md` + `.context/active-work.md`.
 
-**The first 2.2.0 candidate failed actual desktop inference; repair is in progress.** Automated tests/review and four-platform CI passed for the old candidate, but live capture proved desktop adds hosted web_search + effort none and positioned developer instructions. Picker/login worked; GPT5.2 was incorrectly added from the bundled catalog. The user confirmed normal native chat works after rollback. No release/global install; integration disabled and test hosts stopped.
+**User requested wrap-up because the session was too long. Stop point is safe; resume in a fresh session.** Wisp 2.2.0 / VSIX 1.14.0 is NOT released. Reviewed candidate `38ccde1` is pushed to draft [PR 223](https://github.com/EstarinAzx/Wisp-Router/pull/223); all four native CI builds and downloaded artifact checks pass. Real desktop Grok follow-up still fails; cause remains unproven.
 
-**Single next task:** continue revised `desktop-repair/phase-2` implementation/review with builder `5011a81c` and evaluator `ddab1276`, then fresh package/native CI and a new live check. Diagnostic fixes passed at `f738a06`; semantic work remains. The user already authorizes driver-seat fixes and eventual release; no routine permission questions.
+**Single next task:** obtain the actual Grok desktop failure category using the newly reviewed diagnostic candidate, then fix only the reproduced cause. Do not restart completed implementation or repeat passing probes. Candidate38ccde1 has not been tried in the actual UI. Exact evidence/pointers are in [[active-work]].
 
-Draft PR223: https://github.com/EstarinAzx/Wisp-Router/pull/223 . Feature worktree: `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-codex-desktop-signed-in`. Planner state/spec/rubric and detailed repair contract:
+Live setup is restored: integration disabled, no listener41184, native GPT-5.6-Sol / medium / openai, original Wisp routes restored, both auth hashes unchanged. All owned shells exited/stopped; builder/evaluator archived. No global install, merge, tag or publication.
 
-`C:/Users/S.D/.traycer/epics/1702a7c7-a431-43c2-ab5f-79d9cf189643/artifacts/autobuild/wisp-desktop/release-control/index.md`
+Feature worktree: `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-codex-desktop-signed-in`, clean HEAD `38ccde1dac9cede878b64b63210924104bf06dd8`.
 
-Do not rerun the old a342 acceptance helper as the next candidate. Its immutable files remain evidence. Safe request-shape14 and actual provider checks are under `D:/wisp-release-candidate-2.2.0-20260917/desktop-acceptance/`: Grok4.6 returned the exact marker; stored OpenCodeGo/KimiK3 key returns401. Parent will use a reversible named Grok Alias for live acceptance, preserving existing targets. Full state is in [[active-work]].
+Durable investigation: `D:/wisp-release-candidate-2.2.0-20260917/desktop-acceptance-v2/investigation-20260917-1120.md`.
 
 ## Landmines
 
-- Shared CODEX_HOME activation affects other clients; finish active Codex work and use new acceptance chats. Preserve exact routes, including gpt-5.5 -> xAI.
-- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of commits. Keep candidates, review evidence and worktrees.
-- Main source remains stable2.1.5 until PR223 merges. Context commits belong on main. Do not confuse local verified candidate bytes with future tag-built/downloaded release bytes.
-- No tagged release/npm publication yet; recheck availability before using2.2.0. Required companion VSIX is1.14.0; Slot unchanged. Traycer GUI support remains separately NOT VERIFIED.
+- Shared CODEX_HOME enable affects every client. Pause peers before a live window; roll back before waking them. Use fresh chats and preserve exact routes.
+- Do not change assistant output_text or developer-message order: real message-only probes passed. Tool count/schema is a hypothesis, not the cause. Actual desktop tool execution remains unverified.
+- App updated to26.911.7940.0. Failing session used CLI0.155.0-alpha.2.6; official scratch copy passes synthetic protocol checks. Global CLI remains0.154.0.
+- Preserve all candidates/evidence and user-owned `.context/flows.md`, `.context/Untitled.canvas`. Stable main application remains2.1.5.
+- User already authorized eventual implementation/release but requested this session end. Release requires real UI acceptance and publication/download verification.
 
 ## Related
 
