@@ -1,38 +1,84 @@
-// node packages/tui/tests/packagedDesktop.check.mjs <compiled-wisp>
-// Runs the copied binary and npm dispatcher outside the source tree, with temporary homes only.
+// node packagedDesktop.check.mjs <compiled-wisp> <extracted npm shell or -> <expected version>
+// Hermetic packaging check on every native runner; actual-client evidence is nativeDesktop.check.ts.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-const folder = mkdtempSync(join(tmpdir(), 'wisp packaged desktop ')); const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const binary = join(folder, process.platform === 'win32' ? 'wisp.exe' : 'wisp'); const pkg = join(folder, 'package');
-const server = createServer((req, res) => { assert.equal(req.headers['x-api-key'], 'synthetic-local'); assert.equal(req.url, '/codex-desktop/status'); res.setHeader('content-type', 'application/json'); res.end('{"protocol":1}'); });
-await new Promise(r => server.listen(0, '127.0.0.1', r));
+import { join, resolve } from 'node:path';
+
+assert(process.argv[2], 'Supply a compiled binary');
+const folder = mkdtempSync(join(tmpdir(), 'wisp packaged desktop '));
+const binaryName = process.platform === 'win32' ? 'wisp.exe' : 'wisp'; const binary = join(folder, binaryName);
+const runtime = join(folder, 'fixture-runtime'); const exporter = join(runtime, 'node_modules/@openai/codex/bin');
+mkdirSync(exporter, { recursive: true }); cpSync(process.execPath, join(runtime, process.platform === 'win32' ? 'node.exe' : 'node'));
+const exportLog = join(folder, 'exports.jsonl');
+writeFileSync(join(exporter, 'codex.js'), `const fs=require('fs'), assert=require('assert/strict');
+assert.deepEqual(process.argv.slice(2),['debug','models','--bundled']);
+assert(process.env.CODEX_HOME); assert.equal(fs.existsSync(require('path').join(process.env.CODEX_HOME,'auth.json')),false);
+fs.appendFileSync(${JSON.stringify(exportLog)},JSON.stringify(process.argv.slice(2))+'\\n');
+console.log(JSON.stringify({models:[{slug:'fixture-native',display_name:'Fixture native',visibility:'list',packaging_fixture:true}]}));`);
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(systemroot|windir|temp|tmp)$/i.test(key)));
+Object.assign(env, { PATH: runtime, HOME: folder, USERPROFILE: folder });
+const hash = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+const listen = server => new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)));
+const stop = async child => { if (child && child.exitCode === null && child.signalCode === null) { const closed = new Promise(r => child.once('close', r)); child.kill(); await closed; } };
+const captures = [];
+const upstream = createServer(async (req, res) => {
+  let body = ''; for await (const c of req) body += c; captures.push({ headers: req.headers, body: JSON.parse(body) });
+  res.setHeader('content-type', 'text/event-stream'); res.end('data: {"choices":[{"delta":{"content":"PACKAGED_DESKTOP_OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+});
+const upstreamPort = await listen(upstream); let bridge;
 try {
-  cpSync(resolve(process.argv[2]), binary); cpSync(join(root, 'packages/tui/npm/wisp-router'), pkg, { recursive: true });
-  const platform = join(pkg, 'node_modules/@tsd47216', `wisp-router-${process.platform}-${process.arch}`, 'bin'); mkdirSync(platform, { recursive: true }); cpSync(binary, join(platform, process.platform === 'win32' ? 'wisp.exe' : 'wisp'));
+  cpSync(resolve(process.argv[2]), binary); const commands = [[binary]];
+  let manifest;
+  if (process.argv[3] && process.argv[3] !== '-') {
+    const pkg = join(folder, 'package'); cpSync(resolve(process.argv[3]), pkg, { recursive: true });
+    manifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
+    assert(Object.values(manifest.optionalDependencies).every(v => v === manifest.version));
+    const platform = join(pkg, 'node_modules/@tsd47216', `wisp-router-${process.platform}-${process.arch}`);
+    assert.equal(JSON.parse(readFileSync(join(platform, 'package.json'), 'utf8')).version, manifest.version);
+    assert.equal(hash(join(platform, 'bin', binaryName)), hash(binary), 'Packed platform bytes differ from standalone');
+    commands.push([process.execPath, join(pkg, manifest.bin.wisp)]);
+  }
+  const expected = process.argv[4] ?? manifest?.version; assert(expected, 'Supply expected version or an extracted npm shell');
+  if (manifest) assert.equal(manifest.version, expected);
   let index = 0;
-  for (const command of [[binary], [process.execPath, join(pkg, 'bin/wisp.js')]]) {
+  for (const command of commands) {
     const codex = join(folder, `codex-${index}`); const wisp = join(folder, `wisp-${index++}`); mkdirSync(codex); mkdirSync(wisp);
-    writeFileSync(join(codex, 'config.toml'), 'model="preserved-default"\n'); writeFileSync(join(codex, 'auth.json'), 'unchanged-native-auth');
-    writeFileSync(join(wisp, 'auth.json'), '{"bridgeSecret":"synthetic-local"}'); writeFileSync(join(wisp, 'config.json'), JSON.stringify({ bridge: { port: server.address().port }, routing: { families: {}, aliases: [] } }));
+    const childEnv = { ...env, CODEX_HOME: codex, WISP_HOME: wisp };
     const run = args => new Promise((yes, no) => {
-      const child = spawn(command[0], [...command.slice(1), 'codex-desktop', ...args], { cwd: folder, windowsHide: true, env: { ...process.env, CODEX_HOME: codex, WISP_HOME: wisp } }); let out = '', err = '';
+      const child = spawn(command[0], [...command.slice(1), ...args], { cwd: folder, windowsHide: true, env: childEnv }); let out = '', err = '';
       child.stdout.on('data', c => out += c); child.stderr.on('data', c => err += c); child.on('error', no);
       const timer = setTimeout(() => { child.kill(); no(new Error('packaged command timeout')); }, 20000);
       child.on('close', code => { clearTimeout(timer); try { assert.equal(code, 0, err); assert(!out.includes('synthetic-local')); yes(out); } catch (e) { no(e); } });
     });
-    assert((await run(['--help'])).includes('Restart Codex'));
-    assert.equal(JSON.parse(await run(['status', '--json'])).enabled, false);
-    assert.equal(JSON.parse(await run(['enable', '--json'])).enabled, true);
-    assert(readFileSync(join(codex, 'config.toml'), 'utf8').includes('requires_openai_auth = true'));
-    assert.equal(JSON.parse(await run(['refresh', '--json'])).enabled, true);
-    assert.equal(JSON.parse(await run(['status', '--json'])).bridge, true);
-    assert.equal(JSON.parse(await run(['disable', '--json'])).enabled, false);
+    assert.equal(await run(['--version']), `wisp-router ${expected}\n`); assert.deepEqual(readdirSync(wisp), []); assert.deepEqual(readdirSync(codex), []);
+    const spare = createServer(); const port = await listen(spare); await new Promise(r => spare.close(r));
+    writeFileSync(join(codex, 'config.toml'), 'model="preserved-default"\n'); writeFileSync(join(codex, 'auth.json'), 'unchanged-native-auth');
+    writeFileSync(join(wisp, 'auth.json'), '{"bridgeSecret":"synthetic-local","keys":{"custom":"synthetic-external"}}');
+    writeFileSync(join(wisp, 'config.json'), JSON.stringify({ bridge: { port }, customBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`, routing: { families: {}, aliases: [{ name: 'packaged-alias', target: { providerId: 'custom', model: 'EXACT_PACKAGED_TARGET' } }] } }));
+    bridge = spawn(binary, ['serve'], { cwd: folder, windowsHide: true, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] }); bridge.stdout.resume(); bridge.stderr.resume();
+    let alive = false;
+    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 1); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    assert(alive, 'Compiled signed Bridge failed to start');
+    const desktop = args => run(['codex-desktop', ...args]);
+    assert((await desktop(['--help'])).includes('Restart Codex'));
+    assert.equal(JSON.parse(await desktop(['status', '--json'])).enabled, false);
+    assert.equal(JSON.parse(await desktop(['enable', '--json'])).enabled, true);
+    const config = readFileSync(join(codex, 'config.toml'), 'utf8'); assert(config.includes('requires_openai_auth = true')); assert(config.includes('supports_websockets = false'));
+    const catalog = JSON.parse(readFileSync(join(wisp, 'codex-desktop/models.json'), 'utf8')); assert.deepEqual(catalog.models.map(m => m.slug), ['fixture-native', 'packaged-alias']);
+    assert.equal(catalog.models[0].packaging_fixture, true);
+    const response = await fetch(`http://127.0.0.1:${port}/codex-desktop/v1/responses`, { method: 'POST', headers: { 'x-api-key': 'synthetic-local', authorization: 'Bearer synthetic-native', 'chatgpt-account-id': 'synthetic-account', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'packaged-alias', input: 'local packaging check', stream: false }) });
+    assert.equal(response.status, 200); assert((await response.text()).includes('PACKAGED_DESKTOP_OK'));
+    const capture = captures.at(-1); assert.equal(capture.body.model, 'EXACT_PACKAGED_TARGET'); assert.equal(capture.headers.authorization, 'Bearer synthetic-external'); assert(!capture.headers['chatgpt-account-id']); assert(!capture.headers['x-api-key']);
+    assert.equal(JSON.parse(await desktop(['refresh', '--json'])).enabled, true);
+    assert.equal(JSON.parse(await desktop(['status', '--json'])).bridge, true);
+    assert.equal(JSON.parse(await desktop(['disable', '--json'])).enabled, false);
     assert.equal(readFileSync(join(codex, 'config.toml'), 'utf8'), 'model="preserved-default"\n'); assert.equal(readFileSync(join(codex, 'auth.json'), 'utf8'), 'unchanged-native-auth');
+    await stop(bridge); bridge = undefined;
   }
-  console.log('PASS compiled and npm desktop lifecycle outside source cwd');
-} finally { server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(folder, { recursive: true, force: true }); }
+  assert.equal(readFileSync(exportLog, 'utf8').trim().split('\n').length, commands.length * 2);
+  console.log(`PASS ${process.platform}/${process.arch}: version ${expected}, copied compiled${manifest ? ' and packed npm' : ''} desktop lifecycle, production signed route and credential separation. Isolated catalog fixture; no installed Codex/Bun or source runtime.`);
+} finally { await stop(bridge); upstream.closeAllConnections(); await new Promise(r => upstream.close(r)); rmSync(folder, { recursive: true, force: true }); }

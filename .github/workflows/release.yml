@@ -59,6 +59,12 @@ jobs:
         working-directory: packages/tui
         run: node tests/packagedCodex.check.mjs dist/${{ matrix.binary }}
 
+      # Hermetic local catalog fixture; actual CLI and desktop acceptance are separate gates.
+      - name: Signed desktop smoke test
+        working-directory: packages/tui
+        shell: bash
+        run: node tests/packagedDesktop.check.mjs dist/${{ matrix.binary }} - "${GITHUB_REF_NAME#v}"
+
       - uses: actions/upload-artifact@v6
         with:
           name: wisp-${{ matrix.target }}
@@ -82,17 +88,18 @@ jobs:
           path: artifacts
 
       # The VS Code extension rides the same release page (the repo keeps no vsix — *.vsix is
-      # gitignored — so the release is the only copy). BEST-EFFORT: the extension bundles its own
-      # @wisp/core and its version is its own (a cut that bumps only wisp-router re-attaches the
-      # same vsix, harmless); a packaging hiccup must never block the npm release below.
+      # gitignored — so the release is the only copy). The companion is required: it bundles
+      # the same signed Bridge, and a missing/stale VSIX must block publication.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
       - run: bun install --frozen-lockfile
-      - name: Package the VS Code extension (best-effort)
+      - name: Package the exact VS Code companion
         run: |
-          bun run --cwd packages/vscode compile && bun run --cwd packages/vscode package \
-            || echo "WARN: vsix packaging failed — this release ships without the extension"
+          VSIX_VERSION=$(node -p "require('./packages/vscode/package.json').version")
+          VSIX="$GITHUB_WORKSPACE/packages/vscode/wisp-$VSIX_VERSION.vsix"
+          bun run --cwd packages/vscode package --out "$VSIX"
+          test -s "$VSIX"
 
       # Stage each platform package: drop its compiled binary into bin/ and stamp the version.
       - name: Stage platform packages
@@ -133,18 +140,15 @@ jobs:
           cp artifacts/wisp-darwin-arm64/wisp "release/wisp-v$VERSION-darwin-arm64"
           cp artifacts/wisp-darwin-x64/wisp "release/wisp-v$VERSION-darwin-x64"
           cp artifacts/wisp-linux-x64/wisp "release/wisp-v$VERSION-linux-x64"
-          NOTES="Wisp TUI + Bridge + Claude Code and Codex launchers. Install: \`npm i -g wisp-router\` (Node.js required for npm shims), or grab the standalone binary below. Launch with \`wisp claude-wisp …\` or \`wisp codex-wisp …\`. Start the Bridge first. Codex requires an installed native CLI; hosted search and opaque history replay are unsupported. See docs/codex-wisp.md and packages/tui/CHANGELOG.md at this tag for compatibility and release surfaces. A newly built extension bundles this tag's shared core; an already installed extension is unchanged."
-          # The vsix is present only when the best-effort packaging step above succeeded.
-          VSIX=$(ls packages/vscode/*.vsix 2>/dev/null | head -1)
-          if [ -n "$VSIX" ]; then
-            cp "$VSIX" release/
-            NOTES="$NOTES
-
-          VS Code extension: \`$(basename "$VSIX")\` below — install with \`code --install-extension $(basename "$VSIX")\`."
-          fi
+          VSIX_VERSION=$(node -p "require('./packages/vscode/package.json').version")
+          VSIX="packages/vscode/wisp-$VSIX_VERSION.vsix"
+          test -s "$VSIX"
+          cp "$VSIX" release/
+          NOTES_FILE="docs/releases/v$VERSION.md"
+          test -s "$NOTES_FILE"
           gh release create "$GITHUB_REF_NAME" release/* \
             --title "wisp-router $VERSION" \
-            --notes "$NOTES"
+            --notes-file "$NOTES_FILE"
 
       # Platform packages are BEST-EFFORT: npm's spam filter has 403'd and post-publish removed
       # them before — the shim's release-download fallback covers installs either way. The thin

@@ -6,6 +6,21 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.0] - 2026-09-17
+
+### Added
+
+- Opt-in `wisp codex-desktop enable|status|refresh|disable` preserves ChatGPT sign-in mode and creates a durable mixed native/Wisp Alias catalog. Restart Codex after catalog/config changes; exact route target edits remain live.
+- The signed Bridge path preserves exact Alias/native overrides, passes unoverridden native requests only to the fixed native endpoint, and rejects unknown models. Native credentials, external Provider credentials and the local Bridge secret remain separate; credentialed redirects, including catalog discovery, are refused.
+- Atomic activation/restore journals preserve original settings and unrelated later edits. Owned-field conflicts and unowned catalog output files fail before overwrite. `wisp --version` exposes the baked terminal version.
+
+### Candidate verification and surfaces
+
+- **Terminal/npm: 2.2.0**, **companion VSIX: 1.14.0**, **wisp-slot: unchanged**. These are prepared release candidates; publication and installation are separate.
+- Actual CLI **0.154.0** production-path checks cover signed account, mixed model list, external text/tool continuation, exact override, native passthrough and cancellation using isolated synthetic credentials. The legacy **0.153.4** check remains unchanged.
+- The four native release jobs run both legacy and signed desktop package smoke checks. Signed packaging checks use a local catalog-export fixture; they do not establish desktop UI compatibility. Required exact-version companion VSIX packaging now blocks publication on failure.
+- Actual desktop picker/login/restart/selected-route acceptance, other-platform native CI artifacts and publication remain pending. See [desktop operation and rollback](../../docs/codex-desktop.md).
+
 ## [2.1.5] - 2026-09-08
 
 ### Added

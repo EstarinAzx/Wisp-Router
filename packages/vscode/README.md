@@ -1,5 +1,7 @@
 # Wisp
 
+**Companion candidate 1.14.0:** the extension-hosted Bridge supports terminal 2.2.0's signed-in `wisp codex-desktop` integration. Configuration/refresh/rollback belong to that terminal command; install this VSIX and reload the extension host before using its updated Bridge. Actual Codex desktop UI acceptance and publication remain pending. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md). Slot is unchanged.
+
 **Run your ChatGPT or Claude.ai subscription as a model inside VS Code's GitHub Copilot chat — and route external tools like Claude Code onto the same backends.** Sign in with your ChatGPT or Claude.ai account and Codex or Claude models answer right in the native **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker — on your own subscription, no API key. Flip the **Bridge** on and the very same providers become a local endpoint that **Claude Code** and the **Copilot CLI** can run on too.
 
 This is the one thing VS Code's built-in "add a custom model" option **can't** do: it authenticates with a static API key, so it can reach an OpenAI-compatible endpoint but never an **OAuth subscription login**. Wisp can — that's its reason to exist next to Copilot.

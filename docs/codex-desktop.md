@@ -1,6 +1,6 @@
 # Signed-in Codex desktop integration
 
-This opt-in integration keeps Codex in ChatGPT sign-in mode and adds Wisp Aliases to its persistent model catalog. It requires a Wisp Bridge containing signed desktop protocol 1, plus an installed Codex CLI for exporting its native model descriptors. Older Bridges fail the enable check with update/start instructions.
+Prepared terminal/npm **2.2.0** and companion VSIX **1.14.0** contain this opt-in integration. It keeps Codex in ChatGPT sign-in mode and adds Wisp Aliases to its persistent model catalog. It requires a Wisp Bridge containing signed desktop protocol 1, plus an installed Codex CLI for exporting its native model descriptors. Older Bridges fail the enable check with update/start instructions. These are release candidates; actual desktop acceptance and publication remain pending. Slot is unchanged.
 
 ```sh
 wisp serve                         # keep this Bridge running, or use the updated TUI/VS Code host
@@ -28,6 +28,6 @@ For source use: `bun packages/tui/src/index.tsx codex-desktop status --json`. Co
 
 `bun packages/tui/tests/nativeDesktop.check.ts` exercises the actual CLI **0.154.0** app-server with isolated synthetic auth, the production Bridge and generated configuration: signed account, mixed model list, alias text/tool round-trip, exact override, native transport and cancellation. Its refusing proxy blocks incidental native account/plugin probes. The older `nativeCodex.check.ts` remains separately pinned to **0.153.4**. Both require Bun **1.4.2** or later; the release build pins 1.4.2.
 
-`node packages/tui/tests/packagedDesktop.check.mjs <compiled-wisp>` checks copied binary/npm lifecycle dispatch outside the source directory.
+`node packages/tui/tests/packagedDesktop.check.mjs <compiled-wisp> <extracted-npm-shell> 2.2.0` checks copied binary and actual packed npm bytes outside the source directory. Use `-` as the second argument to check the binary alone. A local Node catalog-export fixture removes the need for installed Codex or Bun; this checks packaging, not real-client compatibility. The test also exercises the compiled signed Bridge against a synthetic external Provider. All four native release jobs run this and the unchanged legacy package check. `wisp --version` reports the baked terminal version without starting the UI.
 
 Actual desktop UI picker, login retention across app restart, exact installed desktop build, and release-package/publication acceptance remain **pending**. CLI protocol verification does not establish those desktop results.
