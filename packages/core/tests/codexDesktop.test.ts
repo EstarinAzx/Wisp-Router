@@ -11,9 +11,9 @@ import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
 
 const listen = (s: ReturnType<typeof createServer>): Promise<number> => new Promise(r => s.listen(0, '127.0.0.1', () => r((s.address() as AddressInfo).port)));
 const close = async (s: ReturnType<typeof createServer>) => { s.closeAllConnections(); await new Promise<void>(r => s.close(() => r())); };
-const post = (port: number, model: unknown, headers: Record<string, string> = { 'x-api-key': 'local-secret', authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account', 'x-untrusted': 'NO' }, path = '/codex-desktop/v1/responses') => new Promise<{status: number; text: string}>((resolve, reject) => {
+const post = (port: number, model: unknown, headers: Record<string, string> = { 'x-api-key': 'local-secret', authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account', 'x-untrusted': 'NO' }, path = '/codex-desktop/v1/responses', extra: Record<string, unknown> = {}) => new Promise<{status: number; text: string}>((resolve, reject) => {
   const req = request({ host: '127.0.0.1', port, path, method: 'POST', headers }, res => { let text = ''; res.on('data', c => text += c); res.on('end', () => resolve({ status: res.statusCode!, text })); });
-  req.on('error', reject); req.end(JSON.stringify({ model, input: 'hello', stream: true, metadata: { unchanged: true } }));
+  req.on('error', reject); req.end(JSON.stringify({ model, input: 'hello', stream: true, metadata: { unchanged: true }, ...extra }));
 });
 const answer = (res: ServerResponse) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: {"choices":[{"delta":{"content":"EXTERNAL_OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); };
 
@@ -97,6 +97,19 @@ describe('signed desktop production Bridge', () => {
     expect(logs.filter(line => line.includes('desktop rejection'))).toHaveLength(4);
     expect(logs.join('\n')).not.toContain(secret); expect(seen).toHaveLength(0);
   }));
+  it.each(['keyed', 'antigravity-oauth', 'codex'] as const)('does not reflect arbitrary effort values from the %s validation path', async kind => {
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
+    try { await fixture(async (port, seen, deps) => {
+      if (kind !== 'keyed') deps.providers[0].kind = kind;
+      deps.codexCreds = async () => ({ accessToken: 'provider-token', accountId: 'provider-account' });
+      const logs: string[] = []; deps.log = line => logs.push(line);
+      const canary = 'PRIVATE_EFFORT_VALUE_7619';
+      const reply = await post(port, 'alias', undefined, undefined, { reasoning: { effort: canary } });
+      expect(reply.status).toBe(400); expect(reply.text + logs.join('\n')).not.toContain(canary);
+      const diagnostic = JSON.parse(reply.text).error.diagnostic;
+      expect(diagnostic.reason.code).toBe('unsupported_reasoning_effort'); expect(diagnostic.shape.reasoningEffort).toBe('unrecognized'); expect(seen).toHaveLength(0);
+    }); } finally { discovery.mockRestore(); }
+  });
   it('refuses redirects during real cold Codex catalog discovery on the signed adapter', async () => {
     const root = mkdtempSync(join(tmpdir(), 'wisp-cold-catalog-')); const prior = process.env.WISP_HOME; process.env.WISP_HOME = root;
     const realFetch = globalThis.fetch;

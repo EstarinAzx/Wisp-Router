@@ -623,6 +623,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     let parsed: ReturnType<typeof parseResponsesRequest>;
     let route: RouteMatch | undefined;
     let body: any;
+    const rejectSigned = (error: unknown): void => {
+      const diagnostic = responsesRejectionDiagnostic(error, body);
+      deps.log(`[bridge] desktop rejection ${JSON.stringify(diagnostic)}`);
+      sendJson(res, 400, { error: { message: `Invalid desktop request: ${diagnostic.reason.code}${diagnostic.reason.field ? ` (${diagnostic.reason.field})` : ''}`, type: 'invalid_request_error', diagnostic } });
+    };
     try {
       const raw = await readBody(req); body = JSON.parse(raw);
       if (signedDesktop) {
@@ -646,9 +651,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     catch (err) {
       if (!controller.signal.aborted) {
         if (signedDesktop) {
-          const diagnostic = responsesRejectionDiagnostic(err, body);
-          deps.log(`[bridge] desktop rejection ${JSON.stringify(diagnostic)}`);
-          sendJson(res, 400, { error: { message: `Invalid desktop request: ${diagnostic.reason.code}${diagnostic.reason.field ? ` (${diagnostic.reason.field})` : ''}`, type: 'invalid_request_error', diagnostic } });
+          rejectSigned(err);
         } else sendError(res, 400, String(err));
       }
       return;
@@ -670,7 +673,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const supported = isAnthropicProvider(provider) ? anthropicThinkingEffort(model, effort).output_config?.effort === effort
         : isXaiProvider(provider) ? xaiReasoning(model, effort)?.effort === effort
         : isAntigravityProvider(provider) ? false : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(effort);
-      if (!supported) return sendError(res, 400, `Unsupported reasoning effort '${effort}' for Provider '${provider.id}' model '${model}'`);
+      if (!supported) return signedDesktop ? rejectSigned(new Error('Unsupported reasoning effort'))
+        : sendError(res, 400, `Unsupported reasoning effort '${effort}' for Provider '${provider.id}' model '${model}'`);
     }
     if (!isCodexProvider(provider) && !isXaiProvider(provider) && !isAnthropicProvider(provider) && parsed.turns.some(t => t.toolResults.some(r => r.contentParts))) {
       return sendError(res, 400, 'This Provider wire cannot preserve image-bearing tool results');
@@ -687,6 +691,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         return executor.open({ parsed, provider, model: pinnedModel ?? resolveModel(deps.modelMap(), provider), baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()), signal: controller.signal, signedDesktop });
       }, signedDesktop);
       if (controller.signal.aborted) return;
+      if (!started.ok && signedDesktop && started.message.startsWith('Unsupported reasoning effort')) return rejectSigned(new Error('Unsupported reasoning effort'));
       if (!started.ok) return sendError(res, started.status, started.message);
       if (parsed.stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });

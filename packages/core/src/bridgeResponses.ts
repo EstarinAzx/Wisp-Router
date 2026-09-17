@@ -50,6 +50,7 @@ export const responsesRejectionDiagnostic = (error: unknown, value: unknown) => 
   else if (message.startsWith('Unsupported content type: ')) { reason.code = 'unsupported_content_type'; reason.scope = 'input'; reason.type = tag(message.slice('Unsupported content type: '.length), ['input_text', 'output_text', 'input_image', 'input_file', 'refusal']); }
   else if (message.startsWith('Conflicting tool definition: ')) { reason.code = 'conflicting_tool_definition'; reason.scope = 'tools'; }
   else if (message.startsWith('Only automatic reasoning summaries')) { reason.code = 'unsupported_reasoning_summary'; reason.scope = 'reasoning'; }
+  else if (message.startsWith('Unsupported reasoning effort')) { reason.code = 'unsupported_reasoning_effort'; reason.scope = 'reasoning'; }
   else if (message === 'Stored responses are unsupported') { reason.code = 'stored_responses_unsupported'; }
   else if (message === 'Only automatic tool choice is supported') { reason.code = 'unsupported_tool_choice'; reason.scope = 'tools'; }
   const body = record(value), reasoning = record(body.reasoning), input = Array.isArray(body.input) ? body.input : [], tools = Array.isArray(body.tools) ? body.tools : [];
