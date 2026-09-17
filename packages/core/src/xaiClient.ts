@@ -25,6 +25,7 @@ import {
   responsesIncompleteReason, responsesUsage, type EffortLevel, type CodexResponsesEvent, type CodexResponsesTool,
 } from './catalog';
 import { sseBlocks, type CodexStreamEvent } from './codexClient';
+import { DesktopUpstreamError } from './desktopUpstream';
 
 // A conversation message for the Grok backend — the same shape the Codex/Anthropic clients take, so dispatch
 // stays uniform: user/assistant/system text, optional images, and (agent mode) tool calls + results.
@@ -61,6 +62,11 @@ const xaiResponsesRequest = async (args: XaiRequestArgs): Promise<Response> => {
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    if (args.rejectRedirects) {
+      let code: unknown;
+      try { code = JSON.parse(errBody)?.error?.code; } catch { /* Non-JSON error bodies have no code. */ }
+      throw new DesktopUpstreamError(res.status, code);
+    }
     throw new Error(`Grok API error ${res.status}${errBody.trim() ? `: ${errBody.trim().slice(0, 500)}` : '.'}`);
   }
   return res;
@@ -100,6 +106,7 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
     const ev = parseSseBlock(block);
     if (!ev) continue;
     if (ev.event === 'response.failed') {
+      if (args.rejectRedirects) throw new DesktopUpstreamError(undefined, 'stream_failed');
       throw new Error(ev.data?.response?.error?.message ?? ev.data?.error?.message ?? 'Grok response failed');
     }
     if (ev.event === 'response.output_text.delta') {
@@ -125,10 +132,10 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
     }
   }
   if (args.responses && completed) {
-    if (!completed.startsWith(streamedText)) throw new Error('Provider terminal text disagrees with streamed text');
+    if (!completed.startsWith(streamedText)) throw args.rejectRedirects ? new DesktopUpstreamError(undefined, 'stream_invalid') : new Error('Provider terminal text disagrees with streamed text');
     if (completed.length > streamedText.length) yield { type: 'text', value: completed.slice(streamedText.length) };
   } else if (!sawDelta && completed) yield { type: 'text', value: completed };
-  if (args.responses && (streamError || !sawTerminal)) throw new Error(streamError ?? 'Provider stream ended before completion');
+  if (args.responses && (streamError || !sawTerminal)) throw args.rejectRedirects ? new DesktopUpstreamError(undefined, streamError ? 'stream_failed' : 'stream_incomplete') : new Error(streamError ?? 'Provider stream ended before completion');
   if (args.responses && incompleteReason) yield { type: 'truncation', reason: incompleteReason === 'content_filter' ? 'content_filter' : 'max_tokens' };
   if (!args.responses && incompleteReason) yield { type: 'text', value: `\n\n_[Response truncated: ${incompleteReason}]_` };
   const toolCalls = reduceResponsesToolCalls(toolEvents);

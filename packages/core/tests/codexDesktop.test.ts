@@ -36,6 +36,56 @@ async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Pro
 }
 
 describe('signed desktop production Bridge', () => {
+  it.each([
+    { body: 'event: response.completed\ndata: {"response":{"output":[]}}\n\n', status: 200, code: 'empty_output' },
+    { body: 'event: response.output_text.delta\ndata: {"delta":"visible"}\n\n', status: 200, code: 'stream_incomplete' },
+    { body: 'event: response.output_text.delta\ndata: {"delta":"visible"}\n\nevent: response.failed\ndata: {"response":{"error":{"status":401,"code":"invalid_api_key","message":"PRIVATE_BODY fetch failed API error 503"}}}\n\n', status: 200, code: 'stream_failed' },
+    { body: 'event: response.failed\ndata: {"error":{"status":401,"message":"PRIVATE_BODY fetch failed API error 503"}}\n\n', status: 502, code: 'stream_failed' },
+    { body: 'not valid SSE or JSON', status: 502, code: 'stream_incomplete' },
+  ])('keeps SSE failure $code safe without retrying or promoting text to HTTP status', async scenario => fixture(async (port, seen, deps) => {
+    deps.providers[0].kind = 'xai-oauth'; deps.routingMap().aliases[0].target.model = 'grok-4.6'; deps.xaiCreds = async () => ({ accessToken: 'synthetic-external' });
+    const logs: string[] = []; deps.log = text => logs.push(text);
+    let attempts = 0; const saved = globalThis.fetch;
+    globalThis.fetch = (async () => { attempts++; return new Response(scenario.body, { headers: { 'Content-Type': 'text/event-stream' } }); }) as typeof fetch;
+    try {
+      const reply = await post(port, 'alias');
+      expect(reply.status).toBe(scenario.status); expect(attempts).toBe(1); expect(reply.text).toContain(scenario.code);
+      expect(reply.text + logs.join('\n')).not.toContain('PRIVATE_');
+      expect(reply.text).not.toContain('invalid_api_key');
+      if (scenario.body.includes('"delta"')) expect((reply.text.match(/"delta":"visible"/g) ?? []).length).toBe(1);
+    } finally { globalThis.fetch = saved; }
+  }));
+  it('stops signed retry work when the client disconnects during backoff', async () => fixture(async (port, seen, deps) => {
+    deps.providers[0].kind = 'xai-oauth'; deps.routingMap().aliases[0].target.model = 'grok-4.6'; deps.xaiCreds = async () => ({ accessToken: 'synthetic-external' });
+    let attempts = 0; const saved = globalThis.fetch;
+    globalThis.fetch = (async () => { attempts++; return new Response('', { status: 503 }); }) as typeof fetch;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/codex-desktop/v1/responses', method: 'POST', headers: { 'x-api-key': 'local-secret' } });
+        req.on('error', () => resolve());
+        deps.log = line => { if (line.includes('retrying')) req.destroy(new Error('test disconnect')); };
+        req.end(JSON.stringify({ model: 'alias', input: 'synthetic', stream: true }));
+        req.on('response', () => reject(new Error('unexpected completed request')));
+      });
+      await new Promise(r => setTimeout(r, 800)); expect(attempts).toBe(1);
+    } finally { globalThis.fetch = saved; }
+  }));
+  it.each([400, 401, 403, 422, 429, 500, 503])('preserves authoritative xAI HTTP %s without exposing error-body prose', async status => fixture(async (port, seen, deps) => {
+    deps.providers[0].kind = 'xai-oauth';
+    deps.routingMap().aliases[0].target.model = 'grok-4.6';
+    deps.xaiCreds = async () => ({ accessToken: 'synthetic-external' });
+    const logs: string[] = []; deps.log = text => logs.push(text);
+    let attempts = 0;
+    const saved = globalThis.fetch;
+    globalThis.fetch = (async () => { attempts++; return Response.json({ error: { code: 'PRIVATE_CODE_401', message: 'PRIVATE_BODY fetch failed API error 503 invalid_api_key' } }, { status }); }) as typeof fetch;
+    try {
+      const reply = await post(port, 'alias');
+      expect(reply.status).toBe(status);
+      expect(attempts).toBe([429, 500, 503].includes(status) ? 3 : 1);
+      expect(reply.text + logs.join('\n')).not.toContain('PRIVATE_');
+      expect(reply.text).not.toContain('invalid_api_key');
+    } finally { globalThis.fetch = saved; }
+  }));
   it('accepts the captured fresh shape on a supported keyed wire without hosted search or neutral effort', async () => fixture(async (port, seen) => {
     const input = ['developer', 'user', 'developer', 'developer', 'user', 'developer'].map((role, index) => ({ type: 'message', role, content: `content-${index}` }));
     const tools = [...Array.from({ length: 11 }, (_, n) => ({ type: 'function', name: `function_${n}`, parameters: { type: 'object', properties: {} } })),

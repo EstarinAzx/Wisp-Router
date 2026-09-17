@@ -101,15 +101,23 @@ try {
   await rpc('initialize', { clientInfo: { name: 'wisp-desktop-check', version: '1.0.0' }, capabilities: { experimentalApi: true } }); send({ method: 'initialized', params: {} });
   const account = await rpc('account/read', { refreshToken: false }); assert.equal(account.account.type, 'chatgpt'); assert.equal(account.requiresOpenaiAuth, true);
   const list = await rpc('model/list', { includeHidden: false, limit: 1000 }); assert(list.data.some((m: any) => m.model === 'wisp-external')); assert(list.data.some((m: any) => m.model === native));
-  async function turn(model: string, desired: string) {
-    const result = await rpc('thread/start', { model, cwd: folder, approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: [{ name: 'fixture_tool', description: 'Local check', inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } }] });
-    const threadId = result.thread.id; const started = await rpc('turn/start', { threadId, input: [{ type: 'text', text: 'Local synthetic test' }] });
+  async function turn(model: string, desired: string, existingThread?: string) {
+    const result = existingThread ? undefined : await rpc('thread/start', { model, cwd: folder, approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: [{ name: 'fixture_tool', description: 'Local check', inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } }] });
+    const threadId = existingThread ?? result.thread.id; const started = await rpc('turn/start', { threadId, input: [{ type: 'text', text: existingThread ? 'Distinct synthetic follow-up' : 'Local synthetic test' }] });
     if (mode === 'cancel') { const until = Date.now() + 10000; while (!nativeStarted && Date.now() < until) await new Promise(r => setTimeout(r, 20)); assert(nativeStarted); await rpc('turn/interrupt', { threadId, turnId: started.turn.id }); }
     let final = ''; while (true) { const v = await read(); if (v.method === 'item/completed' && v.params.item.type === 'agentMessage') final += v.params.item.text;
       if (v.method === 'turn/completed') { assert.equal(v.params.turn.status, mode === 'cancel' ? 'interrupted' : 'completed', JSON.stringify(v)); break; } }
     if (desired) assert.equal(final, desired);
+    return threadId;
   }
-  await turn('wisp-external', 'EXTERNAL_OK'); mode = 'tool'; await turn('wisp-external', 'TOOL_FINAL_OK'); assert.equal(toolCalls, 1);
+  const conversation = await turn('wisp-external', 'EXTERNAL_OK');
+  await turn('wisp-external', 'EXTERNAL_OK', conversation);
+  const replay = captures.at(-1).body;
+  assert(xai ? replay.input.some((m: any) => m.role === 'assistant' && m.content.some((p: any) => p.text === 'EXTERNAL_OK')) : replay.messages.some((m: any) => m.role === 'assistant' && m.content === 'EXTERNAL_OK'));
+  const replayMessages = xai ? replay.input : replay.messages;
+  const assistantIndex = replayMessages.findIndex((m: any) => m.role === 'assistant');
+  assert(replayMessages.slice(assistantIndex + 1).some((m: any) => m.role === 'user' && (xai ? m.content.some((p: any) => p.text.includes('Distinct synthetic follow-up')) : JSON.stringify(m.content).includes('Distinct synthetic follow-up'))));
+  mode = 'tool'; await turn('wisp-external', 'TOOL_FINAL_OK', conversation); assert.equal(toolCalls, 1);
   assert(captures.some(c => c.kind === 'external' && (xai ? c.body.input.some((m: any) => m.type === 'function_call_output' && m.output.includes('TOOL_RESULT_OK')) : c.body.messages.some((m: any) => m.role === 'tool' && m.content.includes('TOOL_RESULT_OK')))));
   mode = 'text'; await turn(overridden, 'EXTERNAL_OK'); await turn(native, 'NATIVE_OK');
   mode = 'cancel'; nativeStarted = false; await turn(native, ''); await new Promise(r => setTimeout(r, 100)); assert(cancelled);
@@ -120,9 +128,9 @@ try {
   }
   assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), auth);
   // Signed Codex probes account/plugin endpoints independently. The refusing proxy blocks those;
-  // all six inference requests must instead be accounted for by our two production transports.
-  assert.equal(captures.length, 6); assert.equal(captures.filter(c => c.kind === 'native').length, 2);
-  if (xai) assert.equal(xaiRequests, 4);
+  // all seven inference requests must instead be accounted for by our two production transports.
+  assert.equal(captures.length, 7); assert.equal(captures.filter(c => c.kind === 'native').length, 2);
+  if (xai) assert.equal(xaiRequests, 5);
   await desktopAction('disable', { codexHome, wispHome });
   writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, searchMode, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
   console.log(`PASS native signed production path: ${out}`);

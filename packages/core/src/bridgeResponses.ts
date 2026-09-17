@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import type { AssembledToolCall, BridgeUsage, NormalizedTurn, NormalizedContentPart } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
+export class EmptyResponsesOutputError extends Error {
+  constructor() { super('Provider returned no visible output'); }
+}
+
 type RecordValue = Record<string, any>;
 const object = (v: unknown, label: string): RecordValue => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error(`${label} must be an object`);
@@ -245,7 +249,7 @@ export const createResponsesEncoder = (parsed: BridgeResponsesRequest, id: strin
       return frames + frame('response.output_text.delta', { ...position, delta: event.text });
     },
     finish: (): { frames: string; response: RecordValue } => {
-      if (!text && !calls.length && !incomplete) throw new Error('Provider returned no visible output');
+      if (!text && !calls.length && !incomplete) throw new EmptyResponsesOutputError();
       if (parsed.responses?.parallelToolCalls === false && calls.length > 1) throw new Error('Provider returned multiple tools with parallel_tool_calls=false');
       if (new Set(calls.map(c => c.id)).size !== calls.length) throw new Error('Duplicate upstream call_id');
       // Validate every call before exposing any executable item, even when parallel calls are allowed.

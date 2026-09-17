@@ -25,6 +25,7 @@
 import * as http from 'http';
 import * as crypto from 'crypto';
 import OpenAI from 'openai';
+import { desktopUpstreamFailure } from './desktopUpstream';
 import { forwardDesktopNative, desktopTargetIssue, DESKTOP_PROTOCOL, type NativeFetch } from './codexDesktop';
 import { codexCatalog } from './codexModels';
 import {
@@ -512,7 +513,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         return { ...started, events: await primeStream(started.events) } as R;
       } catch (err) {
         const message = String(err);
-        if (controller.signal.aborted || n >= MAX_PROVIDER_ATTEMPTS || executor.classify(err) || !isTransientProviderError(message)) throw err;
+        const retryable = redact ? desktopUpstreamFailure(err).retryable : !executor.classify(err) && isTransientProviderError(message);
+        if (controller.signal.aborted || n >= MAX_PROVIDER_ATTEMPTS || !retryable) throw err;
         const wait = retryDelayMs(n, Math.random);
         deps.log(`[bridge] provider ${provider.id} transient failure — retrying in ${Math.round(wait)}ms (attempt ${n + 1}/${MAX_PROVIDER_ATTEMPTS}): ${redact ? 'desktop upstream error' : message} (#168)`);
         await sleep(wait);
@@ -533,8 +535,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     controller: AbortController,
     executor: ProviderExecutor,
     midStreamFrame?: (message: string) => string,
+    signedDesktop = false,
   ): void => {
     if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+    if (signedDesktop) {
+      const failure = desktopUpstreamFailure(err);
+      deps.log(`[bridge] desktop upstream HTTP ${failure.status} code=${failure.code}`);
+      if (res.headersSent) { if (midStreamFrame) res.write(midStreamFrame(failure.message)); res.end(); return; }
+      return sendJson(res, failure.status, { error: { message: failure.message, type: 'provider_error', code: failure.code } });
+    }
     deps.log(`[bridge] error ${provider.id} ${String(err)}`);
     noteProviderError(provider.id, err);
     // The log line names the classified code so the four cases are tellable apart in operation.
@@ -713,7 +722,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       controller.signal.throwIfAborted();
       const final = encoder.finish();
       if (parsed.stream) { res.end(final.frames); } else sendJson(res, 200, final.response);
-    } catch (err) { failProviderRequest(res, provider, signedDesktop ? new Error('Desktop provider request failed') : err, controller, executor, encoder.fail); }
+    } catch (err) { failProviderRequest(res, provider, err, controller, executor, encoder.fail, signedDesktop); }
   };
 
   // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
