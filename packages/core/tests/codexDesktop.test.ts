@@ -1,0 +1,123 @@
+import { describe, it, expect, vi } from 'vitest';
+import { codexCatalog } from '../src/codexModels';
+import { readDesktopNativeModels } from '../src/codexDesktop';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer, request, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import OpenAI from 'openai';
+import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
+
+const listen = (s: ReturnType<typeof createServer>): Promise<number> => new Promise(r => s.listen(0, '127.0.0.1', () => r((s.address() as AddressInfo).port)));
+const close = async (s: ReturnType<typeof createServer>) => { s.closeAllConnections(); await new Promise<void>(r => s.close(() => r())); };
+const post = (port: number, model: unknown, headers: Record<string, string> = { 'x-api-key': 'local-secret', authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account', 'x-untrusted': 'NO' }, path = '/codex-desktop/v1/responses') => new Promise<{status: number; text: string}>((resolve, reject) => {
+  const req = request({ host: '127.0.0.1', port, path, method: 'POST', headers }, res => { let text = ''; res.on('data', c => text += c); res.on('end', () => resolve({ status: res.statusCode!, text })); });
+  req.on('error', reject); req.end(JSON.stringify({ model, input: 'hello', stream: true, metadata: { unchanged: true } }));
+});
+const answer = (res: ServerResponse) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: {"choices":[{"delta":{"content":"EXTERNAL_OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); };
+
+async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Promise<void>, upstreamReply = answer) {
+  const seen: any[] = [];
+  const upstream = createServer(async (req, res) => { let raw = ''; for await (const c of req) raw += c; seen.push({ headers: req.headers, body: JSON.parse(raw), url: req.url }); upstreamReply(res); });
+  const up = await listen(upstream); const spare = createServer(); const port = await listen(spare); await close(spare);
+  const provider = { id: 'external', label: 'External', baseUrl: `http://127.0.0.1:${up}/v1`, defaultModel: 'DEFAULT', apiKeyEnv: '' };
+  const map = { families: {}, aliases: [{ name: 'alias', target: { providerId: 'external', model: 'EXACT' } }], codexModels: { 'native-overridden': { providerId: 'external', model: 'OVERRIDE' } } };
+  const deps: BridgeDeps = { providers: [provider], modelMap: () => ({}), customBaseUrl: () => '', keyFor: async () => 'external-token',
+    clientFor: async () => new OpenAI({ apiKey: 'external-token', baseURL: provider.baseUrl, maxRetries: 0 }),
+    codexSignedIn: async () => false, codexCreds: async () => undefined, anthropicSignedIn: async () => false, anthropicCreds: async () => undefined,
+    effort: () => 'medium', activeProviderId: () => 'external', routingMap: () => map, aliasPickerShowsModel: () => false, aliasOnlyModels: () => false,
+    port: () => port, accessSecret: () => 'local-secret', log: () => {},
+    desktopNativeModels: () => ['native', 'native-overridden'],
+    nativeFetch: async (url, init) => { seen.push({ native: true, url, headers: Object.fromEntries(new Headers(init?.headers)), body: JSON.parse(init?.body as string), redirect: init?.redirect }); return new Response('NATIVE_UNCHANGED', { status: 201 }); },
+  } as BridgeDeps;
+  const bridge = createBridgeServer(deps); await bridge.start();
+  try { await run(port, seen, deps); } finally { bridge.stop(); await close(upstream); }
+}
+
+describe('signed desktop production Bridge', () => {
+  it('keeps native body/status, allowlisted credentials and fixed destination', async () => fixture(async (port, seen) => {
+    expect(await post(port, 'native')).toEqual({ status: 201, text: 'NATIVE_UNCHANGED' });
+    expect(seen).toHaveLength(1); expect(seen[0].url).toBe('https://chatgpt.com/backend-api/codex/responses');
+    expect(seen[0].headers).toEqual({ authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account', 'content-type': 'application/json' });
+    expect(seen[0].body.metadata).toEqual({ unchanged: true }); expect(seen[0].redirect).toBe('manual');
+  }));
+  it('preserves UTF-8 characters split across native request chunks', async () => fixture(async (port, seen) => {
+    const body = Buffer.from(JSON.stringify({ model: 'native', input: '🙂' })); const split = body.indexOf(Buffer.from('🙂')) + 2;
+    await new Promise<void>((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, path: '/codex-desktop/v1/responses', method: 'POST', headers: { 'x-api-key': 'local-secret', authorization: 'Bearer native-token' } }, res => { res.resume(); res.on('end', resolve); });
+      req.on('error', reject); req.write(body.subarray(0, split)); setTimeout(() => req.end(body.subarray(split)), 20);
+    }); expect(seen[0].body.input).toBe('🙂');
+  }));
+  it('routes exact aliases/overrides live and never leaks either caller credential', async () => fixture(async (port, seen, deps) => {
+    for (const model of ['alias', 'native-overridden']) expect((await post(port, model)).status).toBe(200);
+    expect(seen.map(s => s.body.model)).toEqual(['EXACT', 'OVERRIDE']);
+    for (const s of seen) { expect(s.headers.authorization).toBe('Bearer external-token'); expect(s.headers['x-api-key']).toBeUndefined(); expect(s.headers['chatgpt-account-id']).toBeUndefined(); }
+    deps.routingMap().aliases[0].target.model = 'LIVE'; await post(port, 'alias'); expect(seen.at(-1).body.model).toBe('LIVE');
+    deps.routingMap().aliases.push({ name: 'native', target: { providerId: 'external', model: 'COLLISION' } }); await post(port, 'native'); expect(seen.at(-1).body.model).toBe('COLLISION');
+    deps.routingMap().aliases[0].target.providerId = 'missing'; expect((await post(port, 'alias')).status).toBe(404); expect(seen).toHaveLength(4);
+  }));
+  it('fails closed for unknown IDs, malformed model, missing registry and local auth', async () => fixture(async (port, seen, deps) => {
+    for (const headers of [{}, { authorization: 'Bearer native-token' }, { 'x-api-key': 'wrong' }, { 'x-api-key': '', authorization: 'Bearer local-secret' }]) expect((await post(port, 'native', headers)).status).toBe(401);
+    for (const id of ['unknown/external', 'external', 'gpt-invented']) expect((await post(port, id)).status).toBe(404);
+    expect((await post(port, null)).status).toBe(400);
+    deps.desktopNativeModels = () => undefined; expect((await post(port, 'native')).status).toBe(503); expect(seen).toHaveLength(0);
+  }));
+  it('retains the ordinary Responses Active fallback', async () => fixture(async (port, seen) => {
+    expect((await post(port, 'unknown', { authorization: 'Bearer local-secret' }, '/v1/responses')).status).toBe(200); expect(seen[0].body.model).toBe('DEFAULT');
+  }));
+  it('rejects native redirects without reflecting Location', async () => fixture(async (port, seen, deps) => {
+    deps.nativeFetch = async () => new Response('', { status: 307, headers: { location: 'https://evil.invalid/secret' } });
+    expect((await post(port, 'native')).status).toBe(502); expect(seen).toHaveLength(0);
+  }));
+  it('does not expose credential-bearing upstream errors in signed logs or replies', async () => fixture(async (port, _seen, deps) => {
+    const logs: string[] = []; deps.log = line => logs.push(line);
+    const reply = await post(port, 'alias'); expect(reply.status).toBe(502);
+    expect(reply.text + logs.join('\n')).not.toContain('external-token');
+  }, res => { res.writeHead(502, { 'content-type': 'application/json' }); res.end('{"error":{"message":"fetch failed external-token"}}'); }));
+  it.each([false, true])('rejects external redirects, cross-origin=%s', async cross => {
+    let hits = 0; const sink = createServer((_req, res) => { hits++; answer(res); }); const sinkPort = await listen(sink);
+    try { await fixture(async (port, seen) => { expect((await post(port, 'alias')).status).toBe(502); expect(hits).toBe(0); expect(seen.every(s => s.url === '/v1/chat/completions')).toBe(true); }, res => { res.writeHead(307, { location: cross ? `http://127.0.0.1:${sinkPort}/stolen` : '/stolen' }); res.end(); }); }
+    finally { await close(sink); }
+  });
+  it.each((['codex', 'anthropic-oauth', 'xai-oauth', 'antigravity-oauth'] as const).flatMap(kind => [false, true].map(cross => ({ kind, cross }))))('refuses OAuth redirects on $kind cross=$cross', async ({ kind, cross }) => {
+    let hits = 0; const sink = createServer((_req, res) => { hits++; answer(res); }); const sinkPort = await listen(sink);
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
+    try { await fixture(async (port, seen, deps) => {
+      deps.providers[0].kind = kind;
+      if (kind === 'xai-oauth') deps.routingMap().aliases[0].target.model = 'grok-build';
+      deps.codexCreds = async () => ({ accessToken: 'provider-token', accountId: 'provider-account' });
+      deps.anthropicCreds = async () => ({ accessToken: 'provider-token' }) as any;
+      deps.xaiCreds = async () => ({ accessToken: 'provider-token' });
+      deps.antigravityCreds = async () => ({ accessToken: 'provider-token', projectId: 'project' }) as any;
+      expect((await post(port, 'alias')).status).toBe(502); expect(hits).toBe(0); expect(seen.every(s => s.url !== '/stolen')).toBe(true);
+    }, res => { res.writeHead(307, { location: cross ? `http://127.0.0.1:${sinkPort}/stolen` : '/stolen' }); res.end(); }); }
+    finally { discovery.mockRestore(); await close(sink); }
+  });
+  it('bounds signed request bodies before either upstream opens', async () => fixture(async (port, seen) => {
+    await expect(new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port, path: '/codex-desktop/v1/responses', method: 'POST', headers: { 'x-api-key': 'local-secret' } }, res => { res.resume(); res.on('end', resolve); });
+      req.on('error', reject); req.end(JSON.stringify({ model: 'native', input: 'x'.repeat(26 * 1024 * 1024) }));
+    })).rejects.toThrow(); expect(seen).toHaveLength(0);
+  }));
+  it('propagates cancellation to the external adapter stream', async () => {
+    let ended = false;
+    await fixture(async (port, seen) => {
+      const req = request({ host: '127.0.0.1', port, path: '/codex-desktop/v1/responses', method: 'POST', headers: { 'x-api-key': 'local-secret' } });
+      req.on('error', () => {}); req.end(JSON.stringify({ model: 'alias', input: 'hello', stream: true }));
+      const until = Date.now() + 2000; while (!seen.length && Date.now() < until) await new Promise(r => setTimeout(r, 10));
+      expect(seen).toHaveLength(1); req.destroy();
+      while (!ended && Date.now() < until) await new Promise(r => setTimeout(r, 10)); expect(ended).toBe(true);
+    }, res => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"choices":[{"delta":{"content":"start"}}]}\n\n'); res.on('close', () => { ended = true; }); });
+  });
+  it('both hosts registry reader fails closed and reads refresh/removal live', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wisp-registry-')); const before = process.env.WISP_HOME; process.env.WISP_HOME = root;
+    try {
+      expect(readDesktopNativeModels()).toBeUndefined(); mkdirSync(join(root, 'codex-desktop'));
+      const file = join(root, 'codex-desktop/state.json');
+      for (const body of ['{', '{}', '{"schema":1,"phase":"prepared","nativeModels":["native"]}', '{"schema":1,"phase":"active","nativeModels":[42]}']) { writeFileSync(file, body); expect(readDesktopNativeModels()).toBeUndefined(); }
+      writeFileSync(file, JSON.stringify({ schema: 1, phase: 'active', nativeModels: ['first', 'second'] })); expect(readDesktopNativeModels()).toEqual(['first', 'second']);
+      writeFileSync(file, JSON.stringify({ schema: 1, phase: 'active', nativeModels: ['second'] })); expect(readDesktopNativeModels()).toEqual(['second']);
+    } finally { if (before === undefined) delete process.env.WISP_HOME; else process.env.WISP_HOME = before; rmSync(root, { recursive: true, force: true }); }
+  });
+});

@@ -1,5 +1,7 @@
 # Native Codex through Wisp
 
+For persistent signed-in desktop configuration, see [Codex desktop integration](codex-desktop.md). The launcher below remains available with its child-only configuration.
+
 Terminal 2.1.5 adds picker Aliases and exact Codex model routes to `codex-wisp` (introduced
 in 2.1.4). Use the 2.1.5 Bridge or the Bridge hosted by companion VS Code extension 1.13.8
 for these routes. These versions are prepared locally; publication and installation are separate.

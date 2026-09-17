@@ -18,6 +18,9 @@
 if (process.argv[2] === 'serve') {
   const { runServe } = await import('./serve');
   await runServe();
+} else if (process.argv[2] === 'codex-desktop') {
+  const { runCodexDesktop } = await import('./codexDesktop');
+  process.exitCode = await runCodexDesktop(process.argv.slice(3));
 } else if (process.argv[2] === 'routing') {
   const { runRoutingCli } = await import('./routingCli');
   process.exitCode = await runRoutingCli(process.argv.slice(3));

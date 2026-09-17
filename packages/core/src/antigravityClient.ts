@@ -38,6 +38,7 @@ import type { BridgeStreamEvent } from './bridge';
 import { sseBlocks } from './codexClient';
 
 type AntigravityRequestArgs = {
+  rejectRedirects?: boolean;
   strictCompletion?: boolean;
   creds: AntigravityCreds;
   baseUrl: string;
@@ -91,7 +92,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     const isLast = index === hosts.length - 1;
     let res: Response;
     try {
-      res = await fetch(antigravityTurnUrl(host, stream), { method: 'POST', headers, body, signal: args.signal });
+      res = await fetch(antigravityTurnUrl(host, stream), { method: 'POST', headers, body, signal: args.signal, ...(args.rejectRedirects ? { redirect: 'error' as const } : {}) });
     } catch (err) {
       // The client hanging up is not a host failure — never burn the fallback on it.
       if (isLast || args.signal?.aborted) throw err;

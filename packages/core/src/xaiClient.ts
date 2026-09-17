@@ -30,7 +30,7 @@ import { sseBlocks, type CodexStreamEvent } from './codexClient';
 // stays uniform: user/assistant/system text, optional images, and (agent mode) tool calls + results.
 type XaiMessage = { role: 'system' | 'user' | 'assistant'; content: string; images?: { mimeType: string; dataBase64: string }[]; toolCalls?: { id: string; name: string; argsJson: string }[]; toolResults?: { callId: string; content: string }[] };
 
-type XaiRequestArgs = { responses?: BridgeChatRequest['responses']; creds: XaiCreds; baseUrl: string; model: string; messages: XaiMessage[]; effort?: EffortLevel; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
+type XaiRequestArgs = { rejectRedirects?: boolean; responses?: BridgeChatRequest['responses']; creds: XaiCreds; baseUrl: string; model: string; messages: XaiMessage[]; effort?: EffortLevel; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
 
 // What xaiStream yields — an answer-text fragment or a fully-assembled tool call. Aliased to the Codex
 // stream event: Grok's Responses stream carries the identical events, so the consumer glue is shared.
@@ -54,6 +54,7 @@ const xaiResponsesRequest = async (args: XaiRequestArgs): Promise<Response> => {
 
   const res = await fetch(xaiResponsesUrl(args.baseUrl, args.model), {
     method: 'POST',
+    ...(args.rejectRedirects ? { redirect: 'error' as const } : {}),
     headers: xaiRequestHeaders(args.model, bearer, crypto.randomUUID()),
     body: JSON.stringify(body),
     signal: args.signal,

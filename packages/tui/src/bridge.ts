@@ -1,3 +1,4 @@
+import { readDesktopNativeModels } from '@wisp/core';
 // ---------------- bridge.ts — the TUI's Bridge host: engine wiring over the ~/.wisp store ---------------- //
 
 /*
@@ -62,6 +63,7 @@ const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
 export const createTuiBridge = (log: (message: string) => void) => {
   let loggingStarted = false;
   return createBridgeServer({
+    desktopNativeModels: readDesktopNativeModels,
     providers: PROVIDERS,
     modelMap: () => home.readConfig().models ?? {},
     customBaseUrl: () => home.readConfig().customBaseUrl ?? '',
