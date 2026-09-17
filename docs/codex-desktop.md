@@ -1,6 +1,6 @@
 # Signed-in Codex desktop integration
 
-Prepared terminal/npm **2.2.0** and companion VSIX **1.14.0** contain this opt-in integration. Use a current Bridge implementing signed desktop **protocol 2**; older candidates are refused even on repeated enable/refresh. Actual desktop acceptance and publication remain pending. Slot is unchanged.
+Terminal/npm **2.2.0** and companion VSIX **1.14.0** contain this opt-in integration. Use a current Bridge implementing signed desktop **protocol 2**; older candidates are refused even on repeated enable/refresh. Grok desktop text, follow-up and tool execution are verified. Other external providers are not individually desktop-verified. Slot is unchanged.
 
 ## Enable from native mode
 
@@ -50,4 +50,4 @@ Signed Codex, Anthropic and xAI HTTP failures and recognized keyed SDK failures 
 
 `node packages/tui/tests/packagedDesktop.check.mjs <compiled-wisp> <extracted-npm-shell> 2.2.0` checks copied binary and actual packed npm bytes outside source. Use `-` for the package argument to test the binary alone. A local Node ordinary-catalog fixture removes dependence on installed Codex; it is packaging evidence, not account or UI evidence. Native CI runs signed and unchanged legacy package checks. Builds pin Bun **1.4.2**; `wisp --version` reports the baked terminal version without UI startup.
 
-Actual desktop picker/login/restart/routed tool use, refreshed release artifacts/native CI and publication acceptance remain **pending** for this revision. Parent owns all live tests and publication.
+Windows desktop acceptance on the repaired 2.2.0 candidate includes user-observed Grok picker/text/follow-up and command execution (`echo WISP_DESKTOP_OK`). The user also reported the requested native-model/restart/sign-in checks passed and that earlier lag was gone; those observations are distinct from automated protocol checks. Four-platform native CI and downloaded Windows artifact checks passed. This is not a compatibility claim for every external provider/model, installed VS Code companion behavior, or Traycer GUI Aliases.

@@ -6,7 +6,11 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
-## [2.2.0] - 2026-09-17
+## [2.2.0] - 2026-09-18
+
+### Fixed
+
+- Grok root-union tool schemas no longer reject the desktop request: the xAI adapter wraps supported schemas internally, preserves local references/open-object defaults, restores original tool arguments and rewraps tool history. Unsafe scoped/dynamic-reference and unevaluated-property schemas remain unchanged rather than weakened.
 
 ### Added
 
@@ -17,12 +21,12 @@ Changes up to 2.0.10 are folded into the product changelog at
 - The signed Bridge path preserves exact Alias/native overrides, passes unoverridden native requests only to the fixed native endpoint, and rejects unknown models. Native credentials, external Provider credentials and the local Bridge secret remain separate; credentialed redirects, including catalog discovery, are refused.
 - Atomic activation/restore journals preserve original settings and unrelated later edits. Owned-field conflicts and unowned catalog output files fail before overwrite. `wisp --version` exposes the baked terminal version.
 
-### Candidate verification and surfaces
+### Verification and surfaces
 
-- **Terminal/npm: 2.2.0**, **companion VSIX: 1.14.0**, **wisp-slot: unchanged**. These are prepared release candidates; publication and installation are separate.
+- **Terminal/npm: 2.2.0**, **companion VSIX: 1.14.0**, **wisp-slot: unchanged**. Existing installations require an explicit update.
 - Actual CLI **0.154.0** production-path checks cover signed account, mixed model list, external text/tool continuation, exact override, native passthrough and cancellation using isolated synthetic credentials. The legacy **0.153.4** check remains unchanged.
 - The four native release jobs run both legacy and signed desktop package smoke checks. Signed packaging checks use a local catalog-export fixture; they do not establish desktop UI compatibility. Required exact-version companion VSIX packaging now blocks publication on failure.
-- Actual desktop picker/login/restart/selected-route acceptance, other-platform native CI artifacts and publication remain pending. See [desktop operation and rollback](../../docs/codex-desktop.md).
+- Windows Grok desktop text, follow-up and tool execution passed user acceptance; the user also reported the requested native/restart/sign-in checks passed. Four-platform native CI and downloaded Windows checks passed. Other external providers, installed VS Code companion behavior and Traycer GUI Aliases are not individually verified. See [desktop operation and rollback](../../docs/codex-desktop.md).
 
 ## [2.1.5] - 2026-09-08
 

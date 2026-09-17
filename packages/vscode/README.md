@@ -1,6 +1,6 @@
 # Wisp
 
-**Companion candidate 1.14.0:** the extension-hosted Bridge supports terminal 2.2.0's signed-in `wisp codex-desktop` integration. Configuration/refresh/rollback belong to that terminal command; install this VSIX and reload the extension host before using its updated Bridge. Actual Codex desktop UI acceptance and publication remain pending. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md). Slot is unchanged.
+**Companion 1.14.0:** the extension-hosted Bridge supports terminal 2.2.0's signed-in `wisp codex-desktop` integration. Configuration/refresh/rollback belong to that terminal command; install this VSIX and reload the extension host before using its updated Bridge. Grok desktop acceptance used the standalone terminal Bridge; installed VS Code companion behavior remains unverified. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md). Slot is unchanged.
 
 The current companion supplies signed desktop protocol 2, with explicit Antigravity exclusion and validated saved native-client identities. It does not consolidate positioned developer instructions, advertise hosted search on external routes, or treat an unbound cache as account-current. Other Bridge clients retain their prior behavior.
 
