@@ -38,7 +38,7 @@ import {
   type QuotaMeter, type WispStatus,
 } from './catalog';
 import { codexStream } from './codexClient';
-import { parseResponsesRequest, createResponsesEncoder } from './bridgeResponses';
+import { parseResponsesRequest, createResponsesEncoder, responsesRejectionDiagnostic } from './bridgeResponses';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import { antigravityStream } from './antigravityClient';
@@ -622,8 +622,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     let parsed: ReturnType<typeof parseResponsesRequest>;
     let route: RouteMatch | undefined;
+    let body: any;
     try {
-      const raw = await readBody(req); const body = JSON.parse(raw);
+      const raw = await readBody(req); body = JSON.parse(raw);
       if (signedDesktop) {
         if (!body || typeof body.model !== 'string' || !body.model.trim()) return sendError(res, 400, 'A nonempty model is required');
         const map = deps.routingMap();
@@ -642,7 +643,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       }
       parsed = parseResponsesRequest(body);
     }
-    catch (err) { if (!controller.signal.aborted) sendError(res, 400, signedDesktop ? 'Invalid desktop request or routing configuration' : String(err)); return; }
+    catch (err) {
+      if (!controller.signal.aborted) {
+        if (signedDesktop) {
+          const diagnostic = responsesRejectionDiagnostic(err, body);
+          deps.log(`[bridge] desktop rejection ${JSON.stringify(diagnostic)}`);
+          sendJson(res, 400, { error: { message: `Invalid desktop request: ${diagnostic.reason.code}${diagnostic.reason.field ? ` (${diagnostic.reason.field})` : ''}`, type: 'invalid_request_error', diagnostic } });
+        } else sendError(res, 400, String(err));
+      }
+      return;
+    }
     if (controller.signal.aborted) return;
     route ??= routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);

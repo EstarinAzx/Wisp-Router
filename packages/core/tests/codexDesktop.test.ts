@@ -75,6 +75,28 @@ describe('signed desktop production Bridge', () => {
     const reply = await post(port, 'alias'); expect(reply.status).toBe(502);
     expect(reply.text + logs.join('\n')).not.toContain('external-token');
   }, res => { res.writeHead(502, { 'content-type': 'application/json' }); res.end('{"error":{"message":"fetch failed external-token"}}'); }));
+  it('returns/logs bounded structural rejections without request/header/tool contents', async () => fixture(async (port, seen, deps) => {
+    const secret = 'PRIVATE_DIAGNOSTIC_CANARY_829ab'; const logs: string[] = []; deps.log = line => logs.push(line);
+    const bodies = [
+      JSON.stringify({ model: 'alias', service_tier: 'default', input: secret, instructions: secret, reasoning: { effort: 'medium' } }),
+      JSON.stringify({ model: 'alias', input: secret, [secret]: secret }),
+      JSON.stringify({ model: 'alias', tools: [{ type: 'function', name: secret }], input: [{ type: 'function_call', call_id: secret, name: secret, arguments: secret }] }),
+      '{"input":"' + secret,
+    ];
+    const replies: any[] = [];
+    for (const body of bodies) {
+      const response = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/codex-desktop/v1/responses', method: 'POST', headers: { 'x-api-key': 'local-secret', authorization: `Bearer ${secret}`, 'chatgpt-account-id': secret } }, res => {
+          let text = ''; res.on('data', c => text += c); res.on('end', () => resolve({ status: res.statusCode!, text }));
+        }); req.on('error', reject); req.end(body);
+      });
+      expect(response.status).toBe(400); expect(response.text).not.toContain(secret); replies.push(JSON.parse(response.text));
+    }
+    expect(replies[0].error.diagnostic.reason).toEqual({ code: 'unsupported_field', scope: 'request', field: 'service_tier' });
+    expect(replies[0].error.diagnostic.shape.reasoningEffort).toBe('medium');
+    expect(logs.filter(line => line.includes('desktop rejection'))).toHaveLength(4);
+    expect(logs.join('\n')).not.toContain(secret); expect(seen).toHaveLength(0);
+  }));
   it('refuses redirects during real cold Codex catalog discovery on the signed adapter', async () => {
     const root = mkdtempSync(join(tmpdir(), 'wisp-cold-catalog-')); const prior = process.env.WISP_HOME; process.env.WISP_HOME = root;
     const realFetch = globalThis.fetch;
