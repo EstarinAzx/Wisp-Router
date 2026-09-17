@@ -1,4 +1,5 @@
 import type { BridgeChatRequest } from './bridge';
+import { DesktopUpstreamError } from './desktopUpstream';
 // ----------------- codexClient.ts — Wisp: Codex Responses request + SSE→text/tool calls ----------------- //
 
 /*
@@ -76,6 +77,7 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (args.rejectRedirects) throw DesktopUpstreamError.fromResponse(res, body);
     throw new Error(`Codex API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
   }
   // #171: the quota meters ride the response HEAD, so they are readable here — before a single SSE byte is

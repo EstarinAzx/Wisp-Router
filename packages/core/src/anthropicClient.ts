@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto';
 import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, parseAnthropicQuota, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason, type AnthropicTruncationReason, type QuotaMeter } from './catalog';
 import { sseBlocks } from './codexClient';
+import { DesktopUpstreamError } from './desktopUpstream';
 
 // onQuota (#171): the side channel for the response's utilization headers — see the codexClient twin. Quota
 // is telemetry, not wire content, so it deliberately does NOT join AnthropicStreamEvent.
@@ -180,6 +181,7 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    if (args.rejectRedirects) throw DesktopUpstreamError.fromResponse(res, body);
     throw new Error(`Anthropic API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
   }
   // #171: utilization rides the response HEAD — readable before any SSE byte. No meters reported → no call,

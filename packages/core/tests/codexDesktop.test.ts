@@ -36,6 +36,22 @@ async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Pro
 }
 
 describe('signed desktop production Bridge', () => {
+  it.each((['codex', 'anthropic-oauth'] as const).flatMap(kind => [400, 401, 503].map(status => ({ kind, status }))))('preserves signed sibling $kind HTTP $status retry boundaries', async ({ kind, status }) => {
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
+    try { await fixture(async (port, seen, deps) => {
+      deps.providers[0].kind = kind;
+      deps.codexCreds = async () => ({ accessToken: 'synthetic-external', accountId: 'synthetic-account' });
+      deps.anthropicCreds = async () => ({ accessToken: 'synthetic-external' });
+      const logs: string[] = []; deps.log = text => logs.push(text);
+      let attempts = 0; const saved = globalThis.fetch;
+      globalThis.fetch = (async () => { attempts++; return Response.json({ error: { code: 'PRIVATE_CODE', message: 'PRIVATE_BODY fetch failed API error 503' } }, { status }); }) as typeof fetch;
+      try {
+        const reply = await post(port, 'alias');
+        expect(reply.status).toBe(status); expect(attempts).toBe(status === 503 ? 3 : 1);
+        expect(reply.text + logs.join('\n')).not.toContain('PRIVATE_');
+      } finally { globalThis.fetch = saved; }
+    }); } finally { discovery.mockRestore(); }
+  });
   it.each([
     { body: 'event: response.completed\ndata: {"response":{"output":[]}}\n\n', status: 200, code: 'empty_output' },
     { body: 'event: response.output_text.delta\ndata: {"delta":"visible"}\n\n', status: 200, code: 'stream_incomplete' },

@@ -6,6 +6,11 @@ export class DesktopUpstreamError extends Error {
   constructor(readonly status: number | undefined, readonly code: unknown = 'upstream_error') {
     super('Desktop provider request failed');
   }
+  static fromResponse(response: Response, body: string) {
+    let code: unknown;
+    try { const error = JSON.parse(body)?.error; code = error?.code ?? error?.type; } catch { /* No structured code. */ }
+    return new DesktopUpstreamError(response.status, code);
+  }
 }
 
 export const desktopUpstreamFailure = (error: unknown) => {

@@ -62,11 +62,7 @@ const xaiResponsesRequest = async (args: XaiRequestArgs): Promise<Response> => {
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    if (args.rejectRedirects) {
-      let code: unknown;
-      try { code = JSON.parse(errBody)?.error?.code; } catch { /* Non-JSON error bodies have no code. */ }
-      throw new DesktopUpstreamError(res.status, code);
-    }
+    if (args.rejectRedirects) throw DesktopUpstreamError.fromResponse(res, errBody);
     throw new Error(`Grok API error ${res.status}${errBody.trim() ? `: ${errBody.trim().slice(0, 500)}` : '.'}`);
   }
   return res;
