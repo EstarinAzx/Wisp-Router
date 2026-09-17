@@ -1,4 +1,4 @@
-﻿---
+---
 type: pick-up
 project: wisp
 updated: 2026-09-17
@@ -9,15 +9,15 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Wisp 2.2.0 / VSIX 1.14.0 is implemented, reviewed and packaged; all four native CI builds pass. Not yet released.** Draft PR223: https://github.com/EstarinAzx/Wisp-Router/pull/223 . Feature HEAD `5de5b5c`; worktree `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-codex-desktop-signed-in`.
+**The first 2.2.0 candidate failed actual desktop inference; repair is in progress.** Automated tests/review and four-platform CI passed for the old candidate, but live capture proved desktop adds hosted web_search + effort none and positioned developer instructions. Picker/login worked; GPT5.2 was incorrectly added from the bundled catalog. The user confirmed normal native chat works after rollback. No release/global install; integration disabled and test hosts stopped.
 
-**Single next task:** obtain the actual desktop account/picker/selected-route/restart/rollback result, then finish authorized integration/publication and downloaded-byte verification. The user has already given full driver-seat release authorization; do not repeat permission questions. UI automation failed native-pipe initialization, and Store CLI execution is denied, so CLI fixture success is not desktop acceptance.
+**Single next task:** continue revised `desktop-repair/phase-2` implementation/review with builder `5011a81c` and evaluator `ddab1276`, then fresh package/native CI and a new live check. Diagnostic fixes passed at `f738a06`; semantic work remains. The user already authorizes driver-seat fixes and eventual release; no routine permission questions.
 
-Exact manual steps and current coordinator state:
+Draft PR223: https://github.com/EstarinAzx/Wisp-Router/pull/223 . Feature worktree: `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-codex-desktop-signed-in`. Planner state/spec/rubric and detailed repair contract:
 
-`C:/Users/S.D/.traycer/epics/1702a7c7-a431-43c2-ab5f-79d9cf189643/artifacts/autobuild/wisp-desktop/desktop-acceptance/index.md`
+`C:/Users/S.D/.traycer/epics/1702a7c7-a431-43c2-ab5f-79d9cf189643/artifacts/autobuild/wisp-desktop/release-control/index.md`
 
-Candidate/helper: `D:/wisp-release-candidate-2.2.0-20260917/a342a64/`. Successful native CI: run35189140842. Full evidence, versions, immutable hashes and release instructions are in [[active-work]]. No live activation or global install was performed; all tests/reviews are complete except actual desktop/live-provider acceptance.
+Do not rerun the old a342 acceptance helper as the next candidate. Its immutable files remain evidence. Safe request-shape14 and actual provider checks are under `D:/wisp-release-candidate-2.2.0-20260917/desktop-acceptance/`: Grok4.6 returned the exact marker; stored OpenCodeGo/KimiK3 key returns401. Parent will use a reversible named Grok Alias for live acceptance, preserving existing targets. Full state is in [[active-work]].
 
 ## Landmines
 

@@ -1,4 +1,4 @@
-﻿---
+---
 type: active-work
 project: wisp
 updated: 2026-09-17
@@ -12,7 +12,7 @@ _Stable release: 2.1.5. Candidate source: `5de5b5c3e1fbe26c3f7d44dbbf94f7092d5da
 
 ## Current focus
 
-Wisp 2.2.0 / VSIX 1.14.0 signed-in desktop support is implemented, independently reviewed, packaged, and green on four-platform native CI. **Not released or activated globally.** The only pre-publication acceptance still missing is the actual desktop account/picker/selected-route/restart/rollback check; the automation helper cannot connect.
+The first Wisp 2.2.0 / VSIX 1.14.0 candidate passed automated review/package/native CI, but actual desktop inference failed. Picker and login worked. **Release is held; captured-request compatibility repairs are active.** The test integration was disabled, both temporary hosts stopped, and the user confirmed normal native GPT chat works again.
 
 The user explicitly authorized unattended implementation, verification and the new release. Routine design/commit/push/release approval is already granted. Do not ask for that again; obtain only missing actual UI evidence, then finish the release.
 
@@ -23,11 +23,11 @@ The user explicitly authorized unattended implementation, verification and the n
 - **Review PASS:** implementation at `0e4b984`, exact local packages at `a342a64`, build-only PR workflow at `6d28817`, test-only macOS fixture repair at `5de5b5c`. No unresolved reviewer finding.
 - **Checks:** core 1168 tests, TUI 112/422 assertions, typechecks/builds, actual CLI 0.154.0 signed account/catalog/text/tool/routing/cancellation using synthetic fixtures, and exact Windows/npm/VSIX archive checks passed. Version dispatch had an additional focused 11/62 check.
 - **Native CI PASS:** https://github.com/EstarinAzx/Wisp-Router/actions/runs/35189140842 . All four native builds and both smoke checks passed; publish was SKIPPED by design. Downloaded ZIP digests verified against GitHub, binary hashes recorded; downloaded Windows bytes passed both smoke checks.
-- **In flight:** no build/test shell; no publication/tag. Peers are finished. Live Codex/Wisp configuration, routes, auth and installed apps are unchanged by this work.
+- **In flight:** builder `5011a81c` and evaluator `ddab1276` are implementing/reviewing the revised phase-2 compatibility contract. Diagnostic-only fixes passed at `f738a06`; semantic fixes/new candidate/CI remain. No release/tag/global install. Integration is disabled; user restored GPT-5.6-Sol/medium. Existing Wisp routes are unchanged.
 
 ## Pick up here
 
-Complete the human-observed desktop check before marking PR ready, merging, tagging or publishing. Then update candidate/pending release wording, recheck any changed package bytes, integrate reviewed source, publish with the normal tag workflow and verify downloaded assets/npm metadata. Both terminal 2.2.0 and exact VSIX 1.14.0 must ship; Slot is unchanged. Recheck tag/version availability first.
+Finish revised desktop-repair/phase-2 implementation and independent review, then build fresh candidates and re-run native CI before another live UI check. Captured shape14 proves unused hosted web_search, effort none and positioned developer instructions; no service_tier. Do not consolidate developer positions for Antigravity: preserve its routes for existing clients but report/exclude unsupported desktop targets. Use ordinary native-client discovery in native mode, no bundled-only union or temporary shared-config stripping; snapshots may support Alias refresh. Restore Wisp-only default selection narrowly on disable with action-required notices. Parent owns temporary test Alias/live activation, with peer model work paused. For the next real external test, existing Grok4.6 answered a fixed marker; OpenCodeGo/KimiK3 returned401. After successful live acceptance, finalize release wording, verify changed package bytes, integrate/publish and verify downloads. Both terminal2.2.0 and VSIX1.14.0 must ship; Slot unchanged.
 
 The manual check and all evidence are linked from:
 
@@ -46,7 +46,7 @@ The manual check and all evidence are linked from:
 
 ## Open questions
 
-Only observed desktop behavior remains unknown. Installed Store app26.908.9136.0, global CLI0.154.0; direct Store CLI execution returned Access is denied. Computer Use native pipe failed after retry/reset. Do not bypass ACL/security or change tool settings to obtain the test.
+Actual fresh desktop request shape is known and user normal-native baseline is restored. Repaired live inference/restart/rollback still need acceptance. Installed Store app26.908.9136.0, global CLI0.154.0; Computer Use pipe is unavailable. Structural evidence is D:/wisp-release-candidate-2.2.0-20260917/desktop-acceptance/request-shape-14.json. No prompts/headers/tool arguments/credentials were recorded. Do not repeat capture or ask for API keys in chat.
 
 ## Recent context
 
