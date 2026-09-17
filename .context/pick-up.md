@@ -1,4 +1,4 @@
----
+﻿---
 type: pick-up
 project: wisp
 updated: 2026-09-17
@@ -9,21 +9,22 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Codex desktop routing research is complete; implementation is not started.** The user wants Wisp models beside native desktop choices while staying signed in, and supplied `duolahypercho/codex-router` as a reference. Read `docs/investigations/codex-desktop-signed-in-routing.md` for the pinned source audit and fresh isolated proof.
+**Wisp 2.2.0 / VSIX 1.14.0 is implemented, reviewed and packaged; all four native CI builds pass. Not yet released.** Draft PR223: https://github.com/EstarinAzx/Wisp-Router/pull/223 . Feature HEAD `5de5b5c`; worktree `C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-codex-desktop-signed-in`.
 
-CLI 0.154.0 was tested with synthetic auth: Wisp-style `requires_openai_auth=false` reports no account; `true` retains the ChatGPT account. Both list native + external rows and complete a local external-model turn. Desktop UI and real providers remain unverified. Wisp 2.1.5 is now installed; the older installation note was stale. This session changed no live configuration/authentication or installed application.
+**Single next task:** obtain the actual desktop account/picker/selected-route/restart/rollback result, then finish authorized integration/publication and downloaded-byte verification. The user has already given full driver-seat release authorization; do not repeat permission questions. UI automation failed native-pipe initialization, and Store CLI execution is denied, so CLI fixture success is not desktop acceptance.
 
-## Next action
+Exact manual steps and current coordinator state:
 
-If continuing into implementation, start from the proposed signed-in desktop integration scope in the report: durable catalog, signed local transport, native/external credential separation, preservation of existing exact routes, and reversible config activation. The source audit found no need to install the full reference router. Local-hop authentication choice is still open; do not treat the proposal as an approved design.
+`C:/Users/S.D/.traycer/epics/1702a7c7-a431-43c2-ab5f-79d9cf189643/artifacts/autobuild/wisp-desktop/desktop-acceptance/index.md`
+
+Candidate/helper: `D:/wisp-release-candidate-2.2.0-20260917/a342a64/`. Successful native CI: run35189140842. Full evidence, versions, immutable hashes and release instructions are in [[active-work]]. No live activation or global install was performed; all tests/reviews are complete except actual desktop/live-provider acceptance.
 
 ## Landmines
 
-- Direct execution of the Store desktop's bundled CLI returned Access is denied; the probe used the separately installed CLI. Preserve that evidence boundary.
-- The current Wisp map explicitly routes `gpt-5.5` to xAI. Preserve user routes; native labels alone do not prove native OpenAI routing.
-- Traycer GUI Alias integration remains NOT VERIFIED and separate from OpenAI desktop support.
-- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of unrelated commits. Preserve retained worktrees/release evidence.
-- #215–#218 and their release relay remain complete. No release/publication task is pending. Bun 1.4.2 remains the source/native test baseline; no global runtime change was made.
+- Shared CODEX_HOME activation affects other clients; finish active Codex work and use new acceptance chats. Preserve exact routes, including gpt-5.5 -> xAI.
+- Keep user-owned `.context/flows.md` and `.context/Untitled.canvas` out of commits. Keep candidates, review evidence and worktrees.
+- Main source remains stable2.1.5 until PR223 merges. Context commits belong on main. Do not confuse local verified candidate bytes with future tag-built/downloaded release bytes.
+- No tagged release/npm publication yet; recheck availability before using2.2.0. Required companion VSIX is1.14.0; Slot unchanged. Traycer GUI support remains separately NOT VERIFIED.
 
 ## Related
 
