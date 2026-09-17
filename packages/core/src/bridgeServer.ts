@@ -636,7 +636,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const explicit = map.aliases.some(a => a.name === body.model) || Object.prototype.hasOwnProperty.call(map.codexModels ?? {}, body.model);
         if (!explicit) {
           const native = deps.desktopNativeModels?.();
-          if (!native) return sendError(res, 503, 'Desktop catalog unavailable; run wisp codex-desktop refresh');
+          if (!native) return sendError(res, 503, 'Desktop native snapshot unavailable; disable desktop integration, run native discovery, then enable with the current Bridge.');
           if (!native.includes(body.model)) return sendError(res, 404, 'Unknown desktop model; refresh the catalog or configure an Alias');
           if (!/^Bearer \S+$/.test(req.headers.authorization ?? '')) return sendError(res, 401, 'Native ChatGPT authorization required');
           try { await forwardDesktopNative(req, res, raw, controller.signal, deps.nativeFetch); }

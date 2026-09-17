@@ -102,7 +102,7 @@ describe('signed desktop production Bridge', () => {
     for (const headers of [{}, { authorization: 'Bearer native-token' }, { 'x-api-key': 'wrong' }, { 'x-api-key': '', authorization: 'Bearer local-secret' }]) expect((await post(port, 'native', headers)).status).toBe(401);
     for (const id of ['unknown/external', 'external', 'gpt-invented']) expect((await post(port, id)).status).toBe(404);
     expect((await post(port, null)).status).toBe(400);
-    deps.desktopNativeModels = () => undefined; expect((await post(port, 'native')).status).toBe(503); expect(seen).toHaveLength(0);
+    deps.desktopNativeModels = () => undefined; const unavailable = await post(port, 'native'); expect(unavailable.status).toBe(503); expect(unavailable.text).toContain('disable'); expect(unavailable.text).toContain('native discovery'); expect(seen).toHaveLength(0);
   }));
   it('retains the ordinary Responses Active fallback', async () => fixture(async (port, seen) => {
     expect((await post(port, 'unknown', { authorization: 'Bearer local-secret' }, '/v1/responses')).status).toBe(200); expect(seen[0].body.model).toBe('DEFAULT');
