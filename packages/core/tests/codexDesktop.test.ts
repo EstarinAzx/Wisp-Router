@@ -57,6 +57,34 @@ describe('signed desktop production Bridge', () => {
     }
     expect(seen).toHaveLength(1);
   }));
+  it.each([
+    { filters: { allowed_domains: ['private-domain.invalid'] } },
+    { user_location: { type: 'approximate', country: 'NZ' } },
+    { search_context_size: 'high' },
+    { external_web_access: 'invalid' },
+    { external_web_access: null },
+    { external_web_access: 1 },
+    { external_web_access: [] },
+    { external_web_access: {} },
+    { indexed_web_access: true },
+    { search_content_types: ['text'] },
+    { PRIVATE_HOSTED_OPTION_83ab: 'PRIVATE_HOSTED_VALUE_83ab' },
+  ])('refuses attached hosted declaration options without exposing values: %j', async options => fixture(async (port, seen) => {
+    for (const type of ['web_search', 'web_search_preview']) {
+      const reply = await post(port, 'alias', undefined, undefined, { tools: [{ type, ...options }], tool_choice: 'auto' });
+      expect(reply.status).toBe(400); expect(JSON.parse(reply.text).error.diagnostic.reason.code).toBe('unsupported_hosted_search_option');
+      expect(reply.text).not.toContain('PRIVATE_HOSTED'); expect(reply.text).not.toContain('private-domain.invalid');
+    }
+    expect(seen).toHaveLength(0);
+  }));
+  it.each([true, false])('accepts only the demonstrated native ambient access flag %s', async external_web_access => fixture(async (port, seen) => {
+    for (const choice of [undefined, 'auto']) {
+      const reply = await post(port, 'alias', undefined, undefined, { tools: [{ type: 'web_search', external_web_access }], ...(choice ? { tool_choice: choice } : {}) });
+      expect(reply.status).toBe(200); expect(seen.at(-1).body).not.toHaveProperty('tools');
+    }
+    expect((await post(port, 'alias', undefined, undefined, { tools: [{ type: 'web_search_preview', external_web_access }] })).status).toBe(400);
+    expect(seen).toHaveLength(2);
+  }));
   it('refuses unsupported Antigravity signed targets before credential lookup and never falls back native', async () => fixture(async (port, seen, deps) => {
     deps.providers[0].kind = 'antigravity-oauth'; const credentials = vi.fn(async () => undefined); deps.antigravityCreds = credentials;
     for (const model of ['alias', 'native-overridden']) {

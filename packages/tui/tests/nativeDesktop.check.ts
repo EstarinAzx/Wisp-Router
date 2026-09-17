@@ -12,6 +12,7 @@ import { resolveCodex } from '../src/codex-wisp';
 
 assert(Bun.semver.satisfies(process.versions.bun!, '>=1.4.2'), 'Requires pinned Bun >=1.4.2');
 const xai = process.argv.includes('--xai');
+const searchMode = process.argv.includes('--cached-search') ? 'cached' : 'live';
 const providerId = xai ? 'xai' : 'opencode-go';
 const aliasTarget = xai ? 'grok-4.6' : 'PINNED_ALIAS', overrideTarget = xai ? 'grok-4.5' : 'PINNED_OVERRIDE';
 const root = resolve(import.meta.dir, '../../..'); const out = join(root, 'out', `desktop-native-${Date.now()}`); mkdirSync(out, { recursive: true });
@@ -72,7 +73,7 @@ const encode = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base
 const token = `${encode({ alg: 'none' })}.${encode({ email: 'fixture@example.invalid', 'https://api.openai.com/auth': { chatgpt_account_id: 'synthetic-account', chatgpt_plan_type: 'plus' } })}.fixture`;
 const auth = JSON.stringify({ auth_mode: 'chatgpt', tokens: { id_token: token, access_token: 'synthetic-native', refresh_token: 'synthetic-refresh', account_id: 'synthetic-account' }, last_refresh: new Date().toISOString() });
 writeFileSync(join(codexHome, 'auth.json'), auth);
-writeFileSync(join(codexHome, 'config.toml'), `web_search="live"\nmodel_reasoning_effort="${xai ? 'medium' : 'none'}"\ncli_auth_credentials_store="file"\n[features]\napps=false\n`);
+writeFileSync(join(codexHome, 'config.toml'), `web_search="${searchMode}"\nmodel_reasoning_effort="${xai ? 'medium' : 'none'}"\ncli_auth_credentials_store="file"\n[features]\napps=false\n`);
 writeFileSync(join(wispHome, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-local' }));
 const wispConfig: any = { bridge: { port }, customBaseUrl: provider.baseUrl, routing: { families: {}, aliases: [{ name: 'wisp-external', target: { providerId, model: aliasTarget } }], codexModels: {} } };
 writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
@@ -123,7 +124,7 @@ try {
   assert.equal(captures.length, 6); assert.equal(captures.filter(c => c.kind === 'native').length, 2);
   if (xai) assert.equal(xaiRequests, 4);
   await desktopAction('disable', { codexHome, wispHome });
-  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
+  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, searchMode, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
   console.log(`PASS native signed production path: ${out}`);
 } finally {
   globalThis.fetch = realFetch;
