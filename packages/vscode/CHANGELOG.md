@@ -4,6 +4,14 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] - 2026-09-18
+
+### Fixed
+
+- The extension-hosted Bridge now gives native Codex desktop names precedence over shared overrides and Alias collisions, preserving the native request body and desktop credentials. Other clients retain their existing routing.
+- Desktop protocol **3** pairs with terminal **2.2.1**, whose catalog/setup repair preserves native effort/context metadata and rebuilds old catalogs on repeated enable. Update both components and reload the extension host.
+- Distinct external Aliases remain pinned to their configured Provider/model. Missing native snapshots fail closed; Antigravity Aliases remain unsupported. Native context limits and user settings are unchanged.
+
 ## [1.14.0] - 2026-09-18
 
 ### Fixed

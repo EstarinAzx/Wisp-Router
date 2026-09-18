@@ -641,19 +641,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const raw = await readBody(req); body = JSON.parse(raw);
       if (signedDesktop) {
         if (!body || typeof body.model !== 'string' || !body.model.trim()) return sendError(res, 400, 'A nonempty model is required');
-        const map = deps.routingMap();
-        const explicit = map.aliases.some(a => a.name === body.model) || Object.prototype.hasOwnProperty.call(map.codexModels ?? {}, body.model);
-        if (!explicit) {
-          const native = deps.desktopNativeModels?.();
-          if (!native) return sendError(res, 503, 'Desktop native snapshot unavailable; disable desktop integration, run native discovery, then enable with the current Bridge.');
-          if (!native.includes(body.model)) return sendError(res, 404, 'Unknown desktop model; refresh the catalog or configure an Alias');
+        const native = deps.desktopNativeModels?.();
+        if (!native) return sendError(res, 503, 'Desktop native snapshot unavailable; disable desktop integration, run native discovery, then enable with the current Bridge.');
+        // Native identity wins in desktop only. Shared overrides still serve the other clients.
+        if (native.includes(body.model)) {
           if (!/^Bearer \S+$/.test(req.headers.authorization ?? '')) return sendError(res, 401, 'Native ChatGPT authorization required');
           try { await forwardDesktopNative(req, res, raw, controller.signal, deps.nativeFetch); }
           catch { if (res.headersSent) res.end(); else if (!controller.signal.aborted) sendError(res, 502, 'Native request failed'); }
           return;
         }
+        if (!deps.routingMap().aliases.some(a => a.name === body.model)) return sendError(res, 404, 'Unknown desktop model; refresh the catalog or configure an Alias');
         route = routeFor(body.model);
-        if (!route || !['alias', 'codex-model'].includes(route.matched)) return sendError(res, 404, 'Invalid desktop route Target');
+        if (!route || route.matched !== 'alias') return sendError(res, 404, 'Invalid desktop route Target');
         const issue = desktopTargetIssue(route.provider);
         if (issue) return sendError(res, 400, issue, 'desktop_target_incompatible');
       }

@@ -29,7 +29,7 @@ Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, y
 
 - **VS Code** — providers show up as native models in Copilot's **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker, with streaming, tool calling, vision, and live per-model context windows.
 - **Claude Code** — the **Bridge** exposes OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`; `claude-wisp` launches Claude Code already wired to it.
-- **Native Codex** — terminal **2.2.0** adds reversible `wisp codex-desktop` setup for signed-in desktop routing; companion VSIX **1.14.0** hosts the same signed Bridge. [Desktop setup and rollback](docs/codex-desktop.md). The existing [codex-wisp launcher](docs/codex-wisp.md) remains available. Grok text, follow-up and tool execution have been verified in the desktop. Other external providers are not individually desktop-verified; Traycer GUI integration remains **NOT VERIFIED**.
+- **Native Codex** — terminal **2.2.1** provides reversible `wisp codex-desktop` setup for signed-in desktop routing; companion VSIX **1.14.1** hosts the same signed Bridge. [Desktop setup and rollback](docs/codex-desktop.md). The existing [codex-wisp launcher](docs/codex-wisp.md) remains available. Grok text, follow-up and tool execution have been verified in the desktop. Other external providers are not individually desktop-verified; Traycer GUI integration remains **NOT VERIFIED**.
 - **Terminal** — the **Wisp TUI** manages providers, keys, OAuth sign-ins, and routing, and hosts the Bridge headlessly (`wisp serve`).
 
 The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
@@ -83,13 +83,14 @@ wisp serve             # headless Bridge (no UI, Ctrl+C stops)
 claude-wisp            # launch Claude Code routed through the Bridge
 ```
 
-**2.2.0** adds `wisp codex-desktop enable|status|refresh|disable` for persistent
-signed-in Codex configuration. It needs a 2.2.0 Bridge or companion VSIX **1.14.0** and an
+**2.2.1** provides `wisp codex-desktop enable|status|refresh|disable` for persistent
+signed-in Codex configuration. It needs a 2.2.1 Bridge or companion VSIX **1.14.1** and an
 independently installed native Codex CLI. Keep the Bridge running and restart Codex after enable,
 refresh or disable. Existing installations remain unchanged until explicitly updated. See [desktop setup and rollback](docs/codex-desktop.md).
 
-Desktop integration requires native-mode discovery and protocol 2. Unsupported Antigravity
-Targets are omitted with explicit reasons; stored routes and other clients remain unchanged. Alias
+Desktop integration requires native-mode discovery and protocol 3. Native model names retain their full
+capabilities and native sign-in, even when shared routes override them. Use distinct Aliases
+for external desktop models. Unsupported Antigravity Aliases are omitted with explicit reasons; stored routes and other clients remain unchanged. Alias
 refresh uses the saved native-client view, while native/account changes require disable/discover/enable.
 Pause other clients sharing CODEX_HOME during setup and inspect disable's model/effort notices.
 

@@ -1,6 +1,6 @@
 {
   "name": "wisp-router",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "license": "MIT",
   "description": "Wisp — BYOK model router: terminal UI, local Bridge, and launchers for Claude Code and Codex",
   "bin": {
@@ -19,9 +19,9 @@
     "node": ">=16"
   },
   "optionalDependencies": {
-    "@tsd47216/wisp-router-win32-x64": "2.2.0",
-    "@tsd47216/wisp-router-darwin-arm64": "2.2.0",
-    "@tsd47216/wisp-router-darwin-x64": "2.2.0",
-    "@tsd47216/wisp-router-linux-x64": "2.2.0"
+    "@tsd47216/wisp-router-win32-x64": "2.2.1",
+    "@tsd47216/wisp-router-darwin-arm64": "2.2.1",
+    "@tsd47216/wisp-router-darwin-x64": "2.2.1",
+    "@tsd47216/wisp-router-linux-x64": "2.2.1"
   }
 }
