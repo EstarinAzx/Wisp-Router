@@ -17,7 +17,7 @@
     },
     "packages/tui": {
       "name": "wisp-router",
-      "version": "2.2.0",
+      "version": "2.2.1",
       "bin": {
         "wisp": "./src/index.tsx",
         "claude-wisp": "./src/claude-wisp.ts",
@@ -38,7 +38,7 @@
     },
     "packages/vscode": {
       "name": "wisp",
-      "version": "1.14.0",
+      "version": "1.14.1",
       "dependencies": {
         "@wisp/core": "workspace:*",
         "openai": "^4.80.0",

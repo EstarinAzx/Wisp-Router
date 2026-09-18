@@ -73,7 +73,8 @@ const encode = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base
 const token = `${encode({ alg: 'none' })}.${encode({ email: 'fixture@example.invalid', 'https://api.openai.com/auth': { chatgpt_account_id: 'synthetic-account', chatgpt_plan_type: 'plus' } })}.fixture`;
 const auth = JSON.stringify({ auth_mode: 'chatgpt', tokens: { id_token: token, access_token: 'synthetic-native', refresh_token: 'synthetic-refresh', account_id: 'synthetic-account' }, last_refresh: new Date().toISOString() });
 writeFileSync(join(codexHome, 'auth.json'), auth);
-writeFileSync(join(codexHome, 'config.toml'), `web_search="${searchMode}"\nmodel_reasoning_effort="${xai ? 'medium' : 'none'}"\ncli_auth_credentials_store="file"\n[features]\napps=false\n`);
+const originalConfig = `model_context_window=1000000\nmodel_auto_compact_token_limit=900000\nweb_search="${searchMode}"\nmodel_reasoning_effort="${xai ? 'medium' : 'none'}"\ncli_auth_credentials_store="file"\n[features]\napps=false\n`;
+writeFileSync(join(codexHome, 'config.toml'), originalConfig);
 writeFileSync(join(wispHome, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-local' }));
 const wispConfig: any = { bridge: { port }, customBaseUrl: provider.baseUrl, routing: { families: {}, aliases: [{ name: 'wisp-external', target: { providerId, model: aliasTarget } }], codexModels: {} } };
 writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
@@ -85,8 +86,13 @@ try {
   const catalog = JSON.parse(readFileSync(join(wispHome, 'codex-desktop/models.json'), 'utf8'));
   const natives = catalog.models.filter((m: any) => m.visibility === 'list' && m.slug !== 'wisp-external'); assert(natives.length >= 2);
   const native = natives[0].slug; const overridden = natives[1].slug;
+  wispConfig.routing.codexModels[native] = { providerId: 'codex', model: native };
   wispConfig.routing.codexModels[overridden] = { providerId, model: overrideTarget }; writeFileSync(join(wispHome, 'config.json'), JSON.stringify(wispConfig));
   await desktopAction('refresh', { codexHome, wispHome, env: childEnv, capabilities });
+  const refreshed = JSON.parse(readFileSync(join(wispHome, 'codex-desktop/models.json'), 'utf8'));
+  assert.deepEqual(refreshed, catalog, 'Desktop self-routes and external overrides must not change native capabilities');
+  const configured = Bun.TOML.parse(readFileSync(join(codexHome, 'config.toml'), 'utf8'));
+  assert.equal(configured.model_context_window, 1000000); assert.equal(configured.model_auto_compact_token_limit, 900000);
   child = spawn(installed.file, [...installed.args, 'app-server', '--listen', 'stdio://'], { cwd: folder, env: childEnv, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
   const queue: any[] = []; let waiter: ((value: any) => void) | undefined; let buffer = ''; let id = 0;
   const send = (v: unknown) => child!.stdin!.write(JSON.stringify(v) + '\n');
@@ -101,6 +107,10 @@ try {
   await rpc('initialize', { clientInfo: { name: 'wisp-desktop-check', version: '1.0.0' }, capabilities: { experimentalApi: true } }); send({ method: 'initialized', params: {} });
   const account = await rpc('account/read', { refreshToken: false }); assert.equal(account.account.type, 'chatgpt'); assert.equal(account.requiresOpenaiAuth, true);
   const list = await rpc('model/list', { includeHidden: false, limit: 1000 }); assert(list.data.some((m: any) => m.model === 'wisp-external')); assert(list.data.some((m: any) => m.model === native));
+  for (const model of natives.slice(0, 2)) {
+    assert.deepEqual(list.data.find((m: any) => m.model === model.slug).supportedReasoningEfforts.map((e: any) => e.reasoningEffort),
+      model.supported_reasoning_levels.map((e: any) => e.effort), 'Native picker efforts must survive desktop integration');
+  }
   async function turn(model: string, desired: string, existingThread?: string) {
     const result = existingThread ? undefined : await rpc('thread/start', { model, cwd: folder, approvalPolicy: 'never', sandbox: 'read-only', dynamicTools: [{ name: 'fixture_tool', description: 'Local check', inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] } }] });
     const threadId = existingThread ?? result.thread.id; const started = await rpc('turn/start', { threadId, input: [{ type: 'text', text: existingThread ? 'Distinct synthetic follow-up' : 'Local synthetic test' }] });
@@ -119,20 +129,25 @@ try {
   assert(replayMessages.slice(assistantIndex + 1).some((m: any) => m.role === 'user' && (xai ? m.content.some((p: any) => p.text.includes('Distinct synthetic follow-up')) : JSON.stringify(m.content).includes('Distinct synthetic follow-up'))));
   mode = 'tool'; await turn('wisp-external', 'TOOL_FINAL_OK', conversation); assert.equal(toolCalls, 1);
   assert(captures.some(c => c.kind === 'external' && (xai ? c.body.input.some((m: any) => m.type === 'function_call_output' && m.output.includes('TOOL_RESULT_OK')) : c.body.messages.some((m: any) => m.role === 'tool' && m.content.includes('TOOL_RESULT_OK')))));
-  mode = 'text'; await turn(overridden, 'EXTERNAL_OK'); await turn(native, 'NATIVE_OK');
+  mode = 'text'; await turn(overridden, 'NATIVE_OK'); await turn(native, 'NATIVE_OK');
+  const nativeUsage = events.filter(e => e.method === 'thread/tokenUsage/updated');
+  // CLI 0.154.0's native catalog caps these models at 872000, with 95% usable context.
+  assert.deepEqual(nativeUsage.slice(-2).map(e => e.params.tokenUsage.modelContextWindow), [828400, 828400]);
   mode = 'cancel'; nativeStarted = false; await turn(native, ''); await new Promise(r => setTimeout(r, 100)); assert(cancelled);
   for (const c of captures) {
     assert(!c.headers['x-api-key']);
-    if (c.kind === 'external') { assert.equal(c.headers.authorization, 'Bearer synthetic-external'); assert.equal(c.body.reasoning_effort, undefined); if (xai) assert.equal(c.body.reasoning.effort, 'medium'); assert(!c.headers['chatgpt-account-id']); assert([aliasTarget, overrideTarget].includes(c.body.model)); }
+    if (c.kind === 'external') { assert.equal(c.headers.authorization, 'Bearer synthetic-external'); assert.equal(c.body.reasoning_effort, undefined); if (xai) assert.equal(c.body.reasoning.effort, 'medium'); assert(!c.headers['chatgpt-account-id']); assert.equal(c.body.model, aliasTarget); }
     else { assert.equal(c.headers.authorization, 'Bearer synthetic-native'); assert.equal(c.headers['chatgpt-account-id'], 'synthetic-account'); assert.equal(c.url, 'https://chatgpt.com/backend-api/codex/responses'); }
   }
   assert.equal(readFileSync(join(codexHome, 'auth.json'), 'utf8'), auth);
   // Signed Codex probes account/plugin endpoints independently. The refusing proxy blocks those;
   // all seven inference requests must instead be accounted for by our two production transports.
-  assert.equal(captures.length, 7); assert.equal(captures.filter(c => c.kind === 'native').length, 2);
-  if (xai) assert.equal(xaiRequests, 5);
+  assert.equal(captures.length, 7); assert.equal(captures.filter(c => c.kind === 'native').length, 3);
+  if (xai) assert.equal(xaiRequests, 4);
   await desktopAction('disable', { codexHome, wispHome });
-  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, searchMode, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, exactOverride: true, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'PENDING sprint2' }, null, 2));
+  assert.equal(readFileSync(join(codexHome, 'config.toml'), 'utf8'), originalConfig);
+  assert.deepEqual(routing(), wispConfig.routing);
+  writeFileSync(join(out, 'result.json'), JSON.stringify({ version: version.stdout.trim(), provider: providerId, searchMode, binary: installed, accountType: account.account.type, mixedPicker: true, dualHeaders: 'Native bearer preserved; production signed route separately required configured x-api-key', text: true, toolCalls, nativePassthrough: true, nativeOverridesIgnored: true, nativeCapabilitiesPreserved: true, contextSettingsPreserved: true, nativeUsableContext: 828400, cancellation: cancelled, authUnchanged: true, blockedProxyHits: proxyHits, desktopUi: 'Not exercised by this CLI check' }, null, 2));
   console.log(`PASS native signed production path: ${out}`);
 } finally {
   globalThis.fetch = realFetch;

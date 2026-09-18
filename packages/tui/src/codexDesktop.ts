@@ -174,7 +174,8 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
     if (provider.http_headers?.['x-api-key'] !== secret || provider.base_url !== `http://127.0.0.1:${port}/codex-desktop/v1`) throw new Error('Bridge credentials/address changed; run codex-desktop disable then enable');
   }
   await (options.probe ?? probeDesktopBridge)(port, secret);
-  if (state && action === 'enable') return status(true, { restartRequired: true, nativeCatalog: 'saved-native-client-view', excludedTargets: state.excludedTargets ?? [], notices: catalogNotices(state) });
+  // Repeated enable reconciles older generated catalogs just like refresh.
+  const activating = !state;
   const native = state ? nativeSnapshot(state) : options.catalogs ? parseNativeCatalog((await options.catalogs()).native) : await loadCatalogs(codexHome, options.env ?? process.env);
   const { catalog, excludedTargets } = mergeDesktopCatalog(native, config, await (options.capabilities ?? readAliasCapabilities)(config, auth));
   let next = raw;
@@ -191,7 +192,7 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   parse(next); checkOwned(next, state);
   state = { ...state, phase: 'prepared', nativeModels: native.models.map(m => m.slug as string), excludedTargets,
     knownAliases: [...new Set([...(state.knownAliases ?? []), ...(config.routing?.aliases.map(alias => alias.name) ?? [])])] };
-  if (action === 'enable' && (existsSync(stateFile) || existsSync(catalogFile))) throw new Error('Desktop state/catalog already exists after preflight; inspect the files before retrying');
+  if (activating && (existsSync(stateFile) || existsSync(catalogFile))) throw new Error('Desktop state/catalog already exists after preflight; inspect the files before retrying');
   // Journal first. A crash before/after either following write is repaired by disable.
   write(stateFile, JSON.stringify(state)); write(catalogFile, JSON.stringify(catalog));
   if (readConfig(configFile) !== raw) throw new Error('Codex config changed concurrently; recovery journal retained');

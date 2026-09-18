@@ -77,7 +77,7 @@ try {
     writeFileSync(join(wisp, 'config.json'), JSON.stringify({ bridge: { port }, customBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`, routing: { families: {}, aliases: [{ name: 'packaged-alias', target: { providerId: 'custom', model: 'EXACT_PACKAGED_TARGET' } }] } }));
     bridge = spawn(binary, ['serve'], { cwd: folder, windowsHide: true, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] }); bridge.stdout.resume(); bridge.stderr.resume();
     let alive = false;
-    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 2); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 3); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
     assert(alive, 'Compiled signed Bridge failed to start');
     const desktop = args => run(['codex-desktop', ...args]);
     assert((await desktop(['--help'])).includes('Restart Codex'));

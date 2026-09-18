@@ -123,18 +123,28 @@ export const mergeAliasCatalog = (
 };
 
 export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, capabilities: (target: Target) => TargetCapabilities | undefined) => {
-  const catalog = mergeAliasCatalog(native, config, capabilities);
   const nativeIds = new Set(native.models.map(model => model.slug));
   const excludedTargets: { name: string; kind: string; reason: string }[] = [];
+  for (const name of nativeIds) {
+    const alias = config.routing?.aliases.some(entry => entry.name === name);
+    if (alias || Object.prototype.hasOwnProperty.call(config.routing?.codexModels ?? {}, name as string)) {
+      excludedTargets.push({ name: name as string, kind: alias ? 'native-alias-shadow' : 'native-override',
+        reason: 'Native choice retained with native capabilities and sign-in. This Wisp route applies only to other clients; use a distinct Alias for desktop.' });
+    }
+  }
+  // Desktop reserves every native identity. Do not change the shared map or the CLI overlay policy.
+  const catalog = mergeAliasCatalog(native, { ...config, routing: { ...config.routing, families: config.routing?.families ?? {},
+    codexModels: {}, aliases: (config.routing?.aliases ?? []).filter(alias => !nativeIds.has(alias.name)),
+  } }, capabilities);
   const models = catalog.models.filter(model => {
     const name = model.slug as string;
+    if (nativeIds.has(name)) return true;
     const alias = config.routing?.aliases.find(entry => entry.name === name);
-    const target = alias?.target ?? config.routing?.codexModels?.[name];
+    const target = alias?.target;
     const provider = target && PROVIDERS.find(p => p.id === target.providerId);
     const issue = provider && desktopTargetIssue(provider);
     if (!issue) return true;
-    const kind = nativeIds.has(name) ? (alias ? 'native-alias-shadow' : 'native-override') : 'alias';
-    excludedTargets.push({ name, kind, reason: `${nativeIds.has(name) ? 'Native choice omitted because its Wisp override/alias target is incompatible. ' : ''}${issue}` });
+    excludedTargets.push({ name, kind: 'alias', reason: issue });
     return false;
   });
   return { catalog: { ...catalog, models }, excludedTargets };

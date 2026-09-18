@@ -6,6 +6,20 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.1] - 2026-09-18
+
+### Fixed
+
+- Native Codex desktop entries retain their full capabilities, including advertised Max/Ultra effort choices, multi-agent settings, instructions and context metadata, despite shared self-routes or external overrides.
+- Native desktop names always use the native request and sign-in path. Shared overrides and colliding Aliases remain saved for other clients; use a distinct Alias for an external desktop model.
+- Repeated desktop enable rebuilds older generated catalogs from the saved full native snapshot, repairing upgrades that previously kept reduced capabilities.
+
+### Compatibility
+
+- Desktop protocol **3** requires terminal **2.2.1** and an updated serving Bridge (terminal 2.2.1 or companion **1.14.1**). Older hosts are refused; restart Codex after catalog changes and reload VS Code after companion updates.
+- Native choices remain available when a shared override targets an unsupported Provider. Distinct Antigravity Aliases are still excluded. Missing native snapshots fail closed.
+- Context and compaction preferences remain untouched. Native Codex model limits still apply; this is not a full 1M usable-context unlock. Legacy codex-wisp, Claude routes and wisp-slot are unchanged.
+
 ## [2.2.0] - 2026-09-18
 
 ### Fixed

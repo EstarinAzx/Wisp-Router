@@ -6,7 +6,7 @@ import { wispHomeDir } from './homeStore';
 import type { Provider } from './catalog';
 import { parseCodexModels } from './codexModels';
 
-export const DESKTOP_PROTOCOL = 2;
+export const DESKTOP_PROTOCOL = 3;
 export const desktopTargetIssue = (provider: Provider): string | undefined => provider.kind === 'antigravity-oauth'
   ? 'Antigravity cannot preserve signed desktop instruction ordering. Select a supported Provider for desktop; the existing Wisp route is unchanged for other clients.' : undefined;
 

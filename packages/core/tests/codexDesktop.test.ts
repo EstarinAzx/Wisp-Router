@@ -151,12 +151,14 @@ describe('signed desktop production Bridge', () => {
     expect((await post(port, 'alias', undefined, undefined, { tools: [{ type: 'web_search_preview', external_web_access }] })).status).toBe(400);
     expect(seen).toHaveLength(2);
   }));
-  it('refuses unsupported Antigravity signed targets before credential lookup and never falls back native', async () => fixture(async (port, seen, deps) => {
+  it('refuses unsupported Antigravity aliases before credential lookup but preserves native identities', async () => fixture(async (port, seen, deps) => {
     deps.providers[0].kind = 'antigravity-oauth'; const credentials = vi.fn(async () => undefined); deps.antigravityCreds = credentials;
-    for (const model of ['alias', 'native-overridden']) {
+    for (const model of ['alias']) {
       const reply = await post(port, model, undefined, undefined, { reasoning: { effort: 'PRIVATE_ANTIGRAVITY_EFFORT' } }); expect(reply.status).toBe(400); expect(JSON.parse(reply.text).error.type).toBe('desktop_target_incompatible'); expect(reply.text).toContain('instruction ordering'); expect(reply.text).not.toContain('PRIVATE_ANTIGRAVITY_EFFORT');
     }
     expect(credentials).not.toHaveBeenCalled(); expect(seen).toHaveLength(0);
+    expect((await post(port, 'native-overridden')).status).toBe(201);
+    expect(seen[0].native).toBe(true); expect(credentials).not.toHaveBeenCalled();
   }));
   it('rejects meaningful unadvertised keyed effort while leaving ordinary Responses control intact', async () => fixture(async (port, seen) => {
     const request = { reasoning: { effort: 'medium' } };
@@ -178,13 +180,29 @@ describe('signed desktop production Bridge', () => {
       req.on('error', reject); req.write(body.subarray(0, split)); setTimeout(() => req.end(body.subarray(split)), 20);
     }); expect(seen[0].body.input).toBe('🙂');
   }));
-  it('routes exact aliases/overrides live and never leaks either caller credential', async () => fixture(async (port, seen, deps) => {
-    for (const model of ['alias', 'native-overridden']) expect((await post(port, model)).status).toBe(200);
-    expect(seen.map(s => s.body.model)).toEqual(['EXACT', 'OVERRIDE']);
+  it('routes distinct aliases live and never leaks either caller credential', async () => fixture(async (port, seen, deps) => {
+    expect((await post(port, 'alias')).status).toBe(200);
+    expect(seen.map(s => s.body.model)).toEqual(['EXACT']);
     for (const s of seen) { expect(s.headers.authorization).toBe('Bearer external-token'); expect(s.headers['x-api-key']).toBeUndefined(); expect(s.headers['chatgpt-account-id']).toBeUndefined(); }
     deps.routingMap().aliases[0].target.model = 'LIVE'; await post(port, 'alias'); expect(seen.at(-1).body.model).toBe('LIVE');
-    deps.routingMap().aliases.push({ name: 'native', target: { providerId: 'external', model: 'COLLISION' } }); await post(port, 'native'); expect(seen.at(-1).body.model).toBe('COLLISION');
-    deps.routingMap().aliases[0].target.providerId = 'missing'; expect((await post(port, 'alias')).status).toBe(404); expect(seen).toHaveLength(4);
+    deps.routingMap().aliases[0].target.providerId = 'missing'; expect((await post(port, 'alias')).status).toBe(404); expect(seen).toHaveLength(2);
+  }));
+  it('native desktop names win over self-routes, external overrides and alias collisions without changing other clients', async () => fixture(async (port, seen, deps) => {
+    const map = deps.routingMap();
+    map.aliases.push({ name: 'native', target: { providerId: 'external', model: 'COLLISION' } });
+    const saved = JSON.stringify(map);
+    const fields = { tools: [{ type: 'web_search' }], reasoning: { effort: 'max' }, input: [{ type: 'reasoning', encrypted_content: 'native-history' }], service_tier: 'priority' };
+    for (const model of ['native', 'native-overridden']) {
+      expect(await post(port, model, undefined, undefined, fields)).toEqual({ status: 201, text: 'NATIVE_UNCHANGED' });
+      expect(seen.at(-1)).toMatchObject({ native: true, headers: { authorization: 'Bearer native-token', 'chatgpt-account-id': 'native-account' }, body: { model, ...fields } });
+      expect((await post(port, model, { 'x-api-key': 'local-secret' })).status).toBe(401);
+    }
+    expect(JSON.stringify(map)).toBe(saved);
+    for (const model of ['native', 'native-overridden']) expect((await post(port, model, { authorization: 'Bearer local-secret' }, '/v1/responses')).status).toBe(200);
+    expect(seen.slice(-2).map(s => s.body.model)).toEqual(['COLLISION', 'OVERRIDE']);
+    map.codexModels!['native-overridden'] = { providerId: 'codex', model: 'native-overridden' };
+    expect((await post(port, 'native-overridden', undefined, undefined, fields)).status).toBe(201);
+    expect(seen.at(-1).native).toBe(true);
   }));
   it('does not inherit OpenAI organization/project headers into a signed external client', async () => {
     const org = process.env.OPENAI_ORG_ID, project = process.env.OPENAI_PROJECT_ID;
@@ -197,6 +215,7 @@ describe('signed desktop production Bridge', () => {
     for (const id of ['unknown/external', 'external', 'gpt-invented']) expect((await post(port, id)).status).toBe(404);
     expect((await post(port, null)).status).toBe(400);
     deps.desktopNativeModels = () => undefined; const unavailable = await post(port, 'native'); expect(unavailable.status).toBe(503); expect(unavailable.text).toContain('disable'); expect(unavailable.text).toContain('native discovery'); expect(seen).toHaveLength(0);
+    expect((await post(port, 'native-overridden')).status).toBe(503); expect((await post(port, 'alias')).status).toBe(503); expect(seen).toHaveLength(0);
   }));
   it('retains the ordinary Responses Active fallback', async () => fixture(async (port, seen) => {
     expect((await post(port, 'unknown', { authorization: 'Bearer local-secret' }, '/v1/responses')).status).toBe(200); expect(seen[0].body.model).toBe('DEFAULT');

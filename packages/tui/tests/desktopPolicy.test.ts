@@ -15,6 +15,39 @@ async function fixture(run: (opts: DesktopOptions, file: string, state: string) 
   const opts: DesktopOptions = { codexHome, wispHome, probe: async () => {}, catalogs: async () => ({ native, input: { models: [{ slug: 'user-unknown', visibility: 'list' }] } }), capabilities: async () => () => undefined };
   try { await run(opts, file, join(wispHome, 'codex-desktop/state.json')); } finally { rmSync(folder, { recursive: true, force: true }); }
 }
+test('desktop preserves full native capabilities through self-routes, external overrides and alias collisions', async () => fixture(async (opts, file) => {
+  const source = { ...native, models: ['native-good', 'native-external', 'native-collision'].map(slug => ({
+    ...native.models[0], slug, context_window: 272000, max_context_window: 872000,
+    auto_compact_token_limit: 800000, effective_context_window_percent: 95,
+    supported_reasoning_levels: [{ effort: 'max', description: 'Maximum' }, { effort: 'ultra', description: 'Delegation' }],
+    multi_agent_version: 'v2', supports_search_tool: true,
+  })) };
+  opts.catalogs = async () => ({ native: source, input: source });
+  opts.capabilities = async () => () => ({ contextInput: 272000, efforts: ['medium'] });
+  const configFile = join(opts.wispHome!, 'config.json');
+  const routes = JSON.stringify({ routing: { families: {}, aliases: [
+    { name: 'native-collision', target: { providerId: 'custom', model: 'shadow' } },
+    { name: 'external-only', target: { providerId: 'custom', model: 'target' } },
+  ], codexModels: {
+    'native-good': { providerId: 'codex', model: 'native-good' },
+    'native-external': { providerId: 'xai', model: 'grok-4.6' },
+  } } });
+  writeFileSync(configFile, routes);
+  const settings = 'model_context_window = 1000000\nmodel_auto_compact_token_limit = 900000\n' + original;
+  writeFileSync(file, settings);
+  for (const action of ['enable', 'refresh'] as const) {
+    const result = await desktopAction(action, opts);
+    const catalog = JSON.parse(readFileSync(join(opts.wispHome!, 'codex-desktop/models.json'), 'utf8'));
+    expect(catalog.models.slice(0, 3)).toEqual(source.models);
+    expect(catalog.client).toBe('native-view');
+    expect(catalog.models.map((m: any) => m.slug)).toEqual(['native-good', 'native-external', 'native-collision', 'external-only']);
+    expect(JSON.stringify(result)).toContain('Native choice retained');
+    const config = Bun.TOML.parse(readFileSync(file, 'utf8'));
+    expect(config.model_context_window).toBe(1000000); expect(config.model_auto_compact_token_limit).toBe(900000);
+    expect(readFileSync(configFile, 'utf8')).toBe(routes);
+  }
+  await desktopAction('disable', opts); expect(readFileSync(file, 'utf8')).toBe(settings);
+}));
 test('ordinary native snapshot is authoritative; alias refresh never re-exports or promotes cache/overlay rows', async () => fixture(async (opts, file, stateFile) => {
   let calls = 0; opts.catalogs = async () => { calls++; return { native, input: { models: [{ slug: 'user-unknown' }] } }; };
   await desktopAction('enable', opts); const state = JSON.parse(readFileSync(stateFile, 'utf8'));
@@ -36,11 +69,11 @@ test('original overlays and non-native discovery settings fail before native exp
   }
   expect(exports).toBe(0); expect(JSON.parse(readFileSync(userFile, 'utf8')).models[0].slug).toBe('unknown-user-row');
 }));
-test('unsupported Antigravity aliases and native overrides are excluded with explicit route reasons', async () => fixture(async (opts, file, state) => {
+test('unsupported Antigravity aliases are excluded while native overrides retain the native choice', async () => fixture(async (opts, file, state) => {
   const configFile = join(opts.wispHome!, 'config.json'); const config = { routing: { families: {}, aliases: [{ name: 'blocked-alias', target: { providerId: 'antigravity', model: 'gemini-model' } }, { name: 'good-alias', target: { providerId: 'custom', model: 'target' } }], codexModels: { 'native-good': { providerId: 'antigravity', model: 'gemini-model' } } } };
   const raw = JSON.stringify(config); writeFileSync(configFile, raw);
   const result = await desktopAction('enable', opts); const catalog = JSON.parse(readFileSync(join(opts.wispHome!, 'codex-desktop/models.json'), 'utf8'));
-  expect(catalog.models.map((m: any) => m.slug)).toEqual(['good-alias']); expect(JSON.stringify(result)).toContain('native-override'); expect(JSON.stringify(result)).toContain('blocked-alias'); expect(JSON.stringify(result)).toContain('instruction ordering');
+  expect(catalog.models.map((m: any) => m.slug)).toEqual(['native-good', 'good-alias']); expect(catalog.models[0]).toEqual(native.models[0]); expect(JSON.stringify(result)).toContain('native-override'); expect(JSON.stringify(result)).toContain('blocked-alias'); expect(JSON.stringify(result)).toContain('instruction ordering');
   expect(readFileSync(configFile, 'utf8')).toBe(raw); expect(JSON.parse(readFileSync(state, 'utf8')).nativeModels).toEqual(['native-good']);
 }));
 test('repeat enable and refresh refuse old hosts or missing native snapshot without mutation; legacy disable works', async () => fixture(async (opts, file, stateFile) => {
@@ -52,11 +85,25 @@ test('repeat enable and refresh refuse old hosts or missing native snapshot with
   for (const action of ['enable', 'refresh'] as const) await expect(desktopAction(action, opts)).rejects.toThrow(/disable/i);
   expect(readFileSync(file, 'utf8')).toBe(before); await desktopAction('disable', opts); expect(readFileSync(file, 'utf8')).toBe(original);
 }));
-test('probe refuses old protocol 1 and accepts current protocol 2', async () => {
-  for (const protocol of [1, 2]) {
+test('repeat enable repairs an older active catalog using the saved full native snapshot', async () => fixture(async (opts, file, stateFile) => {
+  const source = { models: [{ ...native.models[0], max_context_window: 872000, multi_agent_version: 'v2',
+    supported_reasoning_levels: [{ effort: 'max' }, { effort: 'ultra' }] }] };
+  opts.catalogs = async () => ({ native: source, input: source });
+  await desktopAction('enable', opts); const before = readFileSync(file, 'utf8');
+  const catalogFile = join(opts.wispHome!, 'codex-desktop/models.json');
+  writeFileSync(catalogFile, JSON.stringify({ models: [{ ...source.models[0], max_context_window: 272000,
+    multi_agent_version: 'v1', supported_reasoning_levels: [{ effort: 'max' }] }] }));
+  opts.catalogs = async () => { throw new Error('must reuse native snapshot'); };
+  expect((await desktopAction('enable', opts)).enabled).toBe(true);
+  expect(JSON.parse(readFileSync(catalogFile, 'utf8')).models[0]).toEqual(source.models[0]);
+  expect(readFileSync(file, 'utf8')).toBe(before);
+  expect(JSON.parse(readFileSync(stateFile, 'utf8')).nativeCatalog).toEqual(source);
+}));
+test('probe refuses hosts with old routing policy and accepts protocol 3', async () => {
+  for (const protocol of [1, 2, 3]) {
     const server = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ protocol })); });
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); const port = (server.address() as any).port;
-    try { if (protocol === 1) await expect(probeDesktopBridge(port, 'synthetic')).rejects.toThrow(); else await probeDesktopBridge(port, 'synthetic'); }
+    try { if (protocol < 3) await expect(probeDesktopBridge(port, 'synthetic')).rejects.toThrow(); else await probeDesktopBridge(port, 'synthetic'); }
     finally { await new Promise<void>(r => server.close(() => r())); }
   }
 });
