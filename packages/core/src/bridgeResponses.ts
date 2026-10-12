@@ -95,6 +95,7 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
   const body = object(value, 'request');
   fields(body, ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'text', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'safety_identifier'], 'Responses field');
   const model = nonempty(body.model, 'model');
+  const promptCacheKey = body.prompt_cache_key === undefined ? undefined : nonempty(body.prompt_cache_key, 'prompt_cache_key');
   if (body.store !== undefined && body.store !== false) throw new Error('Stored responses are unsupported');
   if (body.stream !== undefined && typeof body.stream !== 'boolean') throw new Error('stream must be boolean');
   if (body.parallel_tool_calls !== undefined && typeof body.parallel_tool_calls !== 'boolean') throw new Error('parallel_tool_calls must be boolean');
@@ -171,7 +172,8 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
     const item = object(v, 'input item');
     if (item.type === 'additional_tools') {
       if (item.role !== 'developer') throw new Error('additional_tools must have developer role');
-      if (item.content !== undefined) turns.push({ ...turn('system'), ...content(item.content) });
+      // Keep the source boundary even without text; assistant call batches must not join across it.
+      turns.push({ ...turn('system'), ...(item.content === undefined ? {} : content(item.content)) });
     } else if (item.type === 'message' || (!item.type && item.role)) {
       if (!['system', 'developer', 'user', 'assistant'].includes(item.role)) throw new Error('Unsupported message role');
       turns.push({ ...turn(item.role === 'developer' ? 'system' : item.role), ...content(item.content, item.role === 'user') });
@@ -201,7 +203,7 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
   }
   if (!turns.length) throw new Error('No messages to send');
   return { model, stream: body.stream ?? false, system: body.instructions === undefined ? '' : string(body.instructions, 'instructions'), turns, tools, registry,
-    responses: { parallelToolCalls: body.parallel_tool_calls, effort: reasoning.effort, context: reasoning.context, verbosity: text.verbosity } };
+    responses: { ...(promptCacheKey === undefined ? {} : { promptCacheKey }), parallelToolCalls: body.parallel_tool_calls, effort: reasoning.effort, context: reasoning.context, verbosity: text.verbosity } };
 };
 
 const outputCall = (call: AssembledToolCall, registry: Map<string, Tool>, id: string): RecordValue => {

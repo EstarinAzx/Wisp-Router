@@ -76,6 +76,51 @@ test('unsupported Antigravity aliases are excluded while native overrides retain
   expect(catalog.models.map((m: any) => m.slug)).toEqual(['native-good', 'good-alias']); expect(catalog.models[0]).toEqual(native.models[0]); expect(JSON.stringify(result)).toContain('native-override'); expect(JSON.stringify(result)).toContain('blocked-alias'); expect(JSON.stringify(result)).toContain('instruction ordering');
   expect(readFileSync(configFile, 'utf8')).toBe(raw); expect(JSON.parse(readFileSync(state, 'utf8')).nativeModels).toEqual(['native-good']);
 }));
+
+test('explicit hoisting admits only the qualified target and persists refresh', async () => fixture(async (opts, file, stateFile) => {
+  writeFileSync(join(opts.wispHome!, 'config.json'), JSON.stringify({ routing: { families: {}, aliases: [
+    { name: 'ag-good', target: { providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' } },
+    { name: 'ag-unvalidated', target: { providerId: 'antigravity', model: 'some-new-model' } },
+  ] } }));
+  opts.capabilities = async () => () => ({ vision: true, efforts: ['high'], defaultEffort: 'high' });
+  await desktopAction('enable', { ...opts, antigravityInstructions: 'hoist-developer' });
+  const catalogFile = join(opts.wispHome!, 'codex-desktop/models.json');
+  const catalog = JSON.parse(readFileSync(catalogFile, 'utf8'));
+  expect(catalog.models.map((m: any) => m.slug)).toEqual(['native-good', 'ag-good']);
+  expect(catalog.models[0]).toEqual(native.models[0]);
+  expect(catalog.models[1]).toMatchObject({ display_name: 'ag-good (Antigravity compatibility)', input_modalities: ['text'], supported_reasoning_levels: [], default_reasoning_level: null });
+  expect(catalog.models[1].description).toContain('Developer notes apply globally');
+  const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+  expect(state.excludedTargets.map((t: any) => t.name)).toEqual(['ag-unvalidated']);
+  expect(JSON.parse(readFileSync(stateFile, 'utf8')).antigravityInstructions).toBe('hoist-developer');
+  const refreshed = await desktopAction('refresh', opts);
+  expect(JSON.parse(readFileSync(catalogFile, 'utf8')).models).toEqual(catalog.models);
+  expect(refreshed.antigravityInstructions).toBe('hoist-developer'); expect(JSON.stringify(refreshed.notices)).toContain('globally');
+  expect((await desktopAction('status', opts)).antigravityInstructions).toBe('hoist-developer');
+  await desktopAction('refresh', { ...opts, antigravityInstructions: 'strict' });
+  expect(JSON.parse(readFileSync(catalogFile, 'utf8')).models.map((m: any) => m.slug)).toEqual(['native-good']);
+  expect(JSON.parse(readFileSync(stateFile, 'utf8')).antigravityInstructions).toBe('strict');
+  await desktopAction('disable', opts); expect(readFileSync(file, 'utf8')).toBe(original);
+  expect(readFileSync(join(opts.codexHome!, 'auth.json'), 'utf8')).toBe('native-auth-untouched');
+}));
+
+test('default setup never opts in even for an admitted Antigravity model', async () => fixture(async (opts, _file, stateFile) => {
+  writeFileSync(join(opts.wispHome!, 'config.json'), JSON.stringify({ routing: { families: {}, aliases: [
+    { name: 'ag', target: { providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' } },
+  ] } }));
+  await desktopAction('enable', opts);
+  expect(JSON.parse(readFileSync(join(opts.wispHome!, 'codex-desktop/models.json'), 'utf8')).models.map((m: any) => m.slug)).toEqual(['native-good']);
+  expect(JSON.parse(readFileSync(stateFile, 'utf8')).antigravityInstructions).toBe('strict');
+}));
+
+test('unsupported actions and invalid mode values cannot toggle integration policy', async () => fixture(async (opts, file, stateFile) => {
+  await desktopAction('enable', opts); const before = readFileSync(stateFile, 'utf8'), config = readFileSync(file, 'utf8');
+  for (const action of ['status', 'disable'] as const) {
+    await expect(desktopAction(action, { ...opts, antigravityInstructions: 'hoist-developer' })).rejects.toThrow(/instruction.*mode|compatibility/i);
+  }
+  await expect(desktopAction('refresh', { ...opts, antigravityInstructions: 'invalid' as any })).rejects.toThrow(/instruction.*mode|compatibility/i);
+  expect(readFileSync(stateFile, 'utf8')).toBe(before); expect(readFileSync(file, 'utf8')).toBe(config);
+}));
 test('repeat enable and refresh refuse old hosts or missing native snapshot without mutation; legacy disable works', async () => fixture(async (opts, file, stateFile) => {
   await desktopAction('enable', opts); const before = readFileSync(file, 'utf8'); const state = readFileSync(stateFile, 'utf8');
   opts.probe = async () => { throw new Error('old host protocol'); };
@@ -99,11 +144,11 @@ test('repeat enable repairs an older active catalog using the saved full native 
   expect(readFileSync(file, 'utf8')).toBe(before);
   expect(JSON.parse(readFileSync(stateFile, 'utf8')).nativeCatalog).toEqual(source);
 }));
-test('probe refuses hosts with old routing policy and accepts protocol 3', async () => {
-  for (const protocol of [1, 2, 3]) {
+test('probe refuses older signed compatibility contracts and accepts protocol 5', async () => {
+  for (const protocol of [1, 2, 3, 4, 5]) {
     const server = createServer((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ protocol })); });
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r)); const port = (server.address() as any).port;
-    try { if (protocol < 3) await expect(probeDesktopBridge(port, 'synthetic')).rejects.toThrow(); else await probeDesktopBridge(port, 'synthetic'); }
+    try { if (protocol < 5) await expect(probeDesktopBridge(port, 'synthetic')).rejects.toThrow(); else await probeDesktopBridge(port, 'synthetic'); }
     finally { await new Promise<void>(r => server.close(() => r())); }
   }
 });

@@ -4,13 +4,28 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { wispHomeDir } from './homeStore';
 import type { Provider } from './catalog';
+import type { Target } from './routing';
 import { parseCodexModels } from './codexModels';
 
-export const DESKTOP_PROTOCOL = 3;
-export const desktopTargetIssue = (provider: Provider): string | undefined => provider.kind === 'antigravity-oauth'
-  ? 'Antigravity cannot preserve signed desktop instruction ordering. Select a supported Provider for desktop; the existing Wisp route is unchanged for other clients.' : undefined;
+export const DESKTOP_PROTOCOL = 5;
+// Existing-auth live and Desktop tool/follow-up qualification: docs/codex-desktop.md.
+const qualifiedAntigravityTargets: readonly Target[] = [{ providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' }];
+export const desktopTargetIssue = (provider: Provider, model?: string, hoisting = false, admittedTargets = qualifiedAntigravityTargets): string | undefined => {
+  if (provider.kind !== 'antigravity-oauth') return undefined;
+  if (!hoisting) return 'Antigravity cannot preserve signed desktop instruction ordering. Select a supported Provider for desktop; the existing Wisp route is unchanged for other clients.';
+  // Release admission is explicit, not inferred from an upstream catalog or mutable Alias name.
+  if (!admittedTargets.some(target => target.providerId === provider.id && target.model === model)) return 'Antigravity Target is not validated for Desktop instruction-hoisting compatibility.';
+  return undefined;
+};
 
 export const desktopStatePath = (home = wispHomeDir()): string => join(home, 'codex-desktop', 'state.json');
+export const readDesktopAntigravityHoisting = (home = wispHomeDir()): boolean => {
+  try {
+    const state = JSON.parse(readFileSync(desktopStatePath(home), 'utf8'));
+    return state.schema === 1 && state.phase === 'active' && state.nativeSource === 'native-client-export'
+      && Number.isFinite(Date.parse(state.nativeCapturedAt)) && state.antigravityInstructions === 'hoist-developer';
+  } catch { return false; }
+};
 export const readDesktopNativeModels = (): string[] | undefined => {
   try {
     const state = JSON.parse(readFileSync(desktopStatePath(), 'utf8'));
@@ -20,7 +35,12 @@ export const readDesktopNativeModels = (): string[] | undefined => {
 };
 
 export type NativeFetch = (url: string, init: RequestInit) => Promise<Response>;
-const requestHeaders = ['authorization', 'chatgpt-account-id', 'openai-beta', 'originator', 'version', 'session_id', 'conversation_id', 'x-codex-turn-state', 'x-codex-turn-metadata'];
+// Native routing/features are part of the request contract, not just telemetry.
+// Keep this allowlist separate from external adapters and never forward the local x-api-key.
+const requestHeaders = ['authorization', 'chatgpt-account-id', 'openai-beta', 'originator', 'version',
+  'session_id', 'conversation_id', 'thread_id', 'x-codex-turn-state', 'x-codex-turn-metadata',
+  'x-codex-routing-hint', 'x-codex-beta-features', 'x-openai-internal-codex-responses-lite',
+  'x-codex-installation-id', 'x-codex-window-id', 'x-codex-parent-thread-id', 'x-openai-subagent'];
 const responseHeaders = ['content-type', 'cache-control', 'retry-after', 'x-request-id', 'x-codex-turn-state'];
 
 export const forwardDesktopNative = async (req: IncomingMessage, res: ServerResponse, body: string, signal: AbortSignal, request: NativeFetch = fetch): Promise<void> => {

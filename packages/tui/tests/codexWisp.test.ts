@@ -108,9 +108,10 @@ test('probe is credential-free, never follows redirects and accepts an auth chal
 
 const run = async (entry: string[], args: string[], env: Record<string, string | undefined>) => {
   const inherited = { ...process.env };
-  // Windows treats Path/PATH as one variable. Avoid duplicate keys in Bun's spawn block.
-  if (process.platform === 'win32' && env.PATH !== undefined) {
-    for (const key of Object.keys(inherited)) if (key.toLowerCase() === 'path') delete inherited[key];
+  // Windows environment keys are case-insensitive; replace inherited spellings before overriding.
+  if (process.platform === 'win32') {
+    const overridden = new Set(Object.keys(env).map(key => key.toLowerCase()));
+    for (const key of Object.keys(inherited)) if (overridden.has(key.toLowerCase())) delete inherited[key];
   }
   const child = Bun.spawn([process.execPath, ...entry, ...args], {
     cwd: root, env: { ...inherited, WISP_HOME: home, CODEX_HOME: join(home, 'codex-home'), ...env },
@@ -152,7 +153,8 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   writeFileSync(join(home, 'codex.cmd'), '@echo BROKEN_SHIM\r\nexit /b 99\r\n');
   const args = ['exec', '-m', 'unchanged', ' spaces "quoted" & | < > ^ %PATH% ', '--', '--search'];
   const result = await run(entry, args, {
-    PATH: home + delimiter + process.env.PATH, WISP_CODEX_BRIDGE_SECRET: 'stale', NO_PROXY: 'internal', no_proxy: 'other',
+    PATH: home + delimiter + process.env.PATH, WISP_CODEX_BRIDGE_SECRET: 'stale', NO_PROXY: 'internal',
+    ...(process.platform === 'win32' ? {} : { no_proxy: 'other' }),
     HTTP_PROXY: `http://127.0.0.1:${proxy}`, HTTPS_PROXY: `http://127.0.0.1:${proxy}`,
     http_proxy: `http://127.0.0.1:${proxy}`, https_proxy: `http://127.0.0.1:${proxy}`,
   });

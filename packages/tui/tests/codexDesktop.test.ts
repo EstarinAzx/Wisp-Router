@@ -30,6 +30,8 @@ test('enable persists signed provider/catalog, restores owned settings and prese
   expect(parsed.model).toBe('my-default'); expect(parsed.model_providers.wisp_desktop.requires_openai_auth).toBe(true);
   expect(parsed.model_providers.wisp_desktop.http_headers['x-api-key']).toBe('synthetic-local-secret');
   expect(parsed.model_providers.wisp_desktop.supports_websockets).toBe(false);
+  expect(parsed.experimental_realtime_webrtc_call_base_url).toBe('http://127.0.0.1:41184/codex-desktop/backend-api/codex');
+  expect(parsed.experimental_realtime_ws_base_url).toBe('http://127.0.0.1:41184/codex-desktop/voice/realtime');
   expect(JSON.parse(readFileSync(parsed.model_catalog_json, 'utf8')).models[0]).toEqual(native.models[0]);
   expect(JSON.stringify(result)).not.toContain('synthetic-local-secret');
   expect(readFileSync(join(opts.codexHome!, 'auth.json'), 'utf8')).toBe('NATIVE_UNTOUCHED');
@@ -37,6 +39,77 @@ test('enable persists signed provider/catalog, restores owned settings and prese
   await desktopAction('enable', opts); await desktopAction('disable', opts);
   expect(readFileSync(config, 'utf8')).toBe(original + '\r\n[user_added]\r\nkeep = "yes"\r\n');
   expect((await desktopAction('disable', opts)).enabled).toBe(false);
+}));
+
+test('user realtime overrides and active profile overrides refuse activation without writes', async () => fixture(async (opts, root, config) => {
+  for (const key of ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url']) {
+    for (const source of [`${key}="https://user.example/voice"\n`, `profile="custom"\n[profiles.custom]\n${key}="https://user.example/voice"\n`]) {
+      writeFileSync(config, source); await expect(desktopAction('enable', opts)).rejects.toThrow(/realtime|voice|profile/i);
+      expect(readFileSync(config, 'utf8')).toBe(source); expect(existsSync(join(opts.wispHome!, 'codex-desktop/state.json'))).toBe(false);
+    }
+  }
+}));
+
+test('active file-based profile voice overrides refuse activation without mutation', async () => fixture(async (opts, root, config) => {
+  const source = 'profile="voice"\n'; writeFileSync(config, source);
+  writeFileSync(join(opts.codexHome!, 'voice.config.toml'), 'experimental_realtime_ws_base_url="https://user.example/realtime"\n');
+  await expect(desktopAction('enable', opts)).rejects.toThrow(/profile/i);
+  expect(readFileSync(config, 'utf8')).toBe(source); expect(existsSync(join(opts.wispHome!, 'codex-desktop/state.json'))).toBe(false);
+}));
+
+test('editing an owned voice destination blocks refresh and disable without overwriting it', async () => fixture(async (opts, root, config) => {
+  await desktopAction('enable', opts);
+  const edited = readFileSync(config, 'utf8').replace('/codex-desktop/voice/realtime', '/my-voice'); writeFileSync(config, edited);
+  for (const action of ['refresh', 'disable'] as const) await expect(desktopAction(action, opts)).rejects.toThrow(/conflict/i);
+  expect(readFileSync(config, 'utf8')).toBe(edited);
+}));
+
+test('legacy desktop journals remain disableable but require re-enable to configure voice', async () => fixture(async (opts, root, config) => {
+  await desktopAction('enable', opts);
+  const journal = join(opts.wispHome!, 'codex-desktop/state.json'); const saved = JSON.parse(readFileSync(journal, 'utf8'));
+  let oldConfig = readFileSync(config, 'utf8');
+  for (const key of ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url']) {
+    if (saved.fields[key]) oldConfig = oldConfig.replace(saved.fields[key].after, ''); delete saved.fields[key];
+  }
+  writeFileSync(config, oldConfig); writeFileSync(journal, JSON.stringify(saved));
+  expect((await desktopAction('status', opts)).voiceConfigured).toBe(false);
+  await expect(desktopAction('refresh', opts)).rejects.toThrow(/disable.*enable/i);
+  expect(readFileSync(config, 'utf8')).toBe(oldConfig); await desktopAction('disable', opts);
+  expect(readFileSync(config, 'utf8')).toBe(original);
+}));
+
+test('legacy disable preserves a previously legal profile-owned voice override', async () => fixture(async (opts, root, config) => {
+  await desktopAction('enable', opts);
+  const journal = join(opts.wispHome!, 'codex-desktop/state.json'); const saved = JSON.parse(readFileSync(journal, 'utf8'));
+  let oldConfig = readFileSync(config, 'utf8');
+  for (const key of ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url']) { oldConfig = oldConfig.replace(saved.fields[key].after, ''); delete saved.fields[key]; }
+  const profile = '\n[profiles.voice]\nexperimental_realtime_ws_base_url="https://user.example/realtime"\n';
+  oldConfig = 'profile="voice"\n' + oldConfig + profile;
+  saved.original = 'profile="voice"\n' + original + profile;
+  writeFileSync(config, oldConfig); writeFileSync(journal, JSON.stringify(saved));
+  await desktopAction('disable', opts); expect(readFileSync(config, 'utf8')).toBe(saved.original);
+}));
+
+test('legacy disable preserves an unowned multiline realtime setting', async () => fixture(async (opts, root, config) => {
+  await desktopAction('enable', opts);
+  const journal = join(opts.wispHome!, 'codex-desktop/state.json'); const saved = JSON.parse(readFileSync(journal, 'utf8'));
+  let oldConfig = readFileSync(config, 'utf8');
+  for (const key of ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url']) { oldConfig = oldConfig.replace(saved.fields[key].after, ''); delete saved.fields[key]; }
+  const unowned = 'experimental_realtime_ws_base_url="""https://user.example/realtime"""\n';
+  saved.original = unowned + original; writeFileSync(config, unowned + oldConfig); writeFileSync(journal, JSON.stringify(saved));
+  await desktopAction('disable', opts); expect(readFileSync(config, 'utf8')).toBe(saved.original);
+}));
+
+test('legacy disable preserves an external profile that older setup did not inspect', async () => fixture(async (opts, root, config) => {
+  await desktopAction('enable', opts);
+  const journal = join(opts.wispHome!, 'codex-desktop/state.json'); const saved = JSON.parse(readFileSync(journal, 'utf8'));
+  let oldConfig = readFileSync(config, 'utf8');
+  for (const key of ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url']) { oldConfig = oldConfig.replace(saved.fields[key].after, ''); delete saved.fields[key]; }
+  saved.original = 'profile="custom"\n' + original;
+  const profilePath = join(opts.codexHome!, 'custom.config.toml'); const profile = 'model_provider="openai"\n'; writeFileSync(profilePath, profile);
+  writeFileSync(config, 'profile="custom"\n' + oldConfig); writeFileSync(journal, JSON.stringify(saved));
+  await desktopAction('disable', opts); expect(readFileSync(config, 'utf8')).toBe(saved.original); expect(readFileSync(profilePath, 'utf8')).toBe(profile);
+  await expect(desktopAction('enable', opts)).rejects.toThrow(/profile/i);
 }));
 test('refresh uses saved native source and removes aliases without promoting unrelated input', async () => fixture(async (opts, root, config) => {
   const sources: unknown[] = []; opts.catalogs = async source => { sources.push(source); return { native, input: { models: [...native.models, { slug: 'unknown/external', visibility: 'list' }] } }; };

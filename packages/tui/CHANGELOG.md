@@ -6,6 +6,30 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.5] - 2026-10-12
+
+### Added
+
+- `/gpt-desktop on` enables signed-in Desktop routing with the qualified Antigravity compatibility mode; `/gpt-desktop off` restores owned native settings. Both preserve the Bridge's running state.
+- Native Desktop voice signaling uses the existing ChatGPT sign-in while the selected Wisp model handles backing text/tool turns.
+- Opt-in Antigravity Desktop support for `gemini-3.8-flash-tiered`, verified through actual Desktop editing, PowerShell read and same-chat follow-up. Developer notes retain their text/order but apply globally; original instruction placement and temporal scope are not preserved. Other Antigravity models remain excluded.
+
+### Fixed
+
+- Native Codex forwarding retains supported cache-routing/feature headers without leaking the Bridge key. Codex adapter requests preserve prompt-cache keys and validated caller session IDs. Live cache-hit recovery and subscription quota impact remain unverified.
+- Antigravity rate-limit handling preserves upstream status, respects supported retry timing and retains bounded safe failures. The earlier production-only 429 cause remains unknown.
+- Signed Antigravity requests preserve original tool IDs and exact custom input/results, validate source boundaries before hoisting and refuse unqualified or unsupported requests before upstream work.
+
+### Compatibility
+
+- Desktop protocol **5** requires matching setup and serving Bridge. Protocol-3 installations need journaled disable then enable to add voice settings; plan that migration around active clients. Restart Desktop after configuration changes.
+- Qualification is specific to the tested target and compatibility contract. No general model/tool guarantee, live cache-recovery claim or fix for the previously unreproduced Grok image report is made.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.5**, **companion VSIX: 1.14.2**, **wisp-slot: unchanged**. Installation and running-process replacement are separate actions.
+- The companion bundles the shared Bridge changes; the `/gpt-desktop` palette command is terminal-only. Packaging does not establish installed VS Code acceptance or Traycer GUI Alias support.
+
 ## [2.2.1] - 2026-09-18
 
 ### Fixed

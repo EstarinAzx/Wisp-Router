@@ -10,11 +10,15 @@ import { resolveCodex } from './codex-wisp';
 const { TOML } = require('bun') as { TOML: { parse: (text: string) => Record<string, any> } };
 
 type Owned = { before?: string; after: string };
+const voiceKeys = ['experimental_realtime_webrtc_call_base_url', 'experimental_realtime_ws_base_url'];
 type State = { schema: 1; phase: 'prepared' | 'active' | 'restoring'; codexHome: string; configExisted: boolean; original: string; source?: string;
   fields: Record<string, Owned>; provider: string; nativeModels: string[];
   nativeCatalog?: NativeCatalog; nativeSource?: 'native-client-export'; nativeCapturedAt?: string; knownAliases?: string[];
-  excludedTargets?: { name: string; kind: string; reason: string }[] };
+  excludedTargets?: { name: string; kind: string; reason: string }[];
+  antigravityInstructions?: 'hoist-developer' | 'strict' };
+const voiceConfigured = (state: State): boolean => voiceKeys.every(key => key in state.fields);
 export type DesktopOptions = {
+  antigravityInstructions?: 'hoist-developer' | 'strict';
   codexHome?: string; wispHome?: string;
   env?: NodeJS.ProcessEnv;
   probe?: (port: number, secret: string) => Promise<void>;
@@ -38,12 +42,14 @@ const nativeSnapshot = (state: State): NativeCatalog => {
 const catalogNotices = (state: State): string[] => [
   `Using a saved native-client catalog (${new Date(state.nativeCapturedAt!).toISOString()}); account freshness is not verified. For native/account refresh: disable -> native discovery -> enable.`,
   'Hosted web search is unavailable on external routes; supported client tools remain available.',
+  ...(state.antigravityInstructions === 'hoist-developer' ? ['Antigravity compatibility: developer notes apply globally; original instruction placement is not preserved. Explicit system turns are unsupported. Cache reuse and latency may change.'] : []),
+  ...(voiceConfigured(state) ? [] : ['Voice setup requires codex-desktop disable then enable with the current Bridge.']),
   ...(state.excludedTargets ?? []).map(item => `${item.name} [${item.kind}]: ${item.reason}`),
 ];
 
 // Accumulate logical TOML statements so apparent keys inside multiline strings/arrays stay opaque.
 // Unsupported owned layouts fail closed; unrelated valid TOML is never serialized or reformatted.
-const ownedLines = (raw: string, keys = ['model_provider', 'model_catalog_json']): Record<string, { text: string; start: number; end: number }> => {
+const ownedLines = (raw: string, keys = ['model_provider', 'model_catalog_json', ...voiceKeys]): Record<string, { text: string; start: number; end: number }> => {
   const found: Record<string, { text: string; start: number; end: number }> = {}; let statement = ''; let table = false; let offset = 0;
   for (const line of raw.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
     statement += line; let value: Record<string, unknown>;
@@ -57,12 +63,20 @@ const ownedLines = (raw: string, keys = ['model_provider', 'model_catalog_json']
   }
   return found;
 };
-const profileCheck = (config: Record<string, any>) => {
+const profileCheck = (config: Record<string, any>, codexHome: string | undefined, realtimeKeys = voiceKeys) => {
   const selected = typeof config.profile === 'string' ? config.profiles?.[config.profile] : undefined;
-  if (selected && ['model_provider', 'model_catalog_json', 'model_providers'].some(key => key in selected)) throw new Error('Active Codex profile overrides desktop provider/catalog; remove the conflict first');
+  let fileProfile: Record<string, any> | undefined;
+  if (codexHome && typeof config.profile === 'string') {
+    const path = resolve(codexHome, `${config.profile}.config.toml`);
+    if (dirname(path) !== resolve(codexHome)) throw new Error('Invalid Codex profile name');
+    if (existsSync(path)) fileProfile = parse(readConfig(path));
+  }
+  if ([selected, fileProfile].some(profile => profile && ['model_provider', 'model_catalog_json', 'model_providers', ...realtimeKeys].some(key => key in profile))) throw new Error('Active Codex profile overrides desktop provider/catalog/realtime; remove the conflict first');
 };
 const checkOwned = (raw: string, state: State): void => {
-  const parsed = parse(raw); profileCheck(parsed); const lines = ownedLines(raw);
+  const ownedVoiceKeys = voiceKeys.filter(key => key in state.fields);
+  // Legacy setup never inspected external profile files; preserve its recovery path.
+  const parsed = parse(raw); profileCheck(parsed, ownedVoiceKeys.length ? state.codexHome : undefined, ownedVoiceKeys); const lines = ownedLines(raw, Object.keys(state.fields));
   for (const [key, field] of Object.entries(state.fields)) if (lines[key]?.text !== field.after) throw new Error('Desktop owned-setting conflict; restore the Wisp-owned values before refresh/disable');
   if (raw.split(state.provider).length !== 2) throw new Error('Desktop provider conflict; restore the Wisp provider block before refresh/disable');
   // A matching block inside a multiline string does not establish ownership of a real table.
@@ -94,6 +108,8 @@ const loadCatalogs = async (codexHome: string, env: NodeJS.ProcessEnv): Promise<
 };
 
 export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'disable', options: DesktopOptions = {}) => {
+  if (options.antigravityInstructions !== undefined && (!['enable', 'refresh'].includes(action)
+    || !['hoist-developer', 'strict'].includes(options.antigravityInstructions))) throw new Error('Invalid Antigravity instruction mode or action');
   const codexHome = resolve(options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), '.codex'));
   const wispDir = resolve(options.wispHome ?? wispHomeDir()); const home = new WispHome(wispDir);
   const configFile = join(codexHome, 'config.toml'); const stateFile = desktopStatePath(wispDir); const catalogFile = join(dirname(stateFile), 'models.json');
@@ -106,12 +122,13 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   }
   const status = (enabled: boolean, extra: Record<string, unknown> = {}): { enabled: boolean; codexHome: string; catalog?: string; [key: string]: unknown } => ({ enabled, codexHome, catalog: enabled ? catalogFile : undefined, ...extra });
   if (action === 'status') {
-    if (!state) return status(false, { state: 'disabled', restartRequired: false });
+    if (!state) return status(false, { state: 'disabled', restartRequired: false, antigravityInstructions: 'strict' });
     let conflict = false; try { checkOwned(raw, state); } catch { conflict = true; }
     let snapshotValid = false; try { nativeSnapshot(state); snapshotValid = true; } catch {}
     let bridge = false; try { await (options.probe ?? probeDesktopBridge)(home.readConfig().bridge?.port ?? DEFAULT_BRIDGE_PORT, home.readAuth().bridgeSecret ?? ''); bridge = true; } catch {}
-    return status(state.phase === 'active' && !conflict && snapshotValid, { state: conflict ? 'conflict' : snapshotValid ? state.phase : 'native-rediscovery-required', bridge, restartRequired: true,
+    return status(state.phase === 'active' && !conflict && snapshotValid, { state: conflict ? 'conflict' : snapshotValid ? state.phase : 'native-rediscovery-required', bridge, restartRequired: true, voiceConfigured: voiceConfigured(state),
       nativeCatalog: 'saved-native-client-view', nativeCapturedAt: snapshotValid ? new Date(state.nativeCapturedAt!).toISOString() : undefined, excludedTargets: snapshotValid ? state.excludedTargets ?? [] : [],
+      antigravityInstructions: state.phase === 'active' && state.antigravityInstructions === 'hoist-developer' ? 'hoist-developer' : 'strict',
       notices: snapshotValid ? catalogNotices(state) : ['Disable desktop integration, run native discovery, then enable with the current Bridge.'] });
   }
   if (action === 'disable') {
@@ -119,11 +136,11 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
     // Recovery compares only owned statements: unrelated edits can happen before installation,
     // or after a restore committed but before its journal was removed.
     let restored = raw;
-    const current = parse(raw); const lines = ownedLines(raw);
+    const current = parse(raw); const lines = ownedLines(raw, Object.keys(state.fields));
     const originalOwned = !current.model_providers?.wisp_desktop && Object.entries(state.fields).every(([key, field]) => lines[key]?.text === field.before);
     if (raw !== state.original && !(state.phase !== 'active' && originalOwned)) {
       checkOwned(raw, state); restored = raw.replace(state.provider, '');
-      for (const [key, field] of Object.entries(state.fields)) { const span = ownedLines(restored)[key]; restored = restored.slice(0, span.start) + (field.before ?? '') + restored.slice(span.end); }
+      for (const [key, field] of Object.entries(state.fields)) { const span = ownedLines(restored, Object.keys(state.fields))[key]; restored = restored.slice(0, span.start) + (field.before ?? '') + restored.slice(span.end); }
     }
     const knownAliases = new Set([...(state.knownAliases ?? []), ...(home.readConfig().routing?.aliases.map(alias => alias.name) ?? [])]);
     let snapshot: NativeCatalog | undefined; try { snapshot = nativeSnapshot(state); } catch { /* legacy disable must remain available */ }
@@ -151,13 +168,15 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
     unlinkSync(stateFile); if (existsSync(catalogFile)) unlinkSync(catalogFile);
     return status(false, { restartRequired: true, selectionRestored, actionRequired, notices });
   }
-  const parsed = parse(raw); profileCheck(parsed);
+  const parsed = parse(raw); profileCheck(parsed, codexHome);
   if (state) {
     if (state.phase !== 'active') throw new Error('Incomplete desktop activation; run wisp codex-desktop disable to recover, then enable');
     checkOwned(raw, state);
     nativeSnapshot(state);
+    if (!voiceConfigured(state)) throw new Error('Desktop voice setup requires codex-desktop disable then enable with the current Bridge.');
   } else {
     if (action === 'refresh') throw new Error('Desktop integration is disabled; run wisp codex-desktop enable');
+    if (voiceKeys.some(key => Object.prototype.hasOwnProperty.call(parsed, key))) throw new Error('User-owned realtime override conflicts with desktop voice; preserve it and resolve the conflict before enabling');
     if (existsSync(catalogFile)) throw new Error('Unowned desktop catalog file already exists; move it and update any original catalog reference before enabling');
     if (parsed.model_providers?.wisp_desktop || parsed.model_provider === 'wisp_desktop') throw new Error('Reserved wisp_desktop provider already exists; resolve the conflict first');
     if (Object.prototype.hasOwnProperty.call(parsed, 'model_catalog_json') || (parsed.model_provider !== undefined && parsed.model_provider !== 'openai') || Object.prototype.hasOwnProperty.call(parsed.model_providers ?? {}, 'openai')) {
@@ -177,11 +196,14 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   // Repeated enable reconciles older generated catalogs just like refresh.
   const activating = !state;
   const native = state ? nativeSnapshot(state) : options.catalogs ? parseNativeCatalog((await options.catalogs()).native) : await loadCatalogs(codexHome, options.env ?? process.env);
-  const { catalog, excludedTargets } = mergeDesktopCatalog(native, config, await (options.capabilities ?? readAliasCapabilities)(config, auth));
+  const antigravityInstructions = options.antigravityInstructions ?? (state?.antigravityInstructions === 'hoist-developer' ? 'hoist-developer' : 'strict');
+  const { catalog, excludedTargets } = mergeDesktopCatalog(native, config, await (options.capabilities ?? readAliasCapabilities)(config, auth), antigravityInstructions === 'hoist-developer');
   let next = raw;
   if (!state) {
     const lines = ownedLines(raw); const fields: Record<string, Owned> = {};
-    for (const [key, value] of Object.entries({ model_provider: 'wisp_desktop', model_catalog_json: catalogFile })) {
+    for (const [key, value] of Object.entries({ model_provider: 'wisp_desktop', model_catalog_json: catalogFile,
+      experimental_realtime_webrtc_call_base_url: `http://127.0.0.1:${port}/codex-desktop/backend-api/codex`,
+      experimental_realtime_ws_base_url: `http://127.0.0.1:${port}/codex-desktop/voice/realtime` })) {
       const after = `${key} = ${JSON.stringify(value)}\n`; fields[key] = { before: lines[key]?.text, after };
       const span = ownedLines(next)[key]; next = span ? next.slice(0, span.start) + after + next.slice(span.end) : after + next;
     }
@@ -190,23 +212,42 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
     state = { schema: 1, phase: 'prepared', codexHome, configExisted: existsSync(configFile), original: raw, fields, provider, nativeModels: [], nativeCatalog: native, nativeSource: 'native-client-export', nativeCapturedAt: new Date().toISOString() };
   }
   parse(next); checkOwned(next, state);
-  state = { ...state, phase: 'prepared', nativeModels: native.models.map(m => m.slug as string), excludedTargets,
+  state = { ...state, phase: 'prepared', antigravityInstructions, nativeModels: native.models.map(m => m.slug as string), excludedTargets,
     knownAliases: [...new Set([...(state.knownAliases ?? []), ...(config.routing?.aliases.map(alias => alias.name) ?? [])])] };
   if (activating && (existsSync(stateFile) || existsSync(catalogFile))) throw new Error('Desktop state/catalog already exists after preflight; inspect the files before retrying');
   // Journal first. A crash before/after either following write is repaired by disable.
   write(stateFile, JSON.stringify(state)); write(catalogFile, JSON.stringify(catalog));
   if (readConfig(configFile) !== raw) throw new Error('Codex config changed concurrently; recovery journal retained');
   write(configFile, next); write(stateFile, JSON.stringify({ ...state, phase: 'active' }));
-  return status(true, { restartRequired: true, nativeCatalog: 'saved-native-client-view', nativeCapturedAt: state.nativeCapturedAt, excludedTargets, notices: catalogNotices(state) });
+  return status(true, { restartRequired: true, antigravityInstructions, nativeCatalog: 'saved-native-client-view', nativeCapturedAt: state.nativeCapturedAt, excludedTargets, notices: catalogNotices(state) });
+};
+
+export const runGptDesktop = async (args: readonly string[], options: DesktopOptions = {}): Promise<string> => {
+  const arg = args[0]?.toLowerCase();
+  if (args.length !== 1 || (arg !== 'on' && arg !== 'off')) throw new Error('Usage: /gpt-desktop on|off');
+  const result = await desktopAction(arg === 'on' ? 'enable' : 'disable', {
+    ...options, antigravityInstructions: arg === 'on' ? 'hoist-developer' : undefined,
+  });
+  const omitted = Array.isArray(result.excludedTargets) ? result.excludedTargets.filter(target => target.kind === 'alias').length : 0;
+  return [`Desktop ${result.enabled ? 'on' : 'off'}. Restart Desktop. Bridge state unchanged.`,
+    arg === 'on' ? 'Antigravity developer notes apply globally; original instruction placement is not preserved.' : '',
+    omitted ? `${omitted} incompatible Alias(es) omitted from the picker.` : '',
+    result.actionRequired ? 'Choose a valid native model and effort in Desktop.' : '',
+  ].filter(Boolean).join(' ');
 };
 
 export const runCodexDesktop = async (args: string[]): Promise<number> => {
   if (!args.length || args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: wisp codex-desktop enable|status|refresh|disable [--json]\nEnable from unmanaged native mode using a current Wisp Bridge. Antigravity targets are excluded.\nRefresh updates aliases using the saved native-client snapshot; native/account refresh requires disable -> native discovery -> enable.\nShared CODEX_HOME affects other clients. Restart Codex after changes; inspect disable action-required notices.'); return 0;
+    console.log('Usage: wisp codex-desktop enable|status|refresh|disable [--json] [--antigravity-instructions=hoist-developer|strict]\nEnable from unmanaged native mode using a current Wisp Bridge. Antigravity gemini-3.8-flash-tiered is qualified only with explicit hoist-developer compatibility.\nCompatibility mode applies developer notes globally and does not preserve original instruction placement.\nRefresh updates aliases using the saved native-client snapshot; native/account refresh requires disable -> native discovery -> enable.\nShared CODEX_HOME affects other clients. Restart Codex after changes; inspect disable action-required notices.'); return 0;
   }
-  if (!['enable', 'status', 'refresh', 'disable'].includes(args[0]) || args.slice(1).some(a => a !== '--json')) { console.error('Usage: wisp codex-desktop enable|status|refresh|disable [--json]'); return 1; }
+  const modeFlags = args.slice(1).filter(a => a.startsWith('--antigravity-instructions='));
+  if (!['enable', 'status', 'refresh', 'disable'].includes(args[0]) || modeFlags.length > 1
+    || args.slice(1).some(a => !['--json', '--antigravity-instructions=hoist-developer', '--antigravity-instructions=strict'].includes(a))
+    || (modeFlags.length && !['enable', 'refresh'].includes(args[0]))) { console.error('Invalid desktop action or instruction-mode option; use codex-desktop --help'); return 1; }
   try {
-    const result = await desktopAction(args[0] as Parameters<typeof desktopAction>[0]);
+    const result = await desktopAction(args[0] as Parameters<typeof desktopAction>[0], {
+      antigravityInstructions: modeFlags[0]?.split('=')[1] as DesktopOptions['antigravityInstructions'],
+    });
     const notices = Array.isArray(result.notices) ? result.notices : [];
     console.log(args.includes('--json') ? JSON.stringify(result) : [`Desktop integration: ${result.enabled ? 'enabled' : 'disabled'}. ${'state' in result ? `State: ${result.state}. ` : ''}Restart Codex after configuration/catalog changes.${result.enabled ? ' Keep the current Wisp Bridge running.' : ''}`, ...notices].join('\n')); return 0;
   } catch (error) { console.error(error instanceof Error ? error.message : 'Desktop operation failed; recovery state retained'); return 1; }

@@ -122,7 +122,7 @@ export const mergeAliasCatalog = (
   return { ...catalog, models: [...models.values()] };
 };
 
-export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, capabilities: (target: Target) => TargetCapabilities | undefined) => {
+export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, capabilities: (target: Target) => TargetCapabilities | undefined, antigravityHoisting = false) => {
   const nativeIds = new Set(native.models.map(model => model.slug));
   const excludedTargets: { name: string; kind: string; reason: string }[] = [];
   for (const name of nativeIds) {
@@ -142,8 +142,15 @@ export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, c
     const alias = config.routing?.aliases.find(entry => entry.name === name);
     const target = alias?.target;
     const provider = target && PROVIDERS.find(p => p.id === target.providerId);
-    const issue = provider && desktopTargetIssue(provider);
-    if (!issue) return true;
+    const issue = provider && desktopTargetIssue(provider, target?.model, antigravityHoisting);
+    if (!issue) {
+      if (provider?.kind === 'antigravity-oauth') Object.assign(model, {
+        display_name: `${name} (Antigravity compatibility)`,
+        description: `${model.description} Developer notes apply globally; original instruction placement is not preserved. Explicit system turns are unsupported.`,
+        input_modalities: ['text'], supported_reasoning_levels: [], default_reasoning_level: null,
+      });
+      return true;
+    }
     excludedTargets.push({ name, kind: 'alias', reason: issue });
     return false;
   });

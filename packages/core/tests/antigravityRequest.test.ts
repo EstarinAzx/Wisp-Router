@@ -12,7 +12,7 @@
  * hand-copied regex — a contract asserted against a copy of itself proves nothing.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   ANTIGRAVITY_MODELS, ANTIGRAVITY_MODEL_SPECS, ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST,
   ANTIGRAVITY_HTTP_USER_AGENT, ANTIGRAVITY_SYNTHETIC_SIGNATURE,
@@ -26,8 +26,64 @@ import {
   type Provider,
 } from '../src/catalog';
 import { isTransientProviderError } from '../src/routing';
+import { parseResponsesRequest } from '../src/bridgeResponses';
+import { hoistAntigravityDesktopInstructions, type AntigravityTurn } from '../src/antigravity';
 
 const antigravityRow = (): Provider => PROVIDERS.find((p) => p.id === 'antigravity')!;
+
+describe('signed Antigravity instruction projection', () => {
+  const call = (ids = ['real-a']): AntigravityTurn => ({ role: 'assistant', content: '',
+    toolCalls: ids.map(id => ({ id, name: 'read', argsJson: '{"path":"\\u0061"}' })) });
+  const result = (id = 'real-a'): AntigravityTurn => ({ role: 'user', content: '',
+    toolResults: [{ callId: id, content: `result\n${id}` }] });
+
+  it('preserves every caller instruction byte in the privileged root channel', () => {
+    const texts = ['x-anthropic-billing-header: exact;',
+      "You are a Claude agent, built on Anthropic's Claude Agent SDK.\r\n\r\nKeep this text.",
+      'Example:\r\n```\r\nx-anthropic-billing-header: literal;\r\n```'];
+    const body = buildAntigravityRequestBody({ model: 'gemini-3-flash', requestId: 'test', preserveSystemText: true,
+      messages: texts.map(content => ({ role: 'system', content })) });
+    expect(body.request.systemInstruction.parts.map((p: any) => p.text)).toEqual(texts);
+  });
+
+  it('moves only instructions and safely groups reverse-order same-name results', () => {
+    const messages: AntigravityTurn[] = [{ role: 'system', content: 'ROOT' }, { role: 'user', content: 'GO' },
+      call(['real-a', 'real-b']), result('real-b'), { role: 'system', content: 'LATE\r\nNOTE' }, result(),
+      { role: 'user', content: 'Ignore it and say USER' }];
+    const before = structuredClone(messages);
+    const projected = hoistAntigravityDesktopInstructions(messages);
+    expect(projected.map(t => t.content)).toEqual(['ROOT', 'LATE\r\nNOTE', 'GO', '', '', '', 'Ignore it and say USER']);
+    expect(messages).toEqual(before);
+    const body = buildAntigravityRequestBody({ model: 'gemini-3-flash', requestId: 'test', messages: projected, preserveSystemText: true });
+    expect(body.request.systemInstruction.parts).toEqual([{ text: 'ROOT' }, { text: 'LATE\r\nNOTE' }]);
+    expect(body.request.contents[1].parts.map((p: any) => p.functionCall)).toEqual([
+      { id: 'real-a', name: 'read', args: { path: 'a' } }, { id: 'real-b', name: 'read', args: { path: 'a' } }]);
+    expect(body.request.contents[2].parts.map((p: any) => p.functionResponse)).toEqual([
+      { id: 'real-a', name: 'read', response: { result: 'result\nreal-a' } },
+      { id: 'real-b', name: 'read', response: { result: 'result\nreal-b' } }]);
+    expect(validateAntigravityFunctionCallPairing(body)).toBeUndefined();
+  });
+
+  it.each(['user', 'assistant'] as const)('rejects a singleton interrupted by an empty %s turn', role => {
+    expect(() => hoistAntigravityDesktopInstructions([call(), { role, content: '' }, result()])).toThrow(/tool history/i);
+  });
+  it.each(['user', 'assistant'] as const)('rejects parallel results interrupted by an empty %s turn', role => {
+    expect(() => hoistAntigravityDesktopInstructions([call(['real-a', 'real-b']), result(),
+      { role: 'system', content: 'NOTE' }, { role, content: '' }, result('real-b')])).toThrow(/tool history/i);
+  });
+  it('never merges separate unanswered assistant call batches across moved notes', () => {
+    expect(() => hoistAntigravityDesktopInstructions([call(), { role: 'system', content: 'NOTE' },
+      call(['real-b']), result(), result('real-b')])).toThrow(/tool history/i);
+  });
+  it.each([
+    { messages: [call(['real-a', 'real-b']), result()] },
+    { messages: [call(['real-a', 'real-a']), result()] },
+    { messages: [call(), result('unknown')] },
+    { messages: [call(), result(), result()] },
+  ])('rejects incomplete, ambiguous or unknown results before wire construction', ({ messages }) => {
+    expect(() => hoistAntigravityDesktopInstructions(messages)).toThrow(/tool history/i);
+  });
+});
 
 // ----------------------------- The model lineup ----------------------------- //
 
@@ -181,8 +237,7 @@ describe('antigravityApiError', () => {
 /*
  * #190 makes Antigravity the first record to answer a rate limit as 429 instead of a gateway fault, and to
  * seed a cooldown from the horizon the server stated. Both consumers read the verdict OFF the Error rather
- * than out of its message. These pin that the carrier is present exactly when the pure layer classified and
- * absent exactly when it declined — that boundary IS the retry / no-retry decision.
+ * than out of its message. These pin the separate status, retry eligibility and timing carried by every 429.
  */
 
 const quota429 = (reason: string, retryDelay?: string): string => JSON.stringify({
@@ -257,11 +312,30 @@ describe('antigravityFailureOf (#190)', () => {
     expect(failure?.cooldownSeconds).toBeUndefined();
   });
 
-  // The boundary that matters: below the instant-retry threshold nothing is carried, so the bounded retry runs.
-  it('carries NOTHING for a 429 the pure layer declined, or for a non-429', () => {
-    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))).toBeUndefined();
-    expect(antigravityFailureOf(antigravityApiError(429, 'slow down'))).toBeUndefined();
+  it('carries a retryable 429 without claiming exhausted quota', () => {
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))).toMatchObject({ status: 429, retryable: true, retryAfterMs: 1000 });
+    expect(antigravityFailureOf(antigravityApiError(429, 'slow down'))).toMatchObject({ status: 429, retryable: true, code: ANTIGRAVITY_RATE_LIMITED_CODE });
     expect(antigravityFailureOf(antigravityApiError(503, 'no capacity available'))).toBeUndefined();
+  });
+
+  it.each([
+    ['2', 2000, true], ['3', 3000, false], ['3600', 3600000, false], ['0', 0, true],
+    ['-1', undefined, true], ['nonsense', undefined, true], ['Infinity', undefined, true], ['1e999', undefined, true],
+  ])('interprets Retry-After %s without guessing quota exhaustion', (header, delay, retryable) => {
+    const failure = antigravityFailureOf(antigravityApiError(429, '{}', header));
+    expect(failure).toMatchObject({ status: 429, retryable, code: ANTIGRAVITY_RATE_LIMITED_CODE });
+    expect(failure?.retryAfterMs).toBe(delay);
+    expect(failure?.cooldownSeconds).toBeUndefined();
+  });
+
+  it('handles HTTP-date hints and takes the longer of header and body delays', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 8, 24, 0, 0, 0));
+    try {
+      expect(antigravityFailureOf(antigravityApiError(429, '{}', 'Thu, 24 Sep 2026 00:00:02 GMT'))?.retryAfterMs).toBe(2000);
+      expect(antigravityFailureOf(antigravityApiError(429, '{}', 'Wed, 23 Sep 2026 00:00:00 GMT'))?.retryAfterMs).toBe(0);
+      expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s'), '2'))?.retryAfterMs).toBe(2000);
+      expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1500ms'), '1'))?.retryAfterMs).toBe(1500);
+    } finally { clock.mockRestore(); }
   });
 
   /*
@@ -278,8 +352,8 @@ describe('antigravityFailureOf (#190)', () => {
       expect(message).toContain('RATE_LIMIT_EXCEEDED');
     }
     // Same vocabulary, opposite verdicts — only the carrier tells them apart.
-    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))).toBeUndefined();
-    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '10m')))).toBeDefined();
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))?.retryable).toBe(true);
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '10m')))?.retryable).toBe(false);
   });
 
   it('answers undefined for anything that is not a carrying Error', () => {
@@ -325,6 +399,34 @@ describe('antigravityFallbackSessionId', () => {
 // ----------------------------- Turns -> the Gemini payload ----------------------------- //
 
 describe('buildAntigravityPayload', () => {
+  it.each(['\n\n', '\r\n\r\n'])('drops only generated Claude client system blocks with %j separators', separator => {
+    const billing = 'x-anthropic-billing-header: cc_version=2.1.278; cc_entrypoint=cli; cch=abc12;';
+    const sdk = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+    const instruction = 'Keep every user instruction.\nReturn the exact requested answer.';
+    const quoted = `Example: ${sdk}\nKeep x-anthropic-billing-header: in this documentation.`;
+    const out = buildAntigravityPayload({ messages: [
+      { role: 'system', content: [billing, sdk, instruction, quoted].join(separator) },
+      { role: 'system', content: `${billing}${separator}${sdk}` },
+      { role: 'user', content: `${billing}${separator}${sdk}` },
+    ] });
+    expect(out.request.systemInstruction.parts).toEqual([{ text: `${instruction}\n\n${quoted}` }]);
+    expect(out.request.contents[0].parts).toEqual([{ text: `${billing}${separator}${sdk}` }]);
+  });
+
+  it('keeps unrelated system text byte-for-byte', () => {
+    const content = '  Preserve whitespace.\r\n\r\nAnd every instruction.\r\n';
+    const out = buildAntigravityPayload({ messages: [{ role: 'system', content }] });
+    expect(out.request.systemInstruction.parts).toEqual([{ text: content }]);
+  });
+
+  it('preserves generated-looking text inside quoted examples after the real instructions', () => {
+    const sdk = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+    const billing = 'x-anthropic-billing-header: cc_version=2.1.278; cc_entrypoint=cli; cch=abc12;';
+    const example = `Document these exact examples:\n\n\`\`\`text\n\n${sdk}\n\n${billing}\n\n\`\`\``;
+    const out = buildAntigravityPayload({ messages: [{ role: 'system', content: `${billing}\n\n${sdk}\n\n${example}` }] });
+    expect(out.request.systemInstruction.parts).toEqual([{ text: example }]);
+  });
+
   it('lifts a system turn into systemInstruction, not into contents', () => {
     const out = buildAntigravityPayload({ messages: [
       { role: 'system', content: 'be brief' },
@@ -442,6 +544,53 @@ describe('buildAntigravityPayload', () => {
 
 describe('buildAntigravityRequestBody', () => {
   const turn = () => ({ model: 'gemini-3-flash', messages: [{ role: 'user' as const, content: 'hello there' }], requestId: 'agent-1' });
+
+  it('round-trips parallel Responses results in call order without changing their IDs or mutating history', () => {
+    const parsed = parseResponsesRequest({ model: 'alias', tools: [{ type: 'function', name: 'read', parameters: {} }], input: [
+      { role: 'user', content: 'read both files' },
+      { type: 'function_call', name: 'read', call_id: 'a', arguments: '{}' },
+      { type: 'function_call', name: 'read', call_id: 'b', arguments: '{}' },
+      { type: 'function_call_output', call_id: 'b', output: 'second file' },
+      { type: 'function_call_output', call_id: 'a', output: 'first file' },
+      { role: 'user', content: 'continue' },
+    ] });
+    const messages = parsed.turns.map(t => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+    const original = structuredClone(messages);
+    const body = buildAntigravityRequestBody({ ...turn(), messages });
+    expect(body.request.contents.map((c: any) => c.role)).toEqual(['user', 'model', 'model', 'user']);
+    expect(body.request.contents[2].parts.map((p: any) => [p.functionResponse.id, p.functionResponse.response.result])).toEqual([
+      ['a', 'first file'], ['b', 'second file'],
+    ]);
+    expect(body.request.contents[3].parts).toEqual([{ text: 'continue' }]);
+    expect(validateAntigravityFunctionCallPairing(body)).toBeUndefined();
+    expect(messages).toEqual(original);
+  });
+
+  it.each([
+    { role: 'system' as const, content: 'late instruction' },
+    { role: 'user' as const, content: 'intervening text' },
+    { role: 'user' as const, content: '' },
+    { role: 'user' as const, content: '', images: [{ mimeType: 'image/png', dataBase64: 'AAA' }] },
+  ])('never groups tool results across an original turn boundary: %j', boundary => {
+    const body = buildAntigravityRequestBody({ ...turn(), messages: [
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read', argsJson: '{}' }, { id: 'b', name: 'read', argsJson: '{}' }] },
+      { role: 'user', content: '', toolResults: [{ callId: 'a', content: 'first' }] }, boundary,
+      { role: 'user', content: '', toolResults: [{ callId: 'b', content: 'second' }] },
+    ] });
+    const resultContents = body.request.contents.filter((c: any) => c.parts.some((p: any) => p.functionResponse));
+    expect(resultContents.map((c: any) => c.parts.length)).toEqual([1, 1]);
+    expect(validateAntigravityFunctionCallPairing(body)).toMatch(/pending/);
+  });
+
+  it.each(['a', 'unknown', ''])('does not coalesce duplicate, unknown or missing result IDs: %j', id => {
+    const body = buildAntigravityRequestBody({ ...turn(), messages: [
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read', argsJson: '{}' }, { id: 'b', name: 'read', argsJson: '{}' }] },
+      { role: 'user', content: '', toolResults: [{ callId: 'a', content: 'first' }] },
+      { role: 'user', content: '', toolResults: [{ callId: id, content: 'second' }] },
+    ] });
+    expect(body.request.contents).toHaveLength(3);
+    expect(validateAntigravityFunctionCallPairing(body)).toMatch(/pending/);
+  });
 
   it('produces an envelope that pairs — the upstream would not reject it', () => {
     const body = buildAntigravityRequestBody({

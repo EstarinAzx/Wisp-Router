@@ -791,11 +791,11 @@ const RETRY_INFO_TYPE = 'type.googleapis.com/google.rpc.RetryInfo';
 // Go-style duration strings ("2s", "1m30s", "1h5m") — the shape the upstream's RetryInfo carries.
 const parseGoDurationMs = (raw: string): number | undefined => {
   const trimmed = raw.trim().toLowerCase();
-  if (!/^(\d+(\.\d+)?(h|m|s|ms))+$/.test(trimmed)) return undefined;
+  if (!/^(\d+(\.\d+)?(ms|h|m|s))+$/.test(trimmed)) return undefined;
   const unit: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1_000, ms: 1 };
   let total = 0;
-  for (const [, value, , suffix] of trimmed.matchAll(/(\d+(\.\d+)?)(h|m|s|ms)/g)) total += Number(value) * unit[suffix];
-  return total;
+  for (const [, value, , suffix] of trimmed.matchAll(/(\d+(\.\d+)?)(ms|h|m|s)/g)) total += Number(value) * unit[suffix];
+  return Number.isFinite(total) ? total : undefined;
 };
 
 // RetryInfo first, then the quota reset hint, then the human-readable message — the reference's order.
@@ -867,6 +867,8 @@ export const decideAntigravity429 = (body: unknown): Antigravity429Decision => {
  */
 export type AntigravityFailure = CodexErrorClass & {
   cooldownSeconds?: number; // spent quota window only, and only when the server actually stated a horizon
+  retryable?: boolean; // retry eligibility is independent of the final HTTP status
+  retryAfterMs?: number;
 };
 
 // Two codes, not one: the Bridge log names them, and "the window is spent" and "slow down" are different
@@ -904,17 +906,13 @@ export const antigravity429Error = (body: unknown): { status: number; message: s
 };
 
 /*
- * The verdict rides ON the thrown Error rather than being re-derived from its message, because the message
- * CANNOT round-trip it: a 429 this layer DECLINED renders as `Antigravity API error 429: <raw upstream body>`,
- * and that body is prose we do not control — it says RESOURCE_EXHAUSTED and RATE_LIMIT_EXCEEDED too. A string
- * matcher would have to guess, and guessing "classified" stops a bounded retry that would have worked.
- *
- * String(err) is untouched by the attachment, so the retryability contract above still holds exactly.
+ * Status, retry eligibility and timing ride ON the Error. The raw message cannot distinguish a short
+ * rate limit from spent quota: both use RESOURCE_EXHAUSTED and RATE_LIMIT_EXCEEDED. Generic 429s carry
+ * their status too, while remaining eligible for bounded retries.
  */
 const FAILURE_PROPERTY = '__wispAntigravityFailure';
 
-// Read back what antigravityApiError attached: undefined for every other Provider's error, and for an
-// Antigravity 429 this layer declined to classify.
+// Read back what antigravityApiError attached; other Providers and unclassified 5xx remain undefined.
 export const antigravityFailureOf = (err: unknown): AntigravityFailure | undefined => {
   const carried = (err as Record<string, unknown> | null | undefined)?.[FAILURE_PROPERTY];
   return isObj(carried) ? (carried as AntigravityFailure) : undefined;
@@ -1142,7 +1140,7 @@ export const antigravityRequestHeaders = (accessToken: string): Record<string, s
 // the real status instead of a 502 — a 502 tells Claude Code "the server broke, retry", and the itemless-array
 // 400 (2.0.48) was retried ten times that way, the storm hiding the stable error. 5xx stays unclassified on
 // purpose: a real outage must never hide behind a client-error status the client would stop retrying. 429
-// keeps its own body classifier above (declining is how the bounded retry stays reachable).
+// carries its status separately from retry eligibility and timing below.
 const ANTIGRAVITY_CLIENT_ERRORS: Record<number, { code: string; type: string }> = {
   400: { code: 'antigravity_bad_request', type: 'invalid_request_error' },
   401: { code: 'antigravity_auth_unavailable', type: 'authentication_error' },
@@ -1150,17 +1148,30 @@ const ANTIGRAVITY_CLIENT_ERRORS: Record<number, { code: string; type: string }> 
   404: { code: 'antigravity_not_found', type: 'not_found_error' },
 };
 
-export const antigravityApiError = (status: number, body: string): Error => {
+export const antigravityApiError = (status: number, body: string, retryAfter?: string | null): Error => {
+  const detail = body.trim().slice(0, 500);
+  const message = `Antigravity API error ${status}${detail ? `: ${detail}` : ''}`;
   if (status === 429) {
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch { parsed = undefined; }
-    const failure = antigravity429Failure(parsed);
-    // #190: the verdict travels ON the Error. This is the ONE place that knows the body classified —
-    // everything downstream (the record's classify hook, the cooldown ledger) only ever sees the Error.
-    if (failure) return Object.assign(new Error(failure.message), { [FAILURE_PROPERTY]: failure });
+    const classified = antigravity429Failure(parsed);
+    const header = retryAfter?.trim() ?? '';
+    // Numeric seconds or an HTTP date. Date.parse alone accepts malformed hints such as "-1".
+    const headerMs = /^\d+(\.\d+)?$/.test(header) ? Number(header) * 1000
+      : /^[A-Za-z]{3}, /.test(header) ? Math.max(0, Date.parse(header) - Date.now()) : NaN;
+    const delays = [headerMs, parseAntigravityRetryDelayMs(parsed)].filter((ms): ms is number =>
+      ms !== undefined && Number.isFinite(ms) && ms >= 0);
+    const retryAfterMs = delays.length ? Math.max(...delays) : undefined;
+    const failure: AntigravityFailure = {
+      ...(classified ?? { status: 429, code: ANTIGRAVITY_RATE_LIMITED_CODE, type: 'rate_limit_error', message }),
+      retryable: !classified && (retryAfterMs ?? 0) < ANTIGRAVITY_INSTANT_RETRY_MS,
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    };
+    if (failure.code === ANTIGRAVITY_QUOTA_EXHAUSTED_CODE && retryAfterMs !== undefined) {
+      failure.cooldownSeconds = Math.ceil(retryAfterMs / 1000);
+    }
+    return Object.assign(new Error(failure.message), { [FAILURE_PROPERTY]: failure });
   }
-  const detail = body.trim().slice(0, 500);
-  const message = `Antigravity API error ${status}${detail ? `: ${detail}` : ''}`;
   const client = ANTIGRAVITY_CLIENT_ERRORS[status];
   if (client) {
     const failure: AntigravityFailure = { status, code: client.code, type: client.type, message };
@@ -1217,7 +1228,36 @@ const parseToolArgs = (argsJson: string): Json => {
  * THE BINDING RULE: ids are copied from the turn, never minted. A call that arrived without one stays
  * without one (the field is omitted, not filled with a hash).
  */
-export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; tools?: ToolSpec[] }): Json => {
+// Only the opted-in signed path removes instruction boundaries. Validate every other source turn
+// before empty turns disappear on the wire, and never join distinct assistant call batches.
+export const hoistAntigravityDesktopInstructions = (messages: AntigravityTurn[]): AntigravityTurn[] => {
+  const pending = new Set<string>();
+  const seen = new Set<string>();
+  const invalid = (): never => { throw new Error('Invalid Antigravity tool history: incomplete, ambiguous or interrupted result group'); };
+  for (const turn of messages) {
+    if (turn.role === 'system') {
+      if (turn.toolCalls?.length || turn.toolResults?.length || turn.images?.length || turn.documents?.length) invalid();
+      continue;
+    }
+    if (pending.size) {
+      if (turn.role !== 'user' || turn.content || turn.toolCalls?.length || turn.images?.length || turn.documents?.length || !turn.toolResults?.length) invalid();
+      for (const result of turn.toolResults!) if (!pending.delete(result.callId)) invalid();
+      continue;
+    }
+    if (turn.toolResults?.length) invalid();
+    if (turn.toolCalls?.length) {
+      if (turn.role !== 'assistant') invalid();
+      for (const call of turn.toolCalls) {
+        if (!call.id.trim() || seen.has(call.id)) invalid();
+        seen.add(call.id); pending.add(call.id);
+      }
+    }
+  }
+  if (pending.size) invalid();
+  return [...messages.filter(t => t.role === 'system'), ...messages.filter(t => t.role !== 'system')];
+};
+
+export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; tools?: ToolSpec[]; preserveSystemText?: boolean }): Json => {
   const contents: Json[] = [];
   const systemParts: Json[] = [];
 
@@ -1229,9 +1269,20 @@ export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; too
     for (const call of message.toolCalls ?? []) if (call.id) nameByCallId.set(call.id, call.name);
   }
 
-  for (const message of args.messages) {
+  for (let index = 0; index < args.messages.length; index++) {
+    const message = args.messages[index];
     if (message.role === 'system') {
-      if (message.content) systemParts.push({ text: message.content });
+      // Claude's leading billing/SDK identity blocks describe its client, not this provider or the task.
+      // Forwarding either block reproduces generic upstream 429s even on tiny tool-free requests.
+      let content = message.content;
+      if (!args.preserveSystemText) {
+        const blocks = content.split(/\r?\n\r?\n/);
+        const firstInstruction = blocks.findIndex(block => !/^x-anthropic-billing-header: [^\r\n]+$/.test(block)
+          && block !== "You are a Claude agent, built on Anthropic's Claude Agent SDK.");
+        const kept = blocks.slice(firstInstruction < 0 ? blocks.length : firstInstruction);
+        content = kept.length === blocks.length ? content : kept.join('\n\n');
+      }
+      if (content) systemParts.push({ text: content });
       continue;
     }
 
@@ -1245,7 +1296,25 @@ export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; too
       continue;
     }
 
-    const responseParts = (message.toolResults ?? []).map((result) => ({
+    let results = message.toolResults ?? [];
+    // Responses represents parallel results as separate turns. Join only a complete, unambiguous
+    // group beside its calls; inspect ORIGINAL turns so a hoisted system/empty turn stays a boundary.
+    const previous = args.messages[index - 1];
+    const calls = previous?.role === 'assistant' ? previous.toolCalls ?? [] : [];
+    const resultOnly = (turn: AntigravityTurn | undefined): boolean => !!turn && turn.role === 'user'
+      && !turn.content && !turn.images?.length && !turn.documents?.length && !turn.toolCalls?.length && !!turn.toolResults?.length;
+    if (calls.length > results.length && resultOnly(message)) {
+      const group = [...results];
+      let end = index + 1;
+      while (group.length < calls.length && resultOnly(args.messages[end])) group.push(...args.messages[end++].toolResults!);
+      const ids = new Set(calls.map(call => call.id));
+      if (group.length === calls.length && ids.size === calls.length && !ids.has('')
+        && new Set(group.map(result => result.callId)).size === calls.length && group.every(result => ids.has(result.callId))) {
+        results = group;
+        index = end - 1;
+      }
+    }
+    const responseParts = results.map((result) => ({
       functionResponse: {
         ...(result.callId ? { id: result.callId } : {}),
         name: nameByCallId.get(result.callId) ?? 'unknown',
@@ -1286,8 +1355,9 @@ export const buildAntigravityRequestBody = (args: {
   sessionId?: string;
   fallbackSessionId?: string;
   thinkingLevel?: AntigravityThinkingLevel;
+  preserveSystemText?: boolean;
 }): Json => {
-  const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools });
+  const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools, preserveSystemText: args.preserveSystemText });
   // The stable id must WIN over the fallback — it is upstream cache behaviour, not a nonce, so resolving
   // it here (rather than passing the random value straight into the envelope, whose opts.sessionId is
   // consulted FIRST) is what keeps the random value a genuine last resort.

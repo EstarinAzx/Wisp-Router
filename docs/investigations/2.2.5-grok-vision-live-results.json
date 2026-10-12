@@ -1,0 +1,256 @@
+{
+  "model": "grok-4.6",
+  "providerCalls": 8,
+  "correctResults": 8,
+  "geometry": {
+    "started": "2026-09-18T08:37:21.293Z",
+    "model": "grok-4.6",
+    "fixtureImages": [
+      {
+        "bytes": 2531,
+        "sha256": "062ffc06e27e3ce3791f5a24c2da8e68f2ed1869d7a3a80525d65d092d6750fe"
+      },
+      {
+        "bytes": 2738,
+        "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+      }
+    ],
+    "maxCalls": 6,
+    "calls": [
+      {
+        "name": "attachment-default",
+        "started": "2026-09-18T08:37:21.295Z",
+        "outgoing": [
+          {
+            "itemIndex": 0,
+            "partIndex": 0,
+            "type": "message",
+            "detail": "absent",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 395,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 512,
+          "output_tokens": 72
+        },
+        "answer": "A solid blue circle labeled B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:23.192Z"
+      },
+      {
+        "name": "attachment-original",
+        "started": "2026-09-18T08:37:23.192Z",
+        "outgoing": [
+          {
+            "itemIndex": 0,
+            "partIndex": 0,
+            "type": "message",
+            "detail": "original",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 11,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 896,
+          "output_tokens": 91
+        },
+        "answer": "A solid blue circle with the printed label B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:25.080Z"
+      },
+      {
+        "name": "tool-default",
+        "started": "2026-09-18T08:37:25.081Z",
+        "outgoing": [
+          {
+            "itemIndex": 2,
+            "partIndex": 0,
+            "type": "function_call_output",
+            "callId": "current_image",
+            "detail": "absent",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 454,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 512,
+          "output_tokens": 56
+        },
+        "answer": "A solid blue circle labeled B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:26.608Z"
+      },
+      {
+        "name": "tool-original",
+        "started": "2026-09-18T08:37:26.609Z",
+        "outgoing": [
+          {
+            "itemIndex": 2,
+            "partIndex": 0,
+            "type": "function_call_output",
+            "callId": "current_image",
+            "detail": "original",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 70,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 896,
+          "output_tokens": 47
+        },
+        "answer": "A solid blue circle labeled B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:27.946Z"
+      },
+      {
+        "name": "history-default",
+        "started": "2026-09-18T08:37:27.946Z",
+        "outgoing": [
+          {
+            "itemIndex": 0,
+            "partIndex": 0,
+            "type": "message",
+            "detail": "absent",
+            "bytes": 2531,
+            "sha256": "062ffc06e27e3ce3791f5a24c2da8e68f2ed1869d7a3a80525d65d092d6750fe"
+          },
+          {
+            "itemIndex": 4,
+            "partIndex": 0,
+            "type": "function_call_output",
+            "callId": "current_image",
+            "detail": "absent",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 582,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 512,
+          "output_tokens": 58
+        },
+        "answer": "Blue circle labeled B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:29.799Z"
+      },
+      {
+        "name": "history-original",
+        "started": "2026-09-18T08:37:29.799Z",
+        "outgoing": [
+          {
+            "itemIndex": 0,
+            "partIndex": 0,
+            "type": "message",
+            "detail": "absent",
+            "bytes": 2531,
+            "sha256": "062ffc06e27e3ce3791f5a24c2da8e68f2ed1869d7a3a80525d65d092d6750fe"
+          },
+          {
+            "itemIndex": 4,
+            "partIndex": 0,
+            "type": "function_call_output",
+            "callId": "current_image",
+            "detail": "original",
+            "bytes": 2738,
+            "sha256": "24706f1a3ce7ed6c0d68022cc0204d8ca6475ceb341ce3a84aea53238c6ac484"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 70,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 1024,
+          "output_tokens": 53
+        },
+        "answer": "A solid blue circle labeled B29.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:37:31.420Z"
+      }
+    ],
+    "credentialsLogged": false,
+    "completed": "2026-09-18T08:37:31.420Z"
+  },
+  "smallTextCrop": {
+    "started": "2026-09-18T08:38:46.488Z",
+    "model": "grok-4.6",
+    "fixtureImages": [
+      {
+        "bytes": 2531,
+        "sha256": "062ffc06e27e3ce3791f5a24c2da8e68f2ed1869d7a3a80525d65d092d6750fe"
+      },
+      {
+        "bytes": 1405,
+        "sha256": "af8df6e7062d2727ffc54657ea799b86bd1bf2280358f0f688a8a7504ee42fc1"
+      }
+    ],
+    "maxCalls": 2,
+    "calls": [
+      {
+        "name": "attachment-default",
+        "started": "2026-09-18T08:38:46.490Z",
+        "outgoing": [
+          {
+            "itemIndex": 0,
+            "partIndex": 0,
+            "type": "message",
+            "detail": "absent",
+            "bytes": 1405,
+            "sha256": "af8df6e7062d2727ffc54657ea799b86bd1bf2280358f0f688a8a7504ee42fc1"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 300,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 512,
+          "output_tokens": 127
+        },
+        "answer": "The image shows white text reading “Synthetic Q73” on a black background.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:38:49.177Z"
+      },
+      {
+        "name": "tool-default",
+        "started": "2026-09-18T08:38:49.177Z",
+        "outgoing": [
+          {
+            "itemIndex": 2,
+            "partIndex": 0,
+            "type": "function_call_output",
+            "callId": "current_image",
+            "detail": "absent",
+            "bytes": 1405,
+            "sha256": "af8df6e7062d2727ffc54657ea799b86bd1bf2280358f0f688a8a7504ee42fc1"
+          }
+        ],
+        "httpStatus": 200,
+        "usage": {
+          "input_tokens": 359,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 512,
+          "output_tokens": 89
+        },
+        "answer": "The image shows white text on a black background that reads “Synthetic Q73”.",
+        "matchesExpected": true,
+        "ended": "2026-09-18T08:38:51.510Z"
+      }
+    ],
+    "credentialsLogged": false,
+    "completed": "2026-09-18T08:38:51.510Z"
+  }
+}

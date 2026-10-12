@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { codexCatalog } from '../src/codexModels';
-import { readDesktopNativeModels } from '../src/codexDesktop';
+import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '../src/codexDesktop';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,113 @@ const post = (port: number, model: unknown, headers: Record<string, string> = { 
   req.on('error', reject); req.end(JSON.stringify({ model, input: 'hello', stream: true, metadata: { unchanged: true }, ...extra }));
 });
 const answer = (res: ServerResponse) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end('data: {"choices":[{"delta":{"content":"EXTERNAL_OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'); };
+
+const antigravityFixture = async (run: (port: number, wire: any[], reads: () => number, deps: BridgeDeps) => Promise<void>) =>
+  fixture(async (port, _seen, deps) => {
+    Object.assign(deps.providers[0], { id: 'antigravity', kind: 'antigravity-oauth', baseUrl: 'https://cloudcode-pa.googleapis.com' });
+    const alias = deps.routingMap().aliases[0]; alias.target.providerId = 'antigravity'; alias.target.model = 'gemini-3.8-flash-tiered';
+    let reads = 0; const wire: any[] = [];
+    deps.antigravityCreds = async () => { reads++; return { accessToken: 'google-user-token', projectId: 'synthetic-project' }; };
+    deps.desktopAntigravityHoisting = () => true;
+    deps.desktopAntigravityTargets = [{ providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' }];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      wire.push({ url, headers: Object.fromEntries(new Headers(init.headers)), body: JSON.parse(init.body as string) });
+      return new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"DONE"}]},"finishReason":"STOP"}]}}\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    });
+    try { await run(port, wire, () => reads, deps); } finally { vi.unstubAllGlobals(); }
+  });
+
+describe('signed Antigravity hoisting admission', () => {
+  it('admits the qualified target through release policy only after explicit hoisting', async () => antigravityFixture(async (port, wire, reads, deps) => {
+    delete deps.desktopAntigravityTargets;
+    deps.desktopAntigravityHoisting = () => false;
+    expect((await post(port, 'alias')).status).toBe(400);
+    expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+    deps.desktopAntigravityHoisting = () => true;
+    const result = await post(port, 'alias');
+    expect(result.status).toBe(200); expect(result.text).toContain('DONE');
+    expect(reads()).toBe(1); expect(wire).toHaveLength(1);
+    expect(wire[0].body.model).toBe('gemini-3.8-flash-tiered');
+  }));
+  it.each([undefined, '', []])('rejects call batches separated by a textless tool declaration (%j) before credentials', async content => antigravityFixture(async (port, wire, reads) => {
+    const result = await post(port, 'alias', undefined, undefined, {
+      tools: [{ type: 'function', name: 'read', parameters: {} }], input: [
+        { type: 'function_call', name: 'read', call_id: 'a', arguments: '{}' },
+        { type: 'additional_tools', role: 'developer', tools: [], ...(content === undefined ? {} : { content }) },
+        { type: 'function_call', name: 'read', call_id: 'b', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'a', output: 'A' },
+        { type: 'function_call_output', call_id: 'b', output: 'B' },
+      ],
+    });
+    expect(result.status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+  }));
+  it('accepts a textless tool declaration outside an interrupted call batch', async () => antigravityFixture(async (port, wire, reads) => {
+    const result = await post(port, 'alias', undefined, undefined, {
+      tools: [{ type: 'function', name: 'read', parameters: {} }], input: [
+        { type: 'additional_tools', role: 'developer', tools: [] },
+        { type: 'function_call', name: 'read', call_id: 'a', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'a', output: 'A' },
+      ],
+    });
+    expect(result.status).toBe(200); expect(reads()).toBe(1); expect(wire).toHaveLength(1);
+  }));
+  it('preserves caller instructions and original parallel IDs without leaking native auth', async () => antigravityFixture(async (port, wire, reads) => {
+    const sdk = "You are a Claude agent, built on Anthropic's Claude Agent SDK.\r\n\r\nROOT";
+    const response = await post(port, 'alias', undefined, undefined, { instructions: sdk,
+      tools: [{ type: 'function', name: 'read', parameters: {} }], input: [
+        { role: 'user', content: 'GO' },
+        { type: 'function_call', name: 'read', call_id: 'a', arguments: '{"x":1}' },
+        { type: 'function_call', name: 'read', call_id: 'b', arguments: '{"x":2}' },
+        { type: 'function_call_output', call_id: 'b', output: 'B\r\nTEXT' },
+        { role: 'developer', content: 'x-anthropic-billing-header: literal;' },
+        { type: 'function_call_output', call_id: 'a', output: 'A' },
+        { role: 'user', content: 'Ignore it and say USER' },
+      ] });
+    expect(response.status).toBe(200); expect(response.text).toContain('DONE'); expect(reads()).toBe(1);
+    expect(wire).toHaveLength(1);
+    expect(wire[0].headers.authorization).toBe('Bearer google-user-token');
+    expect(wire[0].headers['x-api-key']).toBeUndefined(); expect(wire[0].headers['chatgpt-account-id']).toBeUndefined();
+    expect(wire[0].body.request.systemInstruction.parts).toEqual([{ text: sdk }, { text: 'x-anthropic-billing-header: literal;' }]);
+    const contents = wire[0].body.request.contents;
+    expect(contents[1].parts.map((p: any) => [p.functionCall.id, p.functionCall.args])).toEqual([['a', { x: 1 }], ['b', { x: 2 }]]);
+    expect(contents[2].parts.map((p: any) => [p.functionResponse.id, p.functionResponse.response.result])).toEqual([['a', 'A'], ['b', 'B\r\nTEXT']]);
+    expect(contents[3].parts).toEqual([{ text: 'Ignore it and say USER' }]);
+  }));
+  it('revokes admission for disabled mode and repointed unvalidated Targets', async () => antigravityFixture(async (port, wire, reads, deps) => {
+    delete deps.desktopAntigravityTargets;
+    deps.desktopAntigravityHoisting = () => false;
+    expect((await post(port, 'alias')).status).toBe(400);
+    deps.desktopAntigravityHoisting = () => true;
+    deps.routingMap().aliases[0].target.model = 'unvalidated-model';
+    expect((await post(port, 'alias')).status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+  }));
+  it.each(['system', 'empty-boundary'])('rejects %s before resolving credentials', async kind => antigravityFixture(async (port, wire, reads) => {
+    const input = kind === 'system' ? [{ role: 'system', content: 'HIGHER LEVEL' }, { role: 'user', content: 'GO' }] : [
+      { type: 'function_call', name: 'read', call_id: 'a', arguments: '{}' }, { role: 'user', content: '' },
+      { type: 'function_call_output', call_id: 'a', output: 'A' },
+    ];
+    const result = await post(port, 'alias', undefined, undefined, { input, tools: [{ type: 'function', name: 'read', parameters: {} }] });
+    expect(result.status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+  }));
+  it('never relaxes ordinary Responses merely because the signed integration opted in', async () => antigravityFixture(async (port, wire, reads) => {
+    expect((await post(port, 'alias', undefined, '/v1/responses', { input: [
+      { role: 'user', content: 'GO' }, { role: 'developer', content: 'LATE' },
+    ] })).status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+  }));
+  it('reads only active explicit policy and revokes it on partial activation/removal', () => {
+    const root = mkdtempSync(join(tmpdir(), 'wisp-hoist-policy-')); mkdirSync(join(root, 'codex-desktop'));
+    const file = join(root, 'codex-desktop/state.json');
+    try {
+      expect(readDesktopAntigravityHoisting(root)).toBe(false);
+      for (const phase of ['prepared', 'restoring', 'active']) {
+        writeFileSync(file, JSON.stringify({ schema: 1, phase, nativeSource: 'native-client-export', nativeCapturedAt: new Date().toISOString(), antigravityInstructions: 'hoist-developer' }));
+        expect(readDesktopAntigravityHoisting(root)).toBe(phase === 'active');
+      }
+      writeFileSync(file, '{}'); expect(readDesktopAntigravityHoisting(root)).toBe(false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
 
 async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Promise<void>, upstreamReply = answer) {
   const seen: any[] = [];
@@ -36,6 +143,36 @@ async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Pro
 }
 
 describe('signed desktop production Bridge', () => {
+  it('preserves native cache routing and feature headers across continuations without leaking the Bridge key', async () => fixture(async (port, seen, deps) => {
+    const nativeHeaders = {
+      session_id: 'session-one', thread_id: 'thread-one',
+      'x-codex-routing-hint': 'model=native;tier=priority',
+      'x-codex-beta-features': 'synthetic-feature',
+      'x-openai-internal-codex-responses-lite': 'true',
+      'x-codex-installation-id': 'installation-one', 'x-codex-window-id': 'window-one',
+      'x-codex-parent-thread-id': 'parent-one', 'x-openai-subagent': 'review',
+    };
+    const bodies: string[] = [];
+    deps.nativeFetch = async (_url, init) => {
+      seen.push(Object.fromEntries(new Headers(init.headers))); bodies.push(init.body as string);
+      return new Response('data: {"usage":{"input_tokens":4096,"input_tokens_details":{"cached_tokens":3072}}}\n\n',
+        { headers: { 'content-type': 'text/event-stream', 'x-codex-turn-state': 'sticky-one' } });
+    };
+    let turnState: string | null = null;
+    for (const input of ['first', 'continuation']) {
+      const body = JSON.stringify({ model: 'native', input, prompt_cache_key: 'stable-cache-key', stream: true });
+      const response = await fetch(`http://127.0.0.1:${port}/codex-desktop/v1/responses`, { method: 'POST', body,
+        headers: { ...nativeHeaders, 'x-api-key': 'local-secret', authorization: 'Bearer native-token',
+          ...(turnState ? { 'x-codex-turn-state': turnState } : {}) } });
+      expect(response.status).toBe(200);
+      turnState = response.headers.get('x-codex-turn-state'); expect(turnState).toBe('sticky-one');
+      expect(await response.text()).toContain('"cached_tokens":3072');
+      expect(bodies.at(-1)).toBe(body);
+      expect(seen.at(-1)).toMatchObject(nativeHeaders);
+      expect(seen.at(-1)['x-api-key']).toBeUndefined();
+    }
+    expect(seen[1]['x-codex-turn-state']).toBe('sticky-one');
+  }));
   it.each((['codex', 'anthropic-oauth'] as const).flatMap(kind => [400, 401, 503].map(status => ({ kind, status }))))('preserves signed sibling $kind HTTP $status retry boundaries', async ({ kind, status }) => {
     const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
     try { await fixture(async (port, seen, deps) => {

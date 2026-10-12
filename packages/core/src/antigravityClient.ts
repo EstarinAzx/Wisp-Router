@@ -29,8 +29,9 @@
 import {
   AntigravityCreds, AntigravityTurn, buildAntigravityRequestBody, antigravityRequestId,
   antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityModelsUrl,
-  antigravityRequestHeaders, antigravityApiError, antigravityShouldTryNextHost, antigravityStreamEvents,
+  antigravityRequestHeaders, antigravityApiError, antigravityFailureOf, antigravityShouldTryNextHost, antigravityStreamEvents,
   parseAntigravityModels, type ToolSpec, type AntigravityThinkingLevel,
+  validateAntigravityFunctionCallPairing,
 } from './catalog';
 // TYPE only, exactly as antigravity.ts imports it: erased at runtime, so bridge -> catalog stays the sole
 // runtime edge and the module graph never cycles (the xai.ts pattern).
@@ -40,6 +41,7 @@ import { sseBlocks } from './codexClient';
 type AntigravityRequestArgs = {
   rejectRedirects?: boolean;
   strictCompletion?: boolean;
+  preserveSystemText?: boolean;
   creds: AntigravityCreds;
   baseUrl: string;
   model: string;
@@ -49,6 +51,7 @@ type AntigravityRequestArgs = {
   // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
   signal?: AbortSignal;
+  log?: (message: string) => void;
 };
 
 // 16 random hex chars — the injected randomness antigravityFallbackSessionId folds into a session id.
@@ -59,8 +62,8 @@ const randomHex = (): string =>
 
 /*
  * POST one conversation and return the raw Response, walking the host chain: daily, then production.
- * Three conditions move to the next host — a transport error, a 429, and the capacity 503 — and on the
- * LAST host each of them surfaces instead. The body is built ONCE: re-minting the request id per host
+ * Transport errors, untimed 429s and capacity 503s move to the next host; timed 429s surface so the Bridge
+ * can honor their delay. The body is built ONCE: re-minting the request id per host
  * would make the two attempts look like different turns to the upstream.
  *
  * Shared by antigravityStream and antigravityRequest.
@@ -76,7 +79,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     throw new Error('Antigravity API error 400: no Cloud Code project for this account — sign out and sign in again.');
   }
 
-  const body = JSON.stringify(buildAntigravityRequestBody({
+  const request = buildAntigravityRequestBody({
     model: args.model,
     messages: args.messages,
     tools: args.tools,
@@ -84,7 +87,13 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     requestId: antigravityRequestId(crypto.randomUUID()),
     fallbackSessionId: antigravityFallbackSessionId(randomHex()),
     thinkingLevel: args.thinkingLevel,
-  }));
+    preserveSystemText: args.preserveSystemText,
+  });
+  if (args.strictCompletion) {
+    const issue = validateAntigravityFunctionCallPairing(request);
+    if (issue) throw new Error(`Invalid Antigravity tool history: ${issue}`);
+  }
+  const body = JSON.stringify(request);
   const headers = antigravityRequestHeaders(token);
   const hosts = antigravityHostChain(args.baseUrl);
 
@@ -98,10 +107,15 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
       if (isLast || args.signal?.aborted) throw err;
       continue;
     }
+    // Keep both host outcomes visible; the final error otherwise hides the primary failure.
+    args.log?.(`[bridge] antigravity upstream ${new URL(host).hostname} status=${res.status} requestBytes=${Buffer.byteLength(body)} contents=${request.request.contents?.length ?? 0} tools=${args.tools?.length ?? 0} thinking=${args.thinkingLevel ?? 'default'}`);
     if (res.ok) return res;
     const errBody = await res.text().catch(() => '');
+    const error = antigravityApiError(res.status, errBody, res.headers.get('retry-after'));
+    // A timed 429 goes back to the Bridge's bounded retry; immediately walking hosts would ignore its wait.
+    if (antigravityFailureOf(error)?.retryAfterMs !== undefined) throw error;
     if (!isLast && antigravityShouldTryNextHost(res.status, errBody)) continue;
-    throw antigravityApiError(res.status, errBody);
+    throw error;
   }
   // Unreachable: antigravityHostChain never answers empty. The throw is the type-level restatement.
   throw new Error('Antigravity API error 503: no Antigravity host available');
@@ -133,7 +147,7 @@ export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: 
       continue;
     }
     if (!res.ok) {
-      lastError = antigravityApiError(res.status, await res.text().catch(() => ''));
+      lastError = antigravityApiError(res.status, await res.text().catch(() => ''), res.headers.get('retry-after'));
       continue;
     }
     return parseAntigravityModels(await res.json().catch(() => undefined));

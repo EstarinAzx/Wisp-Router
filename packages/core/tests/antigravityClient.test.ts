@@ -81,6 +81,26 @@ afterEach(() => vi.unstubAllGlobals());
 // ----------------------------- The request the client actually sends ----------------------------- //
 
 describe('antigravityStream — the outbound request', () => {
+  it('refuses incomplete parallel history locally on the strict Responses path', async () => {
+    const calls = stubFetch([sseResponse(TEXT_SSE)]);
+    await expect(collect(antigravityStream({ ...turn(), strictCompletion: true, messages: [
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read', argsJson: '{}' }, { id: 'b', name: 'read', argsJson: '{}' }] },
+      { role: 'user', content: '', toolResults: [{ callId: 'a', content: 'first' }] },
+    ] }))).rejects.toThrow(/functionResponse.*pending/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sends complete parallel results as one paired group on the strict Responses path', async () => {
+    const calls = stubFetch([sseResponse(TEXT_SSE)]);
+    await collect(antigravityStream({ ...turn(), strictCompletion: true, messages: [
+      { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read', argsJson: '{}' }, { id: 'b', name: 'read', argsJson: '{}' }] },
+      { role: 'user', content: '', toolResults: [{ callId: 'b', content: 'second' }] },
+      { role: 'user', content: '', toolResults: [{ callId: 'a', content: 'first' }] },
+    ] }));
+    const body = JSON.parse(String(calls[0].init.body));
+    expect(body.request.contents[1].parts.map((p: any) => p.functionResponse.id)).toEqual(['a', 'b']);
+  });
+
   it('opens the daily host on the streaming path, with the SSE flag', async () => {
     const calls = stubFetch([sseResponse(TEXT_SSE)]);
     await collect(antigravityStream(turn()));
@@ -229,6 +249,17 @@ describe('antigravityStream — the host chain', () => {
     const calls = stubFetch([capacity503(), capacity503()]);
     await expect(collect(antigravityStream(turn()))).rejects.toThrow(/Antigravity API error 503/);
     expect(calls).toHaveLength(2);
+  });
+
+  it('logs each failed host without exposing credentials or conversation text', async () => {
+    stubFetch([capacity503(), new Response('rate limited', { status: 429 })]);
+    const lines: string[] = [];
+    await expect(collect(antigravityStream({ ...turn(), log: line => lines.push(line) })))
+      .rejects.toThrow(/Antigravity API error 429/);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('daily-cloudcode-pa.googleapis.com status=503');
+    expect(lines[1]).toContain('cloudcode-pa.googleapis.com status=429');
+    expect(lines.join('\n')).not.toMatch(/test-token|example-project-1|weather in Paris/);
   });
 
   // Re-minting the request id per host would make one turn look like two to the upstream.

@@ -1,4 +1,4 @@
-import { readDesktopNativeModels } from '@wisp/core';
+import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '@wisp/core';
 // ---------------- bridge.ts — the TUI's Bridge host: engine wiring over the ~/.wisp store ---------------- //
 
 /*
@@ -64,6 +64,7 @@ export const createTuiBridge = (log: (message: string) => void) => {
   let loggingStarted = false;
   return createBridgeServer({
     desktopNativeModels: readDesktopNativeModels,
+    desktopAntigravityHoisting: readDesktopAntigravityHoisting,
     providers: PROVIDERS,
     modelMap: () => home.readConfig().models ?? {},
     customBaseUrl: () => home.readConfig().customBaseUrl ?? '',
