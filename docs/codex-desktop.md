@@ -1,5 +1,7 @@
 # Signed-in Codex desktop integration
 
+**Experimental:** the ChatGPT Desktop (Codex) bridge is available in Wisp 2.2.5. Grok and the qualified Antigravity target have passed limited Desktop checks; compatibility with every model, tool or future Desktop release is not established. See the [README preview](../README.md#chatgpt-desktop-codex-bridge--experimental).
+
 Terminal/npm **2.2.5** and companion VSIX **1.14.2** provide signed Desktop **protocol 5**, native voice signaling and qualified opt-in Antigravity routing. Native models retain their capabilities and separate sign-in. Update both setup and serving Bridge before enabling or refreshing; older protocols are refused even on repeated enable/refresh. Slot is unchanged.
 
 An existing protocol-3 configuration needs `disable` then `enable` to install the voice settings; `refresh` reports this explicitly. Coordinate this migration around active clients and keep the current working Bridge running until a handover is arranged. The user confirmed live Desktop voice and completed bounded Antigravity editing/tool/follow-up acceptance. See the [release notes](releases/v2.2.5.md) for delivery and verification boundaries.

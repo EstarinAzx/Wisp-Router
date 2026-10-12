@@ -29,18 +29,32 @@ Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, y
 
 - **VS Code** — providers show up as native models in Copilot's **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker, with streaming, tool calling, vision, and live per-model context windows.
 - **Claude Code** — the **Bridge** exposes OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`; `claude-wisp` launches Claude Code already wired to it.
-- **Native Codex** — terminal **2.2.5** provides reversible `wisp codex-desktop` setup and `/gpt-desktop on|off` for signed-in Desktop routing; companion VSIX **1.14.2** hosts the same protocol-5 Bridge. Includes native voice signaling and qualified opt-in Antigravity `gemini-3.8-flash-tiered` support. [Desktop setup, tradeoffs and rollback](docs/codex-desktop.md). The existing [codex-wisp launcher](docs/codex-wisp.md) remains available. Grok and the qualified Antigravity target have passed bounded Desktop checks; other targets and Traycer GUI integration remain **NOT VERIFIED**.
+- **ChatGPT Desktop (Codex) — experimental** — the new Desktop bridge puts Wisp aliases alongside native models in the desktop picker, with native sign-in and voice support. See the [Desktop preview and setup](#chatgpt-desktop-codex-bridge--experimental). The [codex-wisp launcher](docs/codex-wisp.md) is also available for the native Codex CLI.
 - **Terminal** — the **Wisp TUI** manages providers, keys, OAuth sign-ins, and routing, and hosts the Bridge headlessly (`wisp serve`).
 
 The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
 
 ## Bridge in the TUI
 
-`/bridge` starts the local endpoint. OpenAI + Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it:
+`/bridge` starts the local endpoint or shows the running Bridge. The panel lists the OpenAI and Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it. It also includes Slot plugin and Advisor guidance.
 
 <p align="center">
-  <img src="docs/bridge-tui.png" alt="Wisp TUI Bridge panel — bridge up on port 41184" width="720">
+  <img src="docs/bridge-tui.png" alt="Wisp 2.2.5 Bridge panel on port 41184, with the access secret redacted, Slot plugin instructions and Advisor guidance" width="960">
 </p>
+
+Press **Esc** to close the panel while the Bridge keeps running. Use **`/bridge off`** to stop it, or `wisp serve` to host it without the TUI. The access secret is hidden in this screenshot; keep yours private.
+
+## ChatGPT Desktop (Codex) bridge — experimental
+
+Wisp now brings your configured model aliases into the signed-in Desktop model picker. The screenshot shows **Grok 4.7** selected through a Wisp Alias alongside native Codex models. Native model names keep their own capabilities and ChatGPT sign-in; external aliases use the Provider credentials configured in Wisp.
+
+<p align="center">
+  <img src="docs/chatgpt-desktop-model-picker.png" alt="ChatGPT Desktop Codex model picker with native GPT models and the Grok 4.7 Wisp Alias selected" width="960">
+</p>
+
+**Experimental:** Grok and the qualified Antigravity `gemini-3.8-flash-tiered` target have passed limited Desktop checks. Other targets and Traycer GUI integration remain unverified. Native voice uses your existing ChatGPT sign-in and speech service; the selected Wisp model handles the text and tool turns.
+
+Start the Bridge, then use **`/gpt-desktop on`** in the Wisp TUI and restart Desktop. **`/gpt-desktop off`** restores Wisp-owned native settings; restart Desktop again afterward. These commands leave the Bridge running state unchanged. The `on` shortcut enables Antigravity compatibility, which makes developer notes global and loses their original placement and temporal scope. For strict instruction handling, use `wisp codex-desktop enable --antigravity-instructions=strict` instead. Read the [setup, supported routes and rollback guide](docs/codex-desktop.md) before enabling.
 
 ## Routing aliases
 
@@ -83,7 +97,7 @@ wisp serve             # headless Bridge (no UI, Ctrl+C stops)
 claude-wisp            # launch Claude Code routed through the Bridge
 ```
 
-**2.2.5** provides `wisp codex-desktop enable|status|refresh|disable` and TUI `/gpt-desktop on|off` for persistent
+**Experimental Desktop bridge:** terminal **2.2.5** provides `wisp codex-desktop enable|status|refresh|disable` and TUI `/gpt-desktop on|off` for persistent
 signed-in Codex configuration. It needs a 2.2.5 Bridge or companion VSIX **1.14.2** and an
 independently installed native Codex CLI. Keep the Bridge running and restart Codex after enable,
 refresh or disable. Existing installations remain unchanged until explicitly updated. See [desktop setup and rollback](docs/codex-desktop.md).
@@ -113,7 +127,7 @@ The skill activates when you ask for a subagent on a model the Agent tool cannot
 
 - **13 built-in providers + Custom**, in four kinds: API-key (OpenAI-compatible), **Codex** (ChatGPT OAuth, Responses API), **Anthropic** (Claude.ai OAuth, Messages API), and **Grok** (xAI OAuth, Responses API). Grok ≠ the API-key **Groq** row.
 - **First-class in the Copilot harness** — streaming, tool calling (which is what makes a model selectable in Agent/Edit modes), vision attachments, a reasoning **Effort** knob, and live context windows from [models.dev](https://models.dev).
-- **Bridge** — a local (`127.0.0.1`-only) endpoint guarded by a generated secret, speaking both the OpenAI and Anthropic dialects, so external tools run on your providers.
+- **Bridge** — a local (`127.0.0.1`-only) endpoint guarded by a generated secret, supporting OpenAI Chat Completions, Anthropic Messages, and Codex Responses. Desktop routing is experimental.
 - **Routing map** — pin Claude Code's `opus` / `sonnet` / `haiku` / `fable` model families to any backend, or invent **aliases** (`/model sol`) pointing at exact provider+model targets; an alias-only mode keeps the `/model` picker clean.
 - **Inquire** (VS Code) — inline natural-language code edits: the model returns SEARCH/REPLACE blocks, applied as an accept/reject diff, fail-safe.
 - **One shared home** — both faces read `~/.wisp/` (`config.json` + owner-only `auth.json`); keys and tokens never live in VS Code settings.
@@ -132,7 +146,7 @@ Bun-workspaces monorepo — three packages, one root `bun.lock`.
 
 ```sh
 bun install        # root — one lockfile for all packages
-bun run test       # 434 Vitest tests (packages/core/tests)
+bun run test       # core Vitest suite (packages/core/tests)
 bun run compile    # typecheck + bundle + webview build (packages/vscode)
 ```
 
