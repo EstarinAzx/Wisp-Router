@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>BYOK model router — run the model access you already pay for, everywhere you code.</strong>
+  <strong>Your models, in the coding tools you already use.</strong>
 </p>
 
 <p align="center">
@@ -25,134 +25,179 @@
 
 ## What is Wisp
 
-Wisp routes your own model backends — your **ChatGPT (Codex) subscription**, your **Claude.ai subscription** (both via OAuth, no API key), or any OpenAI-compatible API key (OpenAI, Groq, Mistral, OpenRouter, Ollama, and more) — into the tools you already code with:
+Bring your ChatGPT or Claude subscription, API keys, or compatible local models to the tools you already code with. **Wisp lets you choose which model answers while you keep your existing workflow.**
 
-- **VS Code** — providers show up as native models in Copilot's **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker, with streaming, tool calling, vision, and live per-model context windows.
-- **Claude Code** — the **Bridge** exposes OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`; `claude-wisp` launches Claude Code already wired to it.
-- **ChatGPT Desktop (Codex) — experimental** — the new Desktop bridge puts Wisp aliases alongside native models in the desktop picker, with native sign-in and voice support. See the [Desktop preview and setup](#chatgpt-desktop-codex-bridge--experimental). The [codex-wisp launcher](docs/codex-wisp.md) is also available for the native Codex CLI.
-- **Terminal** — the **Wisp TUI** manages providers, keys, OAuth sign-ins, and routing, and hosts the Bridge headlessly (`wisp serve`).
+Sign in with your **ChatGPT (Codex)** or **Claude.ai** account, or add a key for an OpenAI-compatible provider such as OpenAI, Groq, Mistral, OpenRouter, or Ollama. Manage those connections in one place, then use them where you work:
 
-The OAuth part is the reason Wisp exists: VS Code's built-in "add a custom model" BYOK stops at static API keys — it can't sign in to a ChatGPT or Claude.ai subscription. Wisp can.
+| Your tool | What Wisp adds |
+| --- | --- |
+| **VS Code** | Your models in Copilot Chat, Agent mode, and the `Ctrl+I` picker, with streaming, tools, and images where supported. |
+| **Claude Code** | Choose your backend through the local Bridge and launch with `claude-wisp`. |
+| **ChatGPT Desktop (Codex)** | Wisp aliases alongside native models, with native sign-in and voice support. **Experimental.** |
+| **Terminal** | A terminal interface for providers, sign-ins, model selection, and routing, plus a Bridge you can run without the UI. |
+
+Wisp supports subscription sign-in as well as API keys. Your existing model access stays yours; Wisp helps you use it in more places.
+
+## Quick start
+
+The quickest way to try the Bridge is with Claude Code. You'll need **Node.js** for the npm install and an existing **Claude Code** installation.
+
+```sh
+npm install -g wisp-router
+wisp
+```
+
+Inside Wisp:
+
+1. Open **`/providers`**, choose a provider, and sign in or add its API key.
+2. Open **`/routing`**, choose a provider and model for a new alias, and give it a short name such as `grok` or `sol`.
+3. Run **`/bridge`** and leave Wisp running.
+
+In another terminal, start Claude Code through Wisp:
+
+```sh
+claude-wisp
+```
+
+Use Claude Code's **`/model`** picker to select your alias under **From gateway**. You're ready to work.
+
+Prefer VS Code? [Install the extension](#vs-code-extension) and use your models directly in its chat and agent views. For Desktop, see the [experimental bridge setup](#chatgpt-desktop-codex-bridge--experimental) below.
 
 ## Bridge in the TUI
 
-`/bridge` starts the local endpoint or shows the running Bridge. The panel lists the OpenAI and Anthropic doors, the generated access secret, and `claude-wisp` to launch Claude Code already wired to it. It also includes Slot plugin and Advisor guidance.
+The **Bridge** is the local connection between Wisp and your coding tools. Run **`/bridge`** to start it or reopen its panel. You'll see the connection addresses, access secret, and the command for launching Claude Code, plus guidance for the Slot plugin and Advisor.
 
 <p align="center">
-  <img src="docs/bridge-tui.png" alt="Wisp 2.2.5 Bridge panel on port 41184, with the access secret redacted, Slot plugin instructions and Advisor guidance" width="960">
+  <img src="docs/Screenshot%202026-10-13%20113631.png" alt="Wisp 2.2.5 Bridge panel on port 41184, with the access secret redacted, Slot plugin instructions and Advisor guidance" width="960">
 </p>
 
-Press **Esc** to close the panel while the Bridge keeps running. Use **`/bridge off`** to stop it, or `wisp serve` to host it without the TUI. The access secret is hidden in this screenshot; keep yours private.
+Press **Esc** to close the panel and keep the Bridge running. **`/bridge off`** stops it; quitting Wisp stops it too. Keep your access secret private; the one in this screenshot is redacted.
+
+If you prefer a terminal without the interface, run **`wisp serve`** instead. It hosts the same Bridge until you press **Ctrl+C**.
 
 ## ChatGPT Desktop (Codex) bridge — experimental
 
-Wisp now brings your configured model aliases into the signed-in Desktop model picker. The screenshot shows **Grok 4.7** selected through a Wisp Alias alongside native Codex models. Native model names keep their own capabilities and ChatGPT sign-in; external aliases use the Provider credentials configured in Wisp.
+Wisp now brings your configured models into the signed-in Desktop model picker. Keep your native Codex models and add aliases for external models alongside them. Here's **Grok 4.7** selected through Wisp:
 
 <p align="center">
   <img src="docs/chatgpt-desktop-model-picker.png" alt="ChatGPT Desktop Codex model picker with native GPT models and the Grok 4.7 Wisp Alias selected" width="960">
 </p>
 
-**Experimental:** Grok and the qualified Antigravity `gemini-3.8-flash-tiered` target have passed limited Desktop checks. Other targets and Traycer GUI integration remain unverified. Native voice uses your existing ChatGPT sign-in and speech service; the selected Wisp model handles the text and tool turns.
+**This integration is experimental.** Grok and the Antigravity `gemini-3.8-flash-tiered` target have passed limited Desktop checks. Other targets and Traycer GUI integration remain unverified. Each external model's tools and capabilities depend on its provider and Wisp's adapter.
 
-Start the Bridge, then use **`/gpt-desktop on`** in the Wisp TUI and restart Desktop. **`/gpt-desktop off`** restores Wisp-owned native settings; restart Desktop again afterward. These commands leave the Bridge running state unchanged. The `on` shortcut enables Antigravity compatibility, which makes developer notes global and loses their original placement and temporal scope. For strict instruction handling, use `wisp codex-desktop enable --antigravity-instructions=strict` instead. Read the [setup, supported routes and rollback guide](docs/codex-desktop.md) before enabling.
+Native models keep their capabilities and ChatGPT sign-in. Voice uses your existing ChatGPT sign-in and speech service, while the selected Wisp model handles the text and tool turns.
+
+<details>
+<summary><strong>Try the Desktop bridge</strong></summary>
+
+Use terminal **2.2.5** with a matching Bridge, or companion VSIX **1.14.2** when VS Code hosts it. You'll also need an independently installed native Codex CLI. Read the [Desktop setup and rollback guide](docs/codex-desktop.md) first, especially if you already have custom Codex configuration or other clients sharing `CODEX_HOME`.
+
+With the Bridge running, use **`/gpt-desktop on`** in Wisp and restart Desktop. To turn routing off, use **`/gpt-desktop off`** and restart Desktop again. Neither command starts or stops the Bridge. Use fresh chats when switching to external models.
+
+The `on` shortcut enables Antigravity compatibility: developer notes become global instructions, losing their original placement and temporal scope. For strict instruction handling, use **`wisp codex-desktop enable --antigravity-instructions=strict`** instead; Antigravity is excluded in that mode.
+
+The setup guide covers supported routes, upgrades, model refresh, and restoring your native settings. The [codex-wisp launcher](docs/codex-wisp.md) is also available for the native Codex CLI.
+
+</details>
 
 ## Routing aliases
 
-Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+model targets. Edit the map with the **`/routing`** command in the TUI, or non-interactively via the `wisp routing` CLI (`wisp routing` shows the map, `--json` for scripts; `set`/`unset` edit a row). Same list lands in Claude Code's model picker as **From gateway**:
+Give your models names you can remember. An **alias** such as `sol`, `terra`, or `grok` points to a specific provider and model. Create or change aliases with **`/routing`** in Wisp, then select them in Claude Code's **From gateway** model list.
 
 <p align="center">
-  <img src="docs/routing-tui.png" alt="Wisp TUI Routing — custom aliases" width="720">
+  <img src="docs/routing-tui.png" alt="Wisp TUI Routing showing example model aliases" width="720">
 </p>
 
 <p align="center">
   <img src="docs/claude-model-picker.png" alt="Claude Code model picker showing Wisp gateway aliases" width="720">
 </p>
 
+Once selected, the alias is the model you work with in your session:
+
 <p align="center">
-  <img src="docs/claude-wisp-session.png" alt="Claude Code session on a Wisp gateway model (grok-4.5)" width="720">
+  <img src="docs/claude-wisp-session.png" alt="Claude Code session using the grok alias through Wisp" width="720">
 </p>
 
-## Codex model discovery
-
-Wisp reads the signed-in Codex account's model catalogue, including new names and variants. The same
-metadata supplies reasoning choices, image support and context windows. Discovery refreshes on use
-after 15 minutes; the last successful account-specific list is saved for temporary outages.
-
-Use `wisp models codex --refresh`, **Refresh models** in the terminal picker, or the extension's refresh
-button to check immediately. Manual model entry remains available. Wisp does not require a Codex CLI
-installation: it reads OpenAI's published package version as metadata for the discovery request.
-
-Claude Code's `max` effort passes through as `max` when the selected Codex model supports it; an
-unsupported effort uses that model's advertised default. Codex's **Ultra** mode adds multi-agent
-orchestration and is not accepted as a Responses reasoning value, so Wisp does not offer it as an effort.
+Prefer scripts? **`wisp routing`** shows the map, **`--json`** returns it for scripts, and **`set`** / **`unset`** edit a row. You can also route Claude Code's `opus`, `sonnet`, `haiku`, and `fable` families to the backend you choose.
 
 ## Install
 
 ### TUI + Bridge + Claude Code launcher (npm)
 
 ```sh
-npm i -g wisp-router   # npm shims require Node.js; compiled binaries need no Bun
-wisp                   # the TUI: providers, keys, sign-ins, routing, /bridge
-wisp serve             # headless Bridge (no UI, Ctrl+C stops)
-claude-wisp            # launch Claude Code routed through the Bridge
+npm install -g wisp-router
+wisp                   # manage providers, models, and routing
+wisp serve             # run the Bridge without the interface
+claude-wisp            # launch Claude Code through a running Bridge
 ```
 
-**Experimental Desktop bridge:** terminal **2.2.5** provides `wisp codex-desktop enable|status|refresh|disable` and TUI `/gpt-desktop on|off` for persistent
-signed-in Codex configuration. It needs a 2.2.5 Bridge or companion VSIX **1.14.2** and an
-independently installed native Codex CLI. Keep the Bridge running and restart Codex after enable,
-refresh or disable. Existing installations remain unchanged until explicitly updated. See [desktop setup and rollback](docs/codex-desktop.md).
-
-Desktop integration requires native-mode discovery and protocol 5. Native model names retain their full
-capabilities and native sign-in, even when shared routes override them. Use distinct Aliases
-for external desktop models. Antigravity `gemini-3.8-flash-tiered` requires explicit compatibility: developer notes apply globally and lose their original placement/temporal scope. Strict mode and other Antigravity targets remain excluded. Stored routes and other clients remain unchanged. Alias
-refresh uses the saved native-client view, while native/account changes require disable/discover/enable.
-Pause other clients sharing CODEX_HOME during setup and inspect disable's model/effort notices.
+Use either `/bridge` in the TUI or `wisp serve` to host the Bridge. You only need one running host. The npm commands need Node.js; the compiled Wisp binaries do not need Bun. Standalone binaries for **Windows, macOS, and Linux** are available from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases).
 
 ### VS Code extension
 
-Not on the Marketplace — download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then **Extensions → ⋯ → Install from VSIX…**. Full walkthrough (quickstart, providers, Bridge, security) in the [extension README](packages/vscode/README.md).
+Download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then open **Extensions → ⋯ → Install from VSIX…** in VS Code. The extension is not on the Marketplace yet.
+
+The [extension guide](packages/vscode/README.md) walks you through connecting providers, choosing models, using the Bridge, and making inline edits with Inquire. Requires **VS Code 1.104 or newer**.
 
 ### Slot skill (Claude Code plugin)
 
-Teaches a bridged Claude Code session to run subagents on any Wisp Target: temporarily rebind a sacrificial Claude family route (the **Slot**), spawn the Agent tool through it, and restore the route safely afterwards — with a lease file guarding against crashes and early restores. Needs wisp-router ≥ 2.0.11 (`wisp routing`). Inside Claude Code:
+Want Claude Code to use a different Wisp model for a subagent? The **Slot plugin** teaches it how to temporarily route a Claude model family to that model and restore the original route afterward. It also adds Wisp awareness to your session.
 
-```
+Install it inside Claude Code:
+
+```text
 /plugin marketplace add EstarinAzx/Wisp-Router
 /plugin install wisp-slot@wisp-router
 ```
 
-The skill activates when you ask for a subagent on a model the Agent tool cannot name, e.g. "run a subagent on gpt-5.6-sol". Source: [`plugins/slot`](plugins/slot).
+Then ask for a subagent on the model you want, for example, "run a subagent on gpt-5.6-sol." Requires **wisp-router 2.0.24 or newer**. See the [plugin guide](plugins/slot) for the workflow and routing safeguards.
 
 ## Highlights
 
-- **13 built-in providers + Custom**, in four kinds: API-key (OpenAI-compatible), **Codex** (ChatGPT OAuth, Responses API), **Anthropic** (Claude.ai OAuth, Messages API), and **Grok** (xAI OAuth, Responses API). Grok ≠ the API-key **Groq** row.
-- **First-class in the Copilot harness** — streaming, tool calling (which is what makes a model selectable in Agent/Edit modes), vision attachments, a reasoning **Effort** knob, and live context windows from [models.dev](https://models.dev).
-- **Bridge** — a local (`127.0.0.1`-only) endpoint guarded by a generated secret, supporting OpenAI Chat Completions, Anthropic Messages, and Codex Responses. Desktop routing is experimental.
-- **Routing map** — pin Claude Code's `opus` / `sonnet` / `haiku` / `fable` model families to any backend, or invent **aliases** (`/model sol`) pointing at exact provider+model targets; an alias-only mode keeps the `/model` picker clean.
-- **Inquire** (VS Code) — inline natural-language code edits: the model returns SEARCH/REPLACE blocks, applied as an accept/reject diff, fail-safe.
-- **One shared home** — both faces read `~/.wisp/` (`config.json` + owner-only `auth.json`); keys and tokens never live in VS Code settings.
+- **Use the access you already have.** Connect a subscription account, an API-key provider, or a compatible local endpoint. Grok (xAI) and Groq are separate providers.
+- **Choose models where you work.** Use native VS Code chat and agent controls, Claude Code's model picker, or the experimental Desktop integration.
+- **Keep useful model features.** Streaming, tool calling, images, reasoning effort, and context windows follow the selected model's supported capabilities.
+- **Make inline edits in VS Code.** Inquire turns a natural-language request into a diff you can accept or reject.
+- **Manage everything in one place.** The terminal and extension share `~/.wisp/`. API keys and tokens live in its owner-only `auth.json`, not VS Code settings.
+- **Connect other compatible tools.** The secret-protected Bridge listens only on `127.0.0.1` and supports OpenAI Chat Completions, Anthropic Messages, and a native Codex subset of Responses.
+
+## Codex model discovery
+
+Wisp reads the model catalogue available to your signed-in Codex account, including new names, reasoning choices, image support, and context windows. It refreshes on use after 15 minutes and keeps the last successful account-specific list for temporary outages.
+
+To refresh now, run **`wisp models codex --refresh`**, choose **Refresh models** in the terminal picker, or use the extension's refresh button. You can also enter a model manually.
+
+This provider discovery does not require an installed Codex CLI; Wisp reads OpenAI's published package version as request metadata. The Desktop integration has its own native CLI requirement, described in its setup guide.
+
+Claude Code's `max` effort passes through when the selected Codex model supports it; otherwise Wisp uses the model's advertised default. **Ultra** is Codex orchestration, not a Responses reasoning value, so it is not offered as a Wisp provider effort. Native Desktop choices are preserved separately.
 
 ## Repository layout
 
-Bun-workspaces monorepo — three packages, one root `bun.lock`.
+Wisp is a Bun-workspaces monorepo with three packages and one root `bun.lock`:
 
-| Package | What |
-|---|---|
-| [`packages/core`](packages/core) | The engine: Provider catalog, routing map, Bridge protocol + server, OAuth managers and clients, the `~/.wisp` home store. vscode-free, private, never published — each face bundles it at build time. Tests live in [`packages/core/tests`](packages/core/tests). |
-| [`packages/vscode`](packages/vscode) | The VS Code extension ([README](packages/vscode/README.md)): native chat provider, side panel (Preact + Tailwind), Inquire, Bridge host. |
-| [`packages/tui`](packages/tui) | The Wisp TUI (opentui + React on Bun), headless Bridge, `claude-wisp` and `codex-wisp` launchers. Ships on npm as [`wisp-router`](https://www.npmjs.com/package/wisp-router). |
+| Package | What you'll find |
+| --- | --- |
+| [`packages/core`](packages/core) | Shared provider, routing, Bridge, OAuth, and storage code. Bundled into each app; not published separately. [Core tests](packages/core/tests). |
+| [`packages/vscode`](packages/vscode) | VS Code chat integration, provider panel, Inquire, and a Bridge host. |
+| [`packages/tui`](packages/tui) | The terminal interface, headless Bridge, and `claude-wisp` / `codex-wisp` launchers. Published as [`wisp-router`](https://www.npmjs.com/package/wisp-router). |
 
 ## Development
 
+Want to explore or contribute? Start at the repository root:
+
 ```sh
-bun install        # root — one lockfile for all packages
-bun run test       # core Vitest suite (packages/core/tests)
-bun run compile    # typecheck + bundle + webview build (packages/vscode)
+bun install
+bun run test       # core Vitest suite
+bun run compile    # extension typecheck, bundle, and webview build
 ```
 
-- **Extension:** press **F5** → Extension Development Host (the Wisp icon is in *that* window's activity bar). Package a `.vsix` with `bun run package` in `packages/vscode`.
-- **TUI:** `cd packages/tui && bun run dev`. It writes the real `~/.wisp` — set `WISP_HOME` to sandbox.
+- **Extension:** press **F5** to open an Extension Development Host. Look for Wisp in that window's activity bar. Run `bun run package` in `packages/vscode` to build a `.vsix`.
+- **TUI:** run `bun run dev` in `packages/tui`. Set `WISP_HOME` to a separate directory when experimenting; otherwise it uses your real `~/.wisp` configuration.
+
+Found a bug or have an idea? [Open an issue](https://github.com/EstarinAzx/Wisp-Router/issues) and tell us which tool, provider, and Wisp version you're using.
 
 ## Releases
 
-Tag `v<version>` (must equal the version in `packages/tui/package.json`) and push — the `Release` workflow compiles binaries for win32-x64 / darwin-arm64 / darwin-x64 / linux-x64 via `bun build --compile`, attaches them to a GitHub release, and publishes `wisp-router` (thin shell + platform packages, with a GitHub-release download fallback) to npm.
+For users, [GitHub Releases](https://github.com/EstarinAzx/Wisp-Router/releases) has the standalone binaries and VS Code extension; [npm](https://www.npmjs.com/package/wisp-router) provides the terminal install.
+
+For maintainers, tag `v<version>` matching `packages/tui/package.json` and push. The Release workflow builds Windows x64, macOS arm64/x64, and Linux x64 binaries, attaches them to the release, and publishes the npm shell and platform packages. The npm shell can fall back to the matching GitHub binary download.
