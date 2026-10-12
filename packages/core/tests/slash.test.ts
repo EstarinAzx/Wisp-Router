@@ -69,6 +69,9 @@ describe('suggestSlash — palette filter', () => {
 });
 
 describe('SLASH_COMMANDS — the real palette', () => {
+  it('completes the Desktop toggle into its on/off argument position', () => {
+    expect(completeSlash('/gpt-d', 0)).toBe('/gpt-desktop ');
+  });
   it('carries the MVP trio', () => {
     const names = SLASH_COMMANDS.map((c) => c.name);
     for (const n of ['providers', 'key', 'model']) expect(names).toContain(n);

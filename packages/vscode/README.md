@@ -1,8 +1,8 @@
 # Wisp
 
-**Companion 1.14.1:** the extension-hosted Bridge implements terminal 2.2.1's signed desktop protocol 3. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Use distinct Aliases for external desktop models; other clients retain their existing routes. Configuration, refresh and rollback belong to `wisp codex-desktop`. Install this VSIX and reload the extension host before using its updated Bridge. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
+**Companion 1.14.2:** the extension-hosted Bridge implements terminal 2.2.5's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 
-Update the terminal setup command and serving Bridge together; protocol-2 hosts are refused. Antigravity Aliases remain excluded. Native context limits still apply even when a larger context preference is configured. Grok's earlier desktop acceptance used the standalone Bridge; installed VS Code extension-host behavior remains a separate verification boundary. Slot is unchanged.
+Update the terminal setup command and serving Bridge together; older protocols are refused. A protocol-3 setup needs journaled disable then enable for voice settings. Only Antigravity `gemini-3.8-flash-tiered` is qualified under explicit compatibility: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Strict mode and other Antigravity targets remain excluded. Native context limits still apply. Desktop qualification used the standalone Bridge; installed VS Code host behavior remains a separate verification boundary. Coordinate any installation/reload around active clients; keep the current working Bridge running until a handover is explicitly arranged. Slot is unchanged.
 
 **Run your ChatGPT or Claude.ai subscription as a model inside VS Code's GitHub Copilot chat — and route external tools like Claude Code onto the same backends.** Sign in with your ChatGPT or Claude.ai account and Codex or Claude models answer right in the native **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker — on your own subscription, no API key. Flip the **Bridge** on and the very same providers become a local endpoint that **Claude Code** and the **Copilot CLI** can run on too.
 
@@ -16,7 +16,7 @@ Wisp is a **BYOK model router** for the Copilot harness, registering your own ba
 
 Net: run Copilot's chat / agent / edit experience — and Claude Code's — on the model access you already pay for.
 
-- **Version:** 1.6.0
+- **Version:** 1.14.2
 - **Requires:** VS Code 1.104+
 - **Repo:** [github.com/EstarinAzx/Wisp-Router](https://github.com/EstarinAzx/Wisp-Router)
 - **Not on the Marketplace** — install from a `.vsix` release or from source (see [Install](#install)).

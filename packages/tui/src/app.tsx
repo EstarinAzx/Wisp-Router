@@ -55,6 +55,7 @@ import { TestScreen, streamTestReply } from './testScreen';
 import { BridgeScreen, HelpScreen, LogScreen } from './infoScreens';
 import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
+import { runGptDesktop } from './codexDesktop';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -109,6 +110,7 @@ export const App = () => {
   // loop, not just detach the screen — otherwise a cancelled sign-in still signs the user in (#170).
   const signinAbort = useRef<AbortController | null>(null);
   const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
+  const desktopChanging = useRef(false);
   // statusGen invalidates a pending copied-note clear whenever anything else writes the row.
   const statusGen = useRef(0);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -379,6 +381,14 @@ export const App = () => {
         if (!route) { setStatus(`Unknown provider or alias: ${name}`); return; }
         // An Alias Target's pinned model beats the Provider's remembered model — same rule as the Bridge.
         startTest(route.provider, route.pinnedModel ?? resolveModel(cfg.models ?? {}, route.provider));
+        return;
+      }
+      case 'gpt-desktop': {
+        if (desktopChanging.current) { setStatus('Desktop setup is already running.'); return; }
+        desktopChanging.current = true;
+        setStatus('Updating Desktop integration…');
+        void runGptDesktop(target.args).then(setStatus, error => setStatus(error instanceof Error ? error.message : 'Desktop setup failed; recovery state retained.'))
+          .finally(() => { desktopChanging.current = false; });
         return;
       }
       case 'bridge': {

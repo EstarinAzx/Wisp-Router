@@ -54,6 +54,8 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
   // a header-less request and get an opaque 401/403.
   if (!args.creds.accountId) throw new Error('Codex account id missing — sign out and sign in to Codex again.');
 
+  const promptCacheKey = args.responses?.promptCacheKey;
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Accept': 'text/event-stream',
@@ -62,7 +64,7 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
     'OpenAI-Beta': 'responses=experimental',
     'originator': 'codex_cli_rs',
     // Reuse the client's conversation UUID. Without one, isolate this request.
-    'session_id': args.sessionId ?? crypto.randomUUID(),
+    'session_id': args.sessionId ?? args.responses?.sessionId ?? crypto.randomUUID(),
   };
 
   const info = args.modelInfo ?? (await codexCatalog.get(args)).models.find((m) => m.id === args.model);
@@ -72,7 +74,8 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
     method: 'POST',
     ...(args.rejectRedirects ? { redirect: 'error' as const } : {}),
     headers,
-    body: JSON.stringify(buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: args.responses?.context ? { ...reasoning, context: args.responses.context } : reasoning, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true })),
+    body: JSON.stringify({ ...buildCodexResponsesBody({ model: args.model, messages: args.messages, reasoning: args.responses?.context ? { ...reasoning, context: args.responses.context } : reasoning, tools: args.tools, toolChoice: args.toolChoice, parallelToolCalls: args.responses?.parallelToolCalls, verbosity: args.responses?.verbosity, preserveSystemMessages: true }),
+      ...(promptCacheKey === undefined ? {} : { prompt_cache_key: promptCacheKey }) }),
     signal: args.signal,
   });
   if (!res.ok) {

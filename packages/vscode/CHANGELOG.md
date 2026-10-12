@@ -4,6 +4,20 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.2] - 2026-10-12
+
+### Added
+
+- The extension-hosted Bridge bundles native Desktop voice signaling and the protocol-5 signed integration, paired with terminal/npm **2.2.5** setup.
+- Explicit Antigravity compatibility admits only qualified `gemini-3.8-flash-tiered` Aliases. Developer notes apply globally; original placement/scope is not preserved. Strict mode and unqualified targets remain refused.
+- The bundled core retains original tool IDs, exact custom input/results and source-boundary validation, plus improved Antigravity rate-limit status/retry handling.
+
+### Surfaces
+
+- The shared core includes the reviewed Codex cache-routing header and prompt-cache/session forwarding fixes; live quota/cache recovery is not claimed.
+- **VSIX: 1.14.2**, **terminal/npm: 2.2.5**, **wisp-slot: unchanged**. Installation is separate from publication. Reloading an installed extension affects its Bridge; coordinate separately around active clients.
+- Desktop setup and `/gpt-desktop on|off` belong to the terminal. Live Desktop qualification used the standalone Bridge; installed VS Code host behavior is not established by compilation or package inspection.
+
 ## [1.14.1] - 2026-09-18
 
 ### Fixed

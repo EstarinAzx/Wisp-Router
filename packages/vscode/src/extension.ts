@@ -1,4 +1,4 @@
-import { readDesktopNativeModels } from '@wisp/core';
+import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '@wisp/core';
 // ----------------- extension.ts — Wisp: Inquire inline editor ----------------- //
 
 /*
@@ -1053,6 +1053,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // and model memory; keyed Providers only this slice (Codex #39 / Anthropic #40 later). OFF until toggled.
   bridge = createBridgeServer({
     desktopNativeModels: readDesktopNativeModels,
+    desktopAntigravityHoisting: readDesktopAntigravityHoisting,
     providers: PROVIDERS,
     modelMap: () => home.readConfig().models ?? {},
     customBaseUrl: () => home.readConfig().customBaseUrl ?? '',

@@ -77,7 +77,7 @@ try {
     writeFileSync(join(wisp, 'config.json'), JSON.stringify({ bridge: { port }, customBaseUrl: `http://127.0.0.1:${upstreamPort}/v1`, routing: { families: {}, aliases: [{ name: 'packaged-alias', target: { providerId: 'custom', model: 'EXACT_PACKAGED_TARGET' } }] } }));
     bridge = spawn(binary, ['serve'], { cwd: folder, windowsHide: true, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] }); bridge.stdout.resume(); bridge.stderr.resume();
     let alive = false;
-    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 3); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
+    for (let attempt = 0; attempt < 60; attempt++) { try { const res = await fetch(`http://127.0.0.1:${port}/codex-desktop/status`, { headers: { 'x-api-key': 'synthetic-local' }, signal: AbortSignal.timeout(500) }); assert.equal((await res.json()).protocol, 5); alive = true; break; } catch { await new Promise(r => setTimeout(r, 100)); } }
     assert(alive, 'Compiled signed Bridge failed to start');
     const desktop = args => run(['codex-desktop', ...args]);
     assert((await desktop(['--help'])).includes('Restart Codex'));
@@ -89,6 +89,10 @@ try {
     const response = await fetch(`http://127.0.0.1:${port}/codex-desktop/v1/responses`, { method: 'POST', headers: { 'x-api-key': 'synthetic-local', authorization: 'Bearer synthetic-native', 'chatgpt-account-id': 'synthetic-account', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'packaged-alias', input: 'local packaging check', stream: false }) });
     assert.equal(response.status, 200); assert((await response.text()).includes('PACKAGED_DESKTOP_OK'));
     const capture = captures.at(-1); assert.equal(capture.body.model, 'EXACT_PACKAGED_TARGET'); assert.equal(capture.headers.authorization, 'Bearer synthetic-external'); assert(!capture.headers['chatgpt-account-id']); assert(!capture.headers['x-api-key']);
+    // Prove the packaged voice route exists and rejects locally, without making a native request.
+    const voiceUrl = `http://127.0.0.1:${port}/codex-desktop/backend-api/codex/realtime/calls`;
+    const noNativeAuth = await fetch(voiceUrl, { method: 'POST', headers: { 'x-api-key': 'synthetic-local' }, body: '{}' }); assert.equal(noNativeAuth.status, 401); await noNativeAuth.text();
+    const badVoiceBody = await fetch(voiceUrl, { method: 'POST', headers: { 'x-api-key': 'synthetic-local', authorization: 'Bearer synthetic-native' }, body: '{}' }); assert.equal(badVoiceBody.status, 400); await badVoiceBody.text();
     assert.equal(JSON.parse(await desktop(['refresh', '--json'])).enabled, true);
     assert.equal(JSON.parse(await desktop(['status', '--json'])).bridge, true);
     assert.equal(JSON.parse(await desktop(['disable', '--json'])).enabled, false);

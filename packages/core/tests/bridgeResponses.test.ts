@@ -9,8 +9,8 @@ import { createResponsesEncoder, parseResponsesRequest } from '../src/bridgeResp
 
 const listen = (server: ReturnType<typeof createServer>): Promise<number> => new Promise(resolve =>
   server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port)));
-const post = (port: number, body: unknown): Promise<{ status: number; events: any[]; raw: string }> => new Promise((resolve, reject) => {
-  const req = request({ hostname: '127.0.0.1', port, path: '/v1/responses', method: 'POST', headers: { Authorization: 'Bearer synthetic' } }, res => {
+const post = (port: number, body: unknown, sessionId?: string): Promise<{ status: number; events: any[]; raw: string }> => new Promise((resolve, reject) => {
+  const req = request({ hostname: '127.0.0.1', port, path: '/v1/responses', method: 'POST', headers: { Authorization: 'Bearer synthetic', ...(sessionId === undefined ? {} : { session_id: sessionId }) } }, res => {
     let raw = ''; res.on('data', c => raw += c); res.on('end', () => resolve({ status: res.statusCode!, raw,
       events: raw.split('\n').filter(s => s.startsWith('data: ')).map(s => JSON.parse(s.slice(6))) }));
   }); req.on('error', reject); req.end(JSON.stringify(body));
@@ -307,6 +307,24 @@ describe('Responses public HTTP contract', () => {
       expect(seen[3].messages.map((m: any) => m.content)).toEqual(['old', 'answer', 'new note', 'followup']);
       expect(seen[3].model).toBe('other-model');
     }, provider => ({ providers: [provider, { ...provider, id: 'other', defaultModel: 'other-model' }], activeProviderId: () => active }));
+  });
+  it('preserves the caller cache key and distinct session identities through Codex adapter requests', async () => {
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [{ id: 'gpt-6-astra', name: 'gpt-6-astra', visible: true, reasoningEfforts: ['low'], defaultEffort: 'low' }] });
+    const sessions: unknown[] = [];
+    try {
+      await withBridge((_body, res) => { sessions.push(res.req.headers.session_id); wireAnswer('codex', res); }, async (port, seen) => {
+        // Separate conversations may intentionally share a cache key; it is not their session identity.
+        for (const session of ['11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', 'invalid-session', undefined]) {
+          expect((await post(port, native({ prompt_cache_key: 'shared-cache-key' }), session)).status).toBe(200);
+          expect(seen.at(-1).prompt_cache_key).toBe('shared-cache-key');
+        }
+        expect(sessions.slice(0, 3)).toEqual(['11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']);
+        expect(sessions[3]).toMatch(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i);
+        expect(sessions[3]).not.toBe(sessions[4]);
+        for (const key of [null, 42, {}, '']) expect((await post(port, native({ prompt_cache_key: key }))).status).toBe(400);
+        expect(seen).toHaveLength(5);
+      }, wireDeps('codex'));
+    } finally { discovery.mockRestore(); }
   });
   it('forwards context without inventing effort when Codex has no effort metadata', async () => {
     const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });

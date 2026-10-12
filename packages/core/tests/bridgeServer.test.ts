@@ -154,12 +154,12 @@ describe('Codex conversation cache continuity', () => {
 });
 
 // POST over node http (NOT fetch — fetch is stubbed for the upstream xai call) → { status, body }.
-const post = (port: number, path: string, payload: unknown): Promise<{ status: number; body: string }> =>
+const post = (port: number, path: string, payload: unknown): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> =>
   new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
     const req = http.request(
       { host: '127.0.0.1', port, path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: 'Bearer secret' } },
-      (res) => { let body = ''; res.setEncoding('utf8'); res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode ?? 0, body })); },
+      (res) => { let body = ''; res.setEncoding('utf8'); res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers })); },
     );
     req.on('error', reject);
     req.write(data);
@@ -539,7 +539,7 @@ describe('Bridge — API-key Provider usage (#169)', () => {
  * Every executor record used to return undefined from classify, so EVERY rate limit on every Provider left
  * the Bridge as a 502 — a gateway fault, which is neither what happened nor something a client can act on.
  * Antigravity is the first record to say 429. These drive the real listener, because the boundary that
- * matters (classified vs declined) is exactly where the bounded retry does or does not run.
+ * matters is whether retries are allowed, independently of the final HTTP status.
  */
 describe('Bridge — Antigravity rate limits (#190)', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -572,9 +572,6 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
     },
   }), { status: 429 });
 
-  // A 429 moves to the next host before it surfaces, so ONE attempt is two upstream calls (#189's host walk).
-  const CALLS_PER_ATTEMPT = 2;
-
   const countingFetch = (make: () => Response) => {
     const state = { calls: 0 };
     vi.stubGlobal('fetch', async () => { state.calls += 1; return make(); });
@@ -584,6 +581,68 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
   const chat = (port: number) =>
     post(port, '/v1/chat/completions', { model: 'antigravity', stream: true, messages: [{ role: 'user', content: 'hi' }] });
 
+  const generic429 = (headers: Record<string, string> = {}) => new Response(JSON.stringify({
+    error: { code: 429, message: 'Resource has been exhausted (e.g. check quota).', status: 'RESOURCE_EXHAUSTED' },
+  }), { status: 429, headers });
+
+  it('returns generic 429 after bounded retries and keeps aliases pinned during cooldown', async () => {
+    const state = countingFetch(() => generic429()), lines: string[] = [];
+    await runServer(antigravityDeps({ log: line => lines.push(line), routingMap: () => ({ families: {},
+      aliases: [{ name: 'custom model', target: { providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' } }],
+    }) }), async port => {
+      for (let i = 0; i < 4; i++) {
+        const res = await post(port, '/v1/messages', { model: 'custom model', max_tokens: 32, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+        expect(res.status).toBe(429);
+        expect(JSON.parse(res.body).error.type).toBe('rate_limit_error');
+        expect(res.headers['retry-after']).toBeUndefined();
+      }
+    });
+    expect(state.calls).toBe(24);
+    expect(lines.filter(line => line.includes('retrying in'))).toHaveLength(8);
+    expect(lines.filter(line => line.includes('repeated transient failures'))).toHaveLength(1);
+    expect(lines.some(line => line.includes('quota exhausted'))).toBe(false);
+  });
+
+  it('can recover from a generic 429 before the retry budget is exhausted', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => ++calls <= 2 ? generic429() : new Response(
+      'data: {"response":{"candidates":[{"content":{"parts":[{"text":"recovered"}]},"finishReason":"STOP"}]}}\n\n',
+    ));
+    await runServer(antigravityDeps(), async port => {
+      const res = await chat(port);
+      expect(res.status).toBe(200);
+      expect(res.body).toContain('recovered');
+    });
+    expect(calls).toBe(3);
+  });
+
+  it.each(['header', 'body'])('honors a short retry hint from the %s without a premature host fallback', async source => {
+    const times: number[] = [];
+    vi.stubGlobal('fetch', async () => {
+      times.push(performance.now());
+      return source === 'header' ? generic429({ 'Retry-After': '1' }) : quota429('RATE_LIMIT_EXCEEDED', '1s')();
+    });
+    await runServer(antigravityDeps(), async port => {
+      const res = await chat(port);
+      expect(res.status).toBe(429);
+      expect(res.headers['retry-after']).toBe('1');
+    });
+    expect(times).toHaveLength(3);
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(950);
+    expect(times[2] - times[1]).toBeGreaterThanOrEqual(950);
+  });
+
+  it('returns a long Retry-After immediately without inventing exhausted quota', async () => {
+    const state = countingFetch(() => generic429({ 'Retry-After': '3600' })), lines: string[] = [];
+    await runServer(antigravityDeps({ log: line => lines.push(line) }), async port => {
+      const res = await chat(port);
+      expect(res.status).toBe(429);
+      expect(res.headers['retry-after']).toBe('3600');
+    });
+    expect(state.calls).toBe(1);
+    expect(lines.some(line => line.includes('retrying in') || line.includes('quota exhausted'))).toBe(false);
+  });
+
   it('answers a spent quota window with 429, not 502, and does not spend the retries', async () => {
     const state = countingFetch(quota429('QUOTA_EXHAUSTED', '1h'));
     await runServer(antigravityDeps(), async (port) => {
@@ -591,7 +650,7 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
       expect(status).toBe(429);
       expect(JSON.parse(body).error.type).toBe('rate_limit_error');
     });
-    expect(state.calls).toBe(CALLS_PER_ATTEMPT); // one attempt — a classified failure can never succeed on a retry
+    expect(state.calls).toBe(1); // Respect the first host's stated reset; no immediate fallback.
   });
 
   /*
@@ -606,7 +665,7 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
     await runServer(antigravityDeps(), async (port) => {
       expect((await chat(port)).status).toBe(429);
     });
-    expect(state.calls).toBe(CALLS_PER_ATTEMPT);
+    expect(state.calls).toBe(1);
   });
 
   /*
@@ -615,12 +674,12 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
    * and RATE_LIMIT_EXCEEDED, exactly like a classified one) becomes the message, and the bounded retry must
    * still run. A message-matching classifier passes every test above and breaks this one.
    */
-  it('leaves a below-threshold 429 to the bounded retry, and it stays a 502', async () => {
+  it('leaves a below-threshold 429 to the bounded retry and preserves its status', async () => {
     const state = countingFetch(quota429('RATE_LIMIT_EXCEEDED', '1s'));
     await runServer(antigravityDeps(), async (port) => {
-      expect((await chat(port)).status).toBe(502);
+      expect((await chat(port)).status).toBe(429);
     });
-    expect(state.calls).toBe(MAX_PROVIDER_ATTEMPTS * CALLS_PER_ATTEMPT);
+    expect(state.calls).toBe(MAX_PROVIDER_ATTEMPTS);
   });
 
   /*
@@ -880,7 +939,7 @@ describe('Bridge — Antigravity on the Anthropic door (#191)', () => {
       expect(status).toBe(429);
       expect(JSON.parse(body).error.type).toBe('rate_limit_error');
     });
-    expect(calls).toBe(2); // ONE attempt — a 429 walks both hosts before it surfaces; no retries spent
+    expect(calls).toBe(1); // The first host's reset hint prevents immediate host fallback.
   });
 
   /*

@@ -24,9 +24,11 @@
 
 import * as http from 'http';
 import * as crypto from 'crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import OpenAI from 'openai';
 import { desktopUpstreamFailure } from './desktopUpstream';
 import { forwardDesktopNative, desktopTargetIssue, DESKTOP_PROTOCOL, type NativeFetch } from './codexDesktop';
+import { DESKTOP_VOICE_CALL_PATH, forwardDesktopVoiceCall, forwardDesktopVoiceUpgrade, rejectVoiceUpgrade, type NativeVoiceRequest } from './codexDesktopVoice';
 import { codexCatalog } from './codexModels';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
@@ -43,6 +45,7 @@ import { parseResponsesRequest, parseDesktopResponsesRequest, createResponsesEnc
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import { antigravityStream } from './antigravityClient';
+import { hoistAntigravityDesktopInstructions, type AntigravityTurn } from './antigravity';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE, chatCompletionsUsage,
   type ChunkMeta, type BridgeChatRequest, type BridgeStreamEvent,
@@ -56,7 +59,7 @@ import type { NormalizedTurn } from './catalog';
 import {
   resolveRoute, withCooldownFallback, createProviderCooldowns,
   isTransientProviderError, retryDelayMs, MAX_PROVIDER_ATTEMPTS, DEFAULT_COOLDOWN_SECONDS,
-  type RoutingMap, type RouteMatch,
+  type RoutingMap, type RouteMatch, type Target,
 } from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
@@ -69,7 +72,11 @@ export const DEFAULT_BRIDGE_PORT = 41184;
 // the catalog plus pure getters so it never touches secrets or config directly.
 export type BridgeDeps = {
   desktopNativeModels?: () => string[] | undefined;
+  desktopAntigravityHoisting?: () => boolean;
+  // Diagnostic/test harness only. Production hosts use the release policy's qualified targets.
+  desktopAntigravityTargets?: readonly Target[];
   nativeFetch?: NativeFetch;
+  nativeVoiceRequest?: NativeVoiceRequest;
   providers: Provider[];
   modelMap: () => Record<string, string>;                         // current per-Provider model memory
   customBaseUrl: () => string;                                    // wisp.baseUrl (only Custom resolves from it)
@@ -118,13 +125,13 @@ const MAX_BODY_BYTES = 25 * 1024 * 1024;
 // ----------------------------- Plain HTTP helpers (deps-free) ----------------------------- //
 
 // Read the whole request body as a string, rejecting once it crosses the size cap (and killing the socket).
-const readBody = (req: http.IncomingMessage): Promise<string> =>
+const readBody = (req: http.IncomingMessage, limit = MAX_BODY_BYTES): Promise<string> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) { req.destroy(); reject(new Error('request body too large')); return; }
+      if (size > limit) { req.destroy(); reject(new Error('request body too large')); return; }
       chunks.push(chunk);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -172,8 +179,6 @@ const primeStream = async <T>(source: AsyncIterable<T>): Promise<AsyncIterable<T
     },
   };
 };
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // What an executor / the Anthropic door's startProviderStream answers with: an opened stream, or a refusal
 // carrying its own status. openPrimed below is generic over it so each door keeps the extra fields it returns.
@@ -355,6 +360,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
   type ExecutorArgs = {
     signedDesktop?: boolean;
+    desktopAntigravityMessages?: AntigravityTurn[];
     parsed: BridgeChatRequest;
     provider: Provider;
     model: string;      // the resolved model id (a routed Target's pinned model already applied)
@@ -467,11 +473,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       id: 'antigravity',
       matches: isAntigravityProvider,
       // #190: the FIRST record to answer a rate limit as 429 rather than leaving it a gateway fault. The
-      // verdict is read off the Error the client threw, never re-derived from its message — a 429 the pure
-      // layer DECLINED carries its raw upstream body, which uses the same vocabulary, so a string matcher
-      // would stop the bounded retry that declining exists to allow.
+      // status and retry eligibility are read off the Error, never guessed from its message.
       classify: (err) => antigravityFailureOf(err),
-      open: async ({ parsed, provider, model, baseUrl, signal, signedDesktop }) => {
+      open: async ({ parsed, provider, model, baseUrl, signal, signedDesktop, desktopAntigravityMessages }) => {
         const creds = await deps.antigravityCreds?.();
         if (!creds) return signedOut(provider);
         // The image row is LISTED (it is real, and hiding it would make its absence a mystery) and refused
@@ -482,8 +486,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // into request.systemInstruction, so re-attach it as the leading system message. Images ride along
         // as inlineData parts — #186 confirmed this upstream accepts vision input.
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
-        const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        return { ok: true, events: antigravityStream({ rejectRedirects: signedDesktop, creds, baseUrl, model, messages, tools: parsed.tools, signal, strictCompletion: !!parsed.responses }) };
+        const messages = desktopAntigravityMessages ?? (parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns);
+        return { ok: true, events: antigravityStream({ rejectRedirects: signedDesktop, preserveSystemText: !!desktopAntigravityMessages,
+          creds, baseUrl, model, messages, tools: parsed.tools, signal, strictCompletion: !!parsed.responses, log: deps.log }) };
       },
     },
     keyedExecutor,
@@ -499,7 +504,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // delivering anything" is a condition with a clean boundary — everything up to and including the first pull is
   // retryable, everything after it has already reached the client and must never be discarded and restarted.
   // Written once here, so both doors retry the same way. Four things stop a retry: the client hung up, the
-  // attempts ran out, #166 classified the failure (a client error cannot succeed on a retry), or the failure is
+  // attempts ran out, the classified failure disallows retries, or the failure is
   // not transient at all. A refusal (`ok:false`) is a creds/key problem and returns untouched — never retried.
   const openPrimed = async <R extends OpenedStream>(
     provider: Provider, executor: ProviderExecutor, controller: AbortController, attempt: () => Promise<R>, redact = false,
@@ -513,11 +518,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         return { ...started, events: await primeStream(started.events) } as R;
       } catch (err) {
         const message = String(err);
-        const retryable = redact ? desktopUpstreamFailure(err).retryable : !executor.classify(err) && isTransientProviderError(message);
+        const antigravity = antigravityFailureOf(err);
+        const retryable = redact ? desktopUpstreamFailure(err).retryable
+          : antigravity?.retryable ?? (!executor.classify(err) && isTransientProviderError(message));
         if (controller.signal.aborted || n >= MAX_PROVIDER_ATTEMPTS || !retryable) throw err;
-        const wait = retryDelayMs(n, Math.random);
+        const wait = Math.max(retryDelayMs(n, Math.random), antigravity?.retryAfterMs ?? 0);
         deps.log(`[bridge] provider ${provider.id} transient failure — retrying in ${Math.round(wait)}ms (attempt ${n + 1}/${MAX_PROVIDER_ATTEMPTS}): ${redact ? 'desktop upstream error' : message} (#168)`);
-        await sleep(wait);
+        await sleep(wait, undefined, { signal: controller.signal });
         controller.signal.throwIfAborted();
       }
     }
@@ -550,7 +557,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const classified = executor.classify(err);
     if (classified) deps.log(`[bridge] ${provider.id} failure classified code=${classified.code} -> HTTP ${classified.status} (#166)`);
     if (res.headersSent) { if (midStreamFrame) res.write(midStreamFrame(String(err))); res.end(); return; }
-    if (classified) return sendError(res, classified.status, classified.message, classified.type);
+    if (classified) {
+      const retryAfterMs = antigravityFailureOf(err)?.retryAfterMs;
+      if (retryAfterMs !== undefined) res.setHeader('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
+      return sendError(res, classified.status, classified.message, classified.type);
+    }
     sendError(res, 502, `provider request failed: ${String(err)}`);
   };
 
@@ -632,6 +643,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     let parsed: ReturnType<typeof parseResponsesRequest>;
     let route: RouteMatch | undefined;
     let body: any;
+    let desktopModel: string | undefined;
+    let hoisting = false;
+    let desktopAntigravityMessages: AntigravityTurn[] | undefined;
     const rejectSigned = (error: unknown): void => {
       const diagnostic = responsesRejectionDiagnostic(error, body);
       deps.log(`[bridge] desktop rejection ${JSON.stringify(diagnostic)}`);
@@ -653,10 +667,21 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         if (!deps.routingMap().aliases.some(a => a.name === body.model)) return sendError(res, 404, 'Unknown desktop model; refresh the catalog or configure an Alias');
         route = routeFor(body.model);
         if (!route || route.matched !== 'alias') return sendError(res, 404, 'Invalid desktop route Target');
-        const issue = desktopTargetIssue(route.provider);
+        desktopModel = route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider);
+        const optedIn = deps.desktopAntigravityHoisting?.() ?? false;
+        const issue = desktopTargetIssue(route.provider, desktopModel, optedIn, deps.desktopAntigravityTargets);
         if (issue) return sendError(res, 400, issue, 'desktop_target_incompatible');
+        hoisting = optedIn && isAntigravityProvider(route.provider);
+        // Check the original role before the generic parser merges developer/system.
+        if (hoisting && Array.isArray(body.input) && body.input.some((item: any) => item?.role === 'system')) {
+          throw new Error('Unsupported explicit system input in Antigravity instruction-hoisting compatibility');
+        }
       }
       parsed = signedDesktop ? parseDesktopResponsesRequest(body) : parseResponsesRequest(body);
+      // Cache keys can be shared across conversations. Preserve only the caller's
+      // actual, validated session UUID as identity on the Codex adapter path.
+      const sessionId = req.headers.session_id;
+      if (parsed.responses && typeof sessionId === 'string' && /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(sessionId)) parsed.responses.sessionId = sessionId;
       if (parsed.omittedHostedSearch) deps.log(`[bridge] desktop hosted search unavailable; omitted unused declarations count=${parsed.omittedHostedSearch}`);
     }
     catch (err) {
@@ -673,7 +698,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const { provider, pinnedModel } = route;
     const executor = executorFor(provider);
     const encoder = createResponsesEncoder(parsed, `resp_${crypto.randomBytes(12).toString('hex')}`);
-    const model = pinnedModel ?? resolveModel(deps.modelMap(), provider);
+    const model = desktopModel ?? pinnedModel ?? resolveModel(deps.modelMap(), provider);
     // Generic keyed descriptors advertise no effort choices; desktop's neutral none must not
     // become a provider-specific override. Other explicit controls still fail, never disappear.
     if (signedDesktop && !isCodexProvider(provider) && !isAnthropicProvider(provider) && !isXaiProvider(provider) && parsed.responses?.effort) {
@@ -697,15 +722,24 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       return sendError(res, 400, 'This Provider wire cannot preserve image-bearing tool results');
     }
     if (isAntigravityProvider(provider)) {
-      const firstConversation = parsed.turns.findIndex(t => t.role !== 'system');
-      if (firstConversation >= 0 && parsed.turns.slice(firstConversation).some(t => t.role === 'system')) {
+      if (hoisting) {
+        try {
+          const turns = parsed.turns.map(t => ({ role: t.role, content: t.text, images: t.images,
+            toolCalls: t.toolCalls, toolResults: t.toolResults }));
+          desktopAntigravityMessages = hoistAntigravityDesktopInstructions(parsed.system
+            ? [{ role: 'system', content: parsed.system }, ...turns] : turns);
+        } catch (error) { return rejectSigned(error); }
+      } else {
+        const firstConversation = parsed.turns.findIndex(t => t.role !== 'system');
+        if (firstConversation >= 0 && parsed.turns.slice(firstConversation).some(t => t.role === 'system')) {
         return sendError(res, 400, 'Antigravity cannot preserve positioned developer messages; choose a Responses, Messages or Chat Completions Provider');
+        }
       }
     }
     try {
       const started = await openPrimed(provider, executor, controller, async () => {
         controller.signal.throwIfAborted();
-        return executor.open({ parsed, provider, model: pinnedModel ?? resolveModel(deps.modelMap(), provider), baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()), signal: controller.signal, signedDesktop });
+        return executor.open({ parsed, provider, model, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()), signal: controller.signal, signedDesktop, desktopAntigravityMessages });
       }, signedDesktop);
       if (controller.signal.aborted) return;
       if (!started.ok && signedDesktop && started.message.startsWith('Unsupported reasoning effort')) return rejectSigned(new Error('Unsupported reasoning effort'));
@@ -828,7 +862,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // No tool strictness knob: buildAntigravityTools already cleans Claude Code's rich schemas for this
       // wire, so the door's `false` strict flag has no equivalent to pass. The stream already speaks
       // BridgeStreamEvent, so unlike the three arms above it needs no mapOAuthStream hop.
-      return { ok: true, events: antigravityStream({ creds, baseUrl, model: modelId, messages, tools: parsed.tools, thinkingLevel: standardEffortToAntigravity(effort), signal: controller.signal }), model: modelId };
+      return { ok: true, events: antigravityStream({ creds, baseUrl, model: modelId, messages, tools: parsed.tools, thinkingLevel: standardEffortToAntigravity(effort), signal: controller.signal, log: deps.log }), model: modelId };
     }
     const client = await deps.clientFor(provider);
     if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
@@ -1044,6 +1078,14 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (!authOk(req, deps.accessSecret())) return sendError(res, 401, 'invalid or missing access secret');
     const url = req.url ?? '';
     if (req.method === 'GET' && url === '/codex-desktop/status') return sendJson(res, 200, { protocol: DESKTOP_PROTOCOL });
+    if (req.method === 'POST' && url.split('?')[0] === DESKTOP_VOICE_CALL_PATH) {
+      const controller = new AbortController(); res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+      voiceCalls.add(controller); controller.signal.addEventListener('abort', () => res.destroy(), { once: true });
+      try { await forwardDesktopVoiceCall(req, res, await readBody(req, 1024 * 1024), controller.signal, deps.nativeFetch); }
+      catch { if (!controller.signal.aborted && !res.headersSent) sendError(res, 502, 'Native voice request failed'); }
+      finally { voiceCalls.delete(controller); }
+      return;
+    }
     if (req.method === 'POST' && url === '/codex-desktop/v1/responses') return handleResponses(req, res, true);
     // Both doors share /v1/models — the Anthropic client's headers select the Anthropic-shaped list.
     if (req.method === 'GET' && url.startsWith('/v1/models')) {
@@ -1058,6 +1100,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
   // Start the listener, resolving on 'listening' and rejecting on a bind error so the caller can report a port
   // clash (user story 15). server is set only on a successful bind, so isRunning() stays honest.
+  const voiceSockets = new Set<import('stream').Duplex>();
+  const voiceCalls = new Set<AbortController>();
   const start = (): Promise<void> =>
     new Promise((resolve, reject) => {
       if (server) return resolve();
@@ -1067,11 +1111,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
           if (res.headersSent) res.end(); else sendError(res, 500, 'internal error');
         });
       });
+      s.on('upgrade', (req, socket, head) => {
+        socket.on('error', () => {});
+        if (!req.headers['x-api-key'] || !authOk(req, deps.accessSecret())) return rejectVoiceUpgrade(socket, 401);
+        voiceSockets.add(socket); socket.once('close', () => voiceSockets.delete(socket));
+        try { forwardDesktopVoiceUpgrade(req, socket, head, deps.nativeVoiceRequest); }
+        catch { rejectVoiceUpgrade(socket, 502); }
+      });
       s.on('error', (err) => { server = undefined; reject(err); });
       s.listen(deps.port(), '127.0.0.1', () => { server = s; deps.log(`[bridge] listening on 127.0.0.1:${deps.port()}`); resolve(); });
     });
 
-  const stop = (): void => { if (server) { server.close(); server = undefined; deps.log('[bridge] stopped'); } };
+  const stop = (): void => { for (const call of voiceCalls) call.abort(); voiceCalls.clear(); for (const socket of voiceSockets) socket.destroy(); voiceSockets.clear(); if (server) { server.close(); server = undefined; deps.log('[bridge] stopped'); } };
 
   // dispose === stop, so the handle drops straight onto context.subscriptions and closes on deactivate.
   return { start, stop, isRunning: () => !!server, dispose: stop };
