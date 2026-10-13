@@ -71,6 +71,8 @@ export const DEFAULT_BRIDGE_PORT = 41184;
 // The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is handed
 // the catalog plus pure getters so it never touches secrets or config directly.
 export type BridgeDeps = {
+  // Opt-in Messages capability rejection; the client owns reminder fallback and its priority tradeoff.
+  antigravityClientFallback?: () => boolean;
   desktopNativeModels?: () => string[] | undefined;
   desktopAntigravityHoisting?: () => boolean;
   // Diagnostic/test harness only. Production hosts use the release policy's qualified targets.
@@ -900,6 +902,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
+
+    // Antigravity hoists positioned instructions into the global prefix. Opted-in clients must rebuild
+    // these themselves; never silently rewrite them here or spend credentials on the rejected request.
+    if (isAntigravityProvider(provider) && deps.antigravityClientFallback?.() === true && parsed.turns.some(t => t.role === 'system'))
+      return sendError(res, 400, 'capability_rejected: mid_conv_system', 'invalid_request_error');
 
     // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's
     // — plus how many images the request carried (the vision observable: 0 here means the client never sent

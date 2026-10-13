@@ -12,9 +12,9 @@ let home: string;
 beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'wisp-terminal-cli-')); });
 afterEach(() => { rmSync(home, { recursive: true, force: true }); });
 
-const run = (args: string[], cwd = root) => {
+const run = (args: string[], cwd = root, timeout = 10_000) => {
   const result = Bun.spawnSync([process.execPath, ...args], {
-    cwd, env: { ...process.env, WISP_HOME: home }, timeout: 10_000,
+    cwd, env: { ...process.env, WISP_HOME: home }, timeout,
   });
   return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 };
@@ -39,6 +39,30 @@ test('routing set recognizes Antigravity sign-in and still warns after sign-out'
   const signedOut = run(args);
   expect(signedOut.code).toBe(0);
   expect(signedOut.out).toContain("Provider 'antigravity' is not signed in");
+});
+
+test('antigravity-compat explicitly toggles only the client fallback setting', () => {
+  const compat = (...args: string[]) => run([entry, 'antigravity-compat', ...args], root, 1000);
+  const config = { future: 'keep', bridge: { port: 4242, aliasOnlyModels: false, future: 'keep' },
+    routing: { families: {}, aliases: [] } };
+  const file = join(home, 'config.json');
+  writeFileSync(file, JSON.stringify(config));
+  const before = readFileSync(file, 'utf8');
+  const status = compat('status');
+  expect(status.code).toBe(0);
+  expect(status.out).toContain('off');
+  expect(compat('on', 'unexpected').code).toBe(1);
+  expect(compat('invalid').code).toBe(1);
+  expect(readFileSync(file, 'utf8')).toBe(before);
+  for (const [mode, enabled] of [['on', true], ['off', false]] as const) {
+    const result = compat(mode);
+    expect(result.code).toBe(0);
+    expect(result.err).toBe('');
+    expect(result.out).toContain(mode);
+    if (enabled) { expect(result.out).toContain('user context'); expect(result.out).toContain('omitted'); }
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...config, bridge: { ...config.bridge, antigravityClientFallback: enabled } });
+  }
+  expect(existsSync(join(home, 'auth.json'))).toBe(false);
 });
 
 test('Codex CLI writes preserve aliases, snapshots and unknown fields, without requiring discovery', () => {

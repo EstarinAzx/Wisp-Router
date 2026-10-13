@@ -785,6 +785,51 @@ describe('Bridge — Antigravity on the Anthropic door (#191)', () => {
 
   // ----------------------------- A turn completes ----------------------------- //
 
+  it('rejects positioned system turns before credentials only with Antigravity client fallback enabled', async () => {
+    const credentials = vi.fn(async () => undefined);
+    let enabled = true;
+    const turns = [{ role: 'user', content: 'hi' }, { role: 'system', content: 'late reminder' }];
+    await runServer(deps({ antigravityClientFallback: () => enabled, antigravityCreds: credentials,
+      routingMap: () => ({ families: { sonnet: { providerId: 'antigravity', model: 'claude-opus-5-5-high' } },
+        aliases: [{ name: 'ag', target: { providerId: 'antigravity', model: 'claude-opus-5-5-high' } }] }),
+    }), async port => {
+      for (const model of ['antigravity', 'claude-wisp-ag', 'claude-sonnet-4-5']) {
+        for (const stream of [true, false]) {
+          const reply = await post(port, '/v1/messages?beta=true', { model, stream, messages: turns });
+          expect(reply.status).toBe(400);
+          expect(JSON.parse(reply.body).error).toEqual({ type: 'invalid_request_error', message: 'capability_rejected: mid_conv_system' });
+          expect(reply.headers['content-type']).toBe('application/json');
+        }
+      }
+      expect(credentials).not.toHaveBeenCalled();
+      expect((await messages(port, { system: 'fixed instructions' })).status).toBe(401);
+      enabled = false;
+      expect((await messages(port, { messages: turns })).status).toBe(401);
+      expect(credentials).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('preserves default hoisting, fixed instructions and the other Bridge doors', async () => {
+    const sent: any[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => { sent.push(JSON.parse(String(init.body))); return sse(...textFrames); });
+    const turns = [{ role: 'user', content: 'hi' }, { role: 'system', content: 'late reminder' }];
+    await runServer(deps(), async port => {
+      expect((await messages(port, { system: 'fixed instructions', messages: turns })).status).toBe(200);
+      expect(sent.at(-1).request.systemInstruction.parts).toEqual([{ text: 'fixed instructions' }, { text: 'late reminder' }]);
+    });
+    await runServer(deps({ antigravityClientFallback: () => true }), async port => {
+      expect((await messages(port, { system: 'fixed instructions' })).status).toBe(200);
+      expect(sent.at(-1).request.systemInstruction.parts).toEqual([{ text: 'fixed instructions' }]);
+      expect((await post(port, '/v1/chat/completions', { model: 'antigravity', messages: turns })).status).toBe(200);
+      expect(sent.at(-1).request.systemInstruction.parts).toEqual([{ text: 'late reminder' }]);
+    });
+    const seen: any = {};
+    await runServer({ ...keyedDeps([KEYED_TEXT], seen), antigravityClientFallback: () => true }, async port => {
+      expect((await post(port, '/v1/messages', { model: KEYED.id, system: 'fixed instructions', messages: turns })).status).toBe(200);
+      expect(seen.body.messages).toEqual([{ role: 'system', content: 'fixed instructions' }, ...turns]);
+    });
+  });
+
   it('streams a Gemini turn through the Anthropic door', async () => {
     vi.stubGlobal('fetch', async () => sse(...textFrames));
     await runServer(deps(), async (port) => {

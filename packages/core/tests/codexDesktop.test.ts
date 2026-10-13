@@ -24,6 +24,8 @@ const antigravityFixture = async (run: (port: number, wire: any[], reads: () => 
     let reads = 0; const wire: any[] = [];
     deps.antigravityCreds = async () => { reads++; return { accessToken: 'google-user-token', projectId: 'synthetic-project' }; };
     deps.desktopAntigravityHoisting = () => true;
+    // Enabling the Messages fallback must not alter signed Desktop or ordinary Responses admission.
+    deps.antigravityClientFallback = () => true;
     deps.desktopAntigravityTargets = [{ providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' }];
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
       wire.push({ url, headers: Object.fromEntries(new Headers(init.headers)), body: JSON.parse(init.body as string) });

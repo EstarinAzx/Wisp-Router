@@ -63,6 +63,7 @@ const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
 export const createTuiBridge = (log: (message: string) => void) => {
   let loggingStarted = false;
   return createBridgeServer({
+    antigravityClientFallback: () => home.readConfig().bridge?.antigravityClientFallback === true,
     desktopNativeModels: readDesktopNativeModels,
     desktopAntigravityHoisting: readDesktopAntigravityHoisting,
     providers: PROVIDERS,

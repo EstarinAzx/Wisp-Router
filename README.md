@@ -133,6 +133,10 @@ claude-wisp            # launch Claude Code through a running Bridge
 
 Use either `/bridge` in the TUI or `wisp serve` to host the Bridge. You only need one running host. The npm commands need Node.js; the compiled Wisp binaries do not need Bun. Standalone binaries for **Windows, macOS, and Linux** are available from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases).
 
+For Claude Code routed to Antigravity, **`wisp antigravity-compat on`** opts into client fallback for positioned system messages. This can keep later reminders from changing the global instruction prefix: fixed top-level system instructions stay in place, while Claude rebuilds reminders as user context; some feature-specific reminders may be omitted. Cache benefit depends on the workload. Clients without this recovery support receive an explicit error.
+
+The option defaults to off. Use **`wisp antigravity-compat status`** to inspect it or **`wisp antigravity-compat off`** to disable it, then start a new Claude conversation (the client remembers fallback until `/clear` or `/compact`). Both Bridge hosts read `bridge.antigravityClientFallback` in `~/.wisp/config.json` live. It applies only to Messages requests routed to Antigravity; Desktop and Responses keep their existing behavior.
+
 ### VS Code extension
 
 Download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then open **Extensions → ⋯ → Install from VSIX…** in VS Code. The extension is not on the Marketplace yet.
