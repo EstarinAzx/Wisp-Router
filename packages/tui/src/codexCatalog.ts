@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
-  anthropicThinkingEffort, xaiReasoning, desktopTargetIssue,
+  anthropicThinkingEffort, xaiReasoning, antigravityAcceptsThinkingLevel, desktopTargetIssue,
   type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
 
@@ -147,7 +147,7 @@ export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, c
       if (provider?.kind === 'antigravity-oauth') Object.assign(model, {
         display_name: `${name} (Antigravity compatibility)`,
         description: `${model.description} Developer notes apply globally; original instruction placement is not preserved. Explicit system turns are unsupported.`,
-        input_modalities: ['text'], supported_reasoning_levels: [], default_reasoning_level: null,
+        input_modalities: ['text'],
       });
       return true;
     }
@@ -171,13 +171,16 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
       const info = codex?.models.find(m => m.id === target.model);
       return info ? { contextInput: info.contextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
     }
+    // Tiered rows accept these distinct request levels without public catalog metadata.
+    if (p.kind === 'antigravity-oauth') return antigravityAcceptsThinkingLevel(target.model)
+      ? { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' } : undefined;
     const caps = lookupModelsDevCaps(publicCatalog, p.catalogKey ?? (p.kind === 'anthropic-oauth' ? 'anthropic' : p.kind === 'xai-oauth' ? 'xai' : ''), target.model);
     const efforts = ['low', 'medium', 'high', 'xhigh', 'max'].filter(effort => p.kind === 'anthropic-oauth'
       ? anthropicThinkingEffort(target.model, effort).output_config?.effort === effort
       : p.kind === 'xai-oauth' && xaiReasoning(target.model, effort)?.effort === effort);
     // Grok's implemented wire gate establishes effort independently of optional context metadata.
     if (!caps && !(p.kind === 'xai-oauth' && efforts.length)) return undefined;
-    return { ...caps, vision: p.kind !== 'antigravity-oauth' && p.kind !== 'anthropic-oauth' && caps?.vision, efforts,
+    return { ...caps, vision: p.kind !== 'anthropic-oauth' && caps?.vision, efforts,
       ...(p.kind === 'xai-oauth' && efforts.includes('medium') ? { defaultEffort: 'medium' } : {}) };
   };
 };
