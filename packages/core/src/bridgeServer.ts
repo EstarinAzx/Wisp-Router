@@ -33,7 +33,7 @@ import { codexCatalog } from './codexModels';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
-  isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
+  isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal, antigravityAcceptsThinkingLevel,
   antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker, isFableFamilyModel,
   classifyCodexErrorMessage, buildStatus, codexEffortOptions, anthropicThinkingEffort, xaiReasoning,
@@ -71,6 +71,8 @@ export const DEFAULT_BRIDGE_PORT = 41184;
 // The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is handed
 // the catalog plus pure getters so it never touches secrets or config directly.
 export type BridgeDeps = {
+  // Opt-in Messages capability rejection; the client owns reminder fallback and its priority tradeoff.
+  antigravityClientFallback?: () => boolean;
   desktopNativeModels?: () => string[] | undefined;
   desktopAntigravityHoisting?: () => boolean;
   // Diagnostic/test harness only. Production hosts use the release policy's qualified targets.
@@ -489,7 +491,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, contentParts: t.contentParts, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = desktopAntigravityMessages ?? (parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns);
         return { ok: true, events: antigravityStream({ rejectRedirects: signedDesktop, preserveSystemText: !!desktopAntigravityMessages,
-          creds, baseUrl, model, messages, tools: parsed.tools, signal, strictCompletion: !!parsed.responses, log: deps.log }) };
+          creds, baseUrl, model, messages, tools: parsed.tools,
+          thinkingLevel: parsed.responses?.effort ? standardEffortToAntigravity(parsed.responses.effort) : undefined,
+          signal, strictCompletion: !!parsed.responses, log: deps.log }) };
       },
     },
     keyedExecutor,
@@ -702,7 +706,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const model = desktopModel ?? pinnedModel ?? resolveModel(deps.modelMap(), provider);
     // Generic keyed descriptors advertise no effort choices; desktop's neutral none must not
     // become a provider-specific override. Other explicit controls still fail, never disappear.
-    if (signedDesktop && !isCodexProvider(provider) && !isAnthropicProvider(provider) && !isXaiProvider(provider) && parsed.responses?.effort) {
+    if (signedDesktop && isAntigravityProvider(provider) && parsed.responses?.effort === 'none') delete parsed.responses.effort;
+    if (signedDesktop && !isCodexProvider(provider) && !isAnthropicProvider(provider) && !isXaiProvider(provider) && !isAntigravityProvider(provider) && parsed.responses?.effort) {
       if (parsed.responses.effort !== 'none') return rejectSigned(new Error('Unsupported reasoning effort'));
       delete parsed.responses.effort;
     }
@@ -715,7 +720,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (effort && !isCodexProvider(provider)) {
       const supported = isAnthropicProvider(provider) ? anthropicThinkingEffort(model, effort).output_config?.effort === effort
         : isXaiProvider(provider) ? xaiReasoning(model, effort)?.effort === effort
-        : isAntigravityProvider(provider) ? false : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(effort);
+        : isAntigravityProvider(provider) ? antigravityAcceptsThinkingLevel(model) && standardEffortToAntigravity(effort) === effort
+        : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(effort);
       if (!supported) return signedDesktop ? rejectSigned(new Error('Unsupported reasoning effort'))
         : sendError(res, 400, `Unsupported reasoning effort '${effort}' for Provider '${provider.id}' model '${model}'`);
     }
@@ -896,6 +902,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
+
+    // Antigravity hoists positioned instructions into the global prefix. Opted-in clients must rebuild
+    // these themselves; never silently rewrite them here or spend credentials on the rejected request.
+    if (isAntigravityProvider(provider) && deps.antigravityClientFallback?.() === true && parsed.turns.some(t => t.role === 'system'))
+      return sendError(res, 400, 'capability_rejected: mid_conv_system', 'invalid_request_error');
 
     // One line per door call: whose effort won — Claude Code's /effort (output_config.effort) or the panel's
     // — plus how many images the request carried (the vision observable: 0 here means the client never sent

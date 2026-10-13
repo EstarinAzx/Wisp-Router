@@ -1,6 +1,6 @@
 # wisp-router
 
-**2.2.6:** preserves explicit provider cache keys and Grok conversation identity, and adds Antigravity cache diagnostics. No live cache-hit or quota-recovery improvement is claimed. [Diagnostic reference](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/provider-caching.md).
+**2.2.7:** restores supported Antigravity effort choices and forwarding, and adds an opt-in Claude client compatibility command. The option defaults off, changes later reminder priority and may omit feature reminders. Cache benefit is unverified. [Release details](https://github.com/EstarinAzx/Wisp-Router/blob/v2.2.7/docs/releases/v2.2.7.md).
 
 **2.2.5:** adds signed-in Codex Desktop voice signaling and `/gpt-desktop on` / `/gpt-desktop off` in the TUI. These commands reuse reversible setup and leave the Bridge's running state unchanged. `on` enables qualified Antigravity compatibility for `gemini-3.8-flash-tiered`: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Native model names keep their native capabilities and sign-in; other clients retain their existing routes. Installation and running-Bridge handover are separate actions. [Setup, limits and rollback](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 

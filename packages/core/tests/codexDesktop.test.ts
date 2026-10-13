@@ -24,6 +24,8 @@ const antigravityFixture = async (run: (port: number, wire: any[], reads: () => 
     let reads = 0; const wire: any[] = [];
     deps.antigravityCreds = async () => { reads++; return { accessToken: 'google-user-token', projectId: 'synthetic-project' }; };
     deps.desktopAntigravityHoisting = () => true;
+    // Enabling the Messages fallback must not alter signed Desktop or ordinary Responses admission.
+    deps.antigravityClientFallback = () => true;
     deps.desktopAntigravityTargets = [{ providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' }];
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
       wire.push({ url, headers: Object.fromEntries(new Headers(init.headers)), body: JSON.parse(init.body as string) });
@@ -122,6 +124,35 @@ describe('signed Antigravity hoisting admission', () => {
       writeFileSync(file, '{}'); expect(readDesktopAntigravityHoisting(root)).toBe(false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+});
+
+describe('Antigravity Responses effort', () => {
+  for (const path of ['/codex-desktop/v1/responses', '/v1/responses']) {
+    it.each(['low', 'medium', 'high'])(`forwards exact %s thinkingConfig and pinned model through ${path}`, async effort => antigravityFixture(async (port, wire, reads, deps) => {
+      deps.effort = () => effort === 'high' ? 'low' : 'high';
+      const result = await post(port, 'alias', undefined, path, { reasoning: { effort } });
+      expect(result.status).toBe(200); expect(result.text).toContain('DONE');
+      expect(reads()).toBe(1); expect(wire).toHaveLength(1);
+      expect(wire[0].body.model).toBe('gemini-3.8-flash-tiered');
+      expect(wire[0].body.request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: effort, includeThoughts: true });
+    }));
+    it.each(path === '/v1/responses' ? [undefined] : [undefined, 'none'])(`leaves %s effort without a panel override through ${path}`, async effort => antigravityFixture(async (port, wire, reads, deps) => {
+      deps.effort = () => 'high';
+      const result = await post(port, 'alias', undefined, path, effort === undefined ? {} : { reasoning: { effort } });
+      expect(result.status).toBe(200); expect(reads()).toBe(1); expect(wire).toHaveLength(1);
+      expect(wire[0].body.model).toBe('gemini-3.8-flash-tiered');
+      expect(wire[0].body.request.generationConfig?.thinkingConfig).toBeUndefined();
+    }));
+    it.each([...(path === '/v1/responses' ? ['none'] : []), 'minimal', 'xhigh', 'max', 'invented', 'LOW', '', null, 7, {}])(`rejects unsupported or malformed %j effort before credentials through ${path}`, async effort => antigravityFixture(async (port, wire, reads) => {
+      const result = await post(port, 'alias', undefined, path, { reasoning: { effort } });
+      expect(result.status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+    }));
+    it.each(['low', 'medium', 'high'])(`rejects %s effort on pinned noneligible models before credentials through ${path}`, async effort => antigravityFixture(async (port, wire, reads, deps) => {
+      deps.routingMap().aliases[0].target.model = 'gemini-3.1-pro-high';
+      const result = await post(port, 'alias', undefined, path, { reasoning: { effort } });
+      expect(result.status).toBe(400); expect(reads()).toBe(0); expect(wire).toHaveLength(0);
+    }));
+  }
 });
 
 async function fixture(run: (port: number, seen: any[], deps: BridgeDeps) => Promise<void>, upstreamReply = answer) {

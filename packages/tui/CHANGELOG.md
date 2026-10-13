@@ -6,6 +6,24 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.7] - 2026-10-14
+
+### Fixed
+
+- Eligible Antigravity custom models expose Low, Medium and High in the Desktop catalog. Responses requests forward the selected literal effort to tiered targets; native model descriptors and unsupported-effort validation are preserved.
+
+### Added
+
+- Explicit opt-in Claude client compatibility: `wisp antigravity-compat on|off|status`. It asks Claude to use its normal fallback for positioned system messages before Provider dispatch. Fixed instructions stay system instructions; later reminders may become user context and some feature reminders may be omitted. Begin a new conversation after changing the option.
+
+### Compatibility
+
+- The option defaults off. Signed Desktop instruction hoisting and protocol **5** are unchanged. Local tests establish stable-prefix behavior; the bounded live fallback comparison ended with Provider SAFETY, so no cache benefit or repair is claimed. Interactive Desktop acceptance and Provider-internal reasoning allocation are not established by the offline evidence.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.7**, **companion VSIX: 1.14.4**, **wisp-slot: unchanged**. The terminal owns catalog/command setup; both Bridge hosts carry effort forwarding and the opt-in compatibility flag.
+
 ## [2.2.6] - 2026-10-13
 
 ### Fixed

@@ -48,6 +48,13 @@ describe('isUnusableStore', () => {
 // ----------------------------- parseWispConfig ----------------------------- //
 
 describe('parseWispConfig', () => {
+  test('Antigravity client fallback only accepts an explicit boolean', () => {
+    for (const value of [true, false, 'true', 'false', 1, null]) {
+      const cfg = parseWispConfig(JSON.stringify({ bridge: { antigravityClientFallback: value, port: 4242 } }));
+      expect(cfg.bridge).toEqual({ port: 4242, ...(typeof value === 'boolean' ? { antigravityClientFallback: value } : {}) });
+    }
+  });
+
   test('missing, empty, corrupt, or non-object input parses as the empty config', () => {
     expect(parseWispConfig(undefined)).toEqual({});
     expect(parseWispConfig('')).toEqual({});

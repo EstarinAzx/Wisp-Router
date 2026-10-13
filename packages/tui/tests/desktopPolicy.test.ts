@@ -82,13 +82,18 @@ test('explicit hoisting admits only the qualified target and persists refresh', 
     { name: 'ag-good', target: { providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' } },
     { name: 'ag-unvalidated', target: { providerId: 'antigravity', model: 'some-new-model' } },
   ] } }));
-  opts.capabilities = async () => () => ({ vision: true, efforts: ['high'], defaultEffort: 'high' });
+  opts.capabilities = async () => () => ({ vision: true, efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' });
   await desktopAction('enable', { ...opts, antigravityInstructions: 'hoist-developer' });
   const catalogFile = join(opts.wispHome!, 'codex-desktop/models.json');
   const catalog = JSON.parse(readFileSync(catalogFile, 'utf8'));
   expect(catalog.models.map((m: any) => m.slug)).toEqual(['native-good', 'ag-good']);
   expect(catalog.models[0]).toEqual(native.models[0]);
-  expect(catalog.models[1]).toMatchObject({ display_name: 'ag-good (Antigravity compatibility)', input_modalities: ['text'], supported_reasoning_levels: [], default_reasoning_level: null });
+  expect(catalog.models[1]).toMatchObject({ display_name: 'ag-good (Antigravity compatibility)', input_modalities: ['text'],
+    supported_reasoning_levels: [
+      { effort: 'low', description: 'low reasoning' },
+      { effort: 'medium', description: 'medium reasoning' },
+      { effort: 'high', description: 'high reasoning' },
+    ], default_reasoning_level: 'medium' });
   expect(catalog.models[1].description).toContain('Developer notes apply globally');
   const state = JSON.parse(readFileSync(stateFile, 'utf8'));
   expect(state.excludedTargets.map((t: any) => t.name)).toEqual(['ag-unvalidated']);

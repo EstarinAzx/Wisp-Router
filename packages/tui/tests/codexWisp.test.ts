@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { delimiter, join, resolve } from 'path';
 
 import * as launcher from '../src/codex-wisp';
-import { catalogArguments, mergeAliasCatalog, parseNativeCatalog, readNativeCatalog, writeChildCatalog } from '../src/codexCatalog';
+import { catalogArguments, mergeAliasCatalog, parseNativeCatalog, readAliasCapabilities, readNativeCatalog, writeChildCatalog } from '../src/codexCatalog';
 const root = resolve(import.meta.dir, '../../..');
 const source = join(root, 'packages/tui/src/codex-wisp.ts');
 const dispatch = join(root, 'packages/tui/src/index.tsx');
@@ -336,6 +336,27 @@ test('per-child catalogs are UTF-8 without BOM and remain isolated until cleanup
     expect(JSON.parse(readFileSync(a.path,'utf8')).models[0].slug).toBe('日本語');
     a.cleanup(); expect(existsSync(a.path)).toBe(false); expect(existsSync(b.path)).toBe(true);
   } finally { a.cleanup(); b.cleanup(); }
+});
+
+test('Antigravity catalog advertises distinct request-level choices only on eligible models without discovery', async () => {
+  const config = { routing: { families: {}, aliases: [
+    { name: 'tiered', target: { providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' } },
+    { name: 'future', target: { providerId: 'antigravity', model: 'gemini-9.9-nova-tiered' } },
+    { name: 'pinned', target: { providerId: 'antigravity', model: 'gemini-3.1-pro-high' } },
+  ] } };
+  const capabilities = await readAliasCapabilities(config, {});
+  const catalog = mergeAliasCatalog({ models: [] }, config, capabilities);
+  for (const row of catalog.models.slice(0, 2)) {
+    expect(row.supported_reasoning_levels).toEqual([
+      { effort: 'low', description: 'low reasoning' },
+      { effort: 'medium', description: 'medium reasoning' },
+      { effort: 'high', description: 'high reasoning' },
+    ]);
+    expect(row.default_reasoning_level).toBe('medium');
+    expect(row.input_modalities).toEqual(['text']);
+    expect(row.context_window).toBeNull();
+  }
+  expect(catalog.models[2]).toMatchObject({ supported_reasoning_levels: [], default_reasoning_level: null });
 });
 
 test('catalog export uses the resolved executable, source catalog and bounded bundled fallback', async () => {

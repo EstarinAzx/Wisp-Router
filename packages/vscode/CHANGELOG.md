@@ -4,6 +4,20 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.4] - 2026-10-14
+
+### Fixed
+
+- The bundled Bridge forwards explicit Low, Medium and High effort on eligible Antigravity Responses targets while retaining signed Desktop admission and native forwarding.
+
+### Added
+
+- The Bridge reads the shared opt-in Antigravity client compatibility flag configured by terminal `wisp antigravity-compat`. Default is off. Claude's fallback changes later reminder priority and may omit feature reminders; it is not a transparent cache fix.
+
+### Surfaces
+
+- **VSIX: 1.14.4**, **terminal/npm: 2.2.7**, **wisp-slot: unchanged**. Desktop catalog setup and the CLI command are terminal-only. Cache benefit, interactive Desktop and installed VS Code host acceptance remain distinct from source/package checks.
+
 ## [1.14.3] - 2026-10-13
 
 ### Fixed
