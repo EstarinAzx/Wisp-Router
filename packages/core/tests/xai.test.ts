@@ -370,6 +370,27 @@ describe('oauthModelOptions — Grok', () => {
 });
 
 
+describe('Grok caller cache keys', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each(['grok-build', 'grok-4.7'])('preserves an explicit key on %s without deriving conversation identity from it', async model => {
+    const sent: { headers: Headers; body: any }[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      sent.push({ headers: new Headers(init.headers), body: JSON.parse(init.body as string) });
+      return new Response('event: response.completed\ndata: {"response":{"output":[]}}\n\n');
+    });
+    for (const responses of [{ promptCacheKey: 'shared-key' }, { promptCacheKey: 'shared-key' }, undefined]) {
+      for await (const _ of xaiStream({ creds: { accessToken: 'synthetic' }, baseUrl: 'https://proxy.example', model,
+        messages: [{ role: 'user', content: 'hi' }], responses })) { /* drain real adapter */ }
+    }
+    expect(sent.slice(0, 2).map(s => s.body.prompt_cache_key)).toEqual(['shared-key', 'shared-key']);
+    expect(sent[2].body).not.toHaveProperty('prompt_cache_key');
+    if (model === 'grok-build') {
+      expect(sent[0].headers.get('x-grok-conv-id')).not.toBe(sent[1].headers.get('x-grok-conv-id'));
+      expect(sent[0].headers.get('x-grok-conv-id')).not.toBe('shared-key');
+    } else expect(sent[0].headers.has('x-grok-conv-id')).toBe(false);
+  });
+});
+
 describe('Grok union-schema tool roundtrip', () => {
   afterEach(() => vi.unstubAllGlobals());
   const schema = {

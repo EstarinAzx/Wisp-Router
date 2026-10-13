@@ -403,7 +403,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         { model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
           ...(parsed.responses?.parallelToolCalls !== undefined ? { parallel_tool_calls: parsed.responses.parallelToolCalls } : {}),
           ...(parsed.responses?.effort ? { reasoning_effort: parsed.responses.effort as OpenAI.ChatCompletionCreateParams['reasoning_effort'] } : {}),
-          ...(parsed.responses?.verbosity ? { verbosity: parsed.responses.verbosity } : {}) },
+          ...(parsed.responses?.verbosity ? { verbosity: parsed.responses.verbosity } : {}),
+          ...(parsed.responses?.promptCacheKey !== undefined ? { prompt_cache_key: parsed.responses.promptCacheKey } : {}) },
         { signal },
       );
       return { ok: true, events: mapKeyedStream(upstream, !!parsed.responses) };
@@ -679,7 +680,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       }
       parsed = signedDesktop ? parseDesktopResponsesRequest(body) : parseResponsesRequest(body);
       // Cache keys can be shared across conversations. Preserve only the caller's
-      // actual, validated session UUID as identity on the Codex adapter path.
+      // actual, validated session UUID as identity on the Responses adapter paths.
       const sessionId = req.headers.session_id;
       if (parsed.responses && typeof sessionId === 'string' && /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(sessionId)) parsed.responses.sessionId = sessionId;
       if (parsed.omittedHostedSearch) deps.log(`[bridge] desktop hosted search unavailable; omitted unused declarations count=${parsed.omittedHostedSearch}`);
@@ -837,7 +838,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       // Non-strict tools: the door forwards an external client's toolset (same reason as the Codex arm above).
-      const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
+      const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', sessionId: parsed.sessionId, signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     if (isAntigravityProvider(provider)) {

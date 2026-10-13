@@ -6,6 +6,20 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.6] - 2026-10-13
+
+### Fixed
+
+- Responses requests retain explicit caller cache keys through Grok and the common API-key adapter. Grok proxy requests preserve independently validated conversation identity from Responses or Claude Messages; requests without identity remain isolated.
+
+### Added
+
+- Antigravity request/usage diagnostics correlate host attempts, token counts and process-local HMAC fingerprints of prompt components. Missing usage remains unknown; raw prompts, credentials and session IDs stay out of the new records. See [the diagnostic reference](../../docs/provider-caching.md).
+
+### Compatibility
+
+- Terminal/npm **2.2.6** pairs with companion VSIX **1.14.3**. Desktop protocol remains **5**; routing, instruction hoisting and provider payload policy are unchanged. No live cache-hit or quota-recovery improvement is claimed.
+
 ## [2.2.5] - 2026-10-12
 
 ### Added

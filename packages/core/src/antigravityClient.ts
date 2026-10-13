@@ -26,11 +26,12 @@
  * and is deliberately NOT ported: there is no knob to set, and adding one would be dead configuration.
  */
 
+import { createHmac, randomBytes } from 'crypto';
 import {
   AntigravityCreds, AntigravityTurn, buildAntigravityRequestBody, antigravityRequestId,
   antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityModelsUrl,
   antigravityRequestHeaders, antigravityApiError, antigravityFailureOf, antigravityShouldTryNextHost, antigravityStreamEvents,
-  parseAntigravityModels, type ToolSpec, type AntigravityThinkingLevel,
+  parseAntigravityModels, type ToolSpec, type AntigravityThinkingLevel, type BridgeUsage,
   validateAntigravityFunctionCallPairing,
 } from './catalog';
 // TYPE only, exactly as antigravity.ts imports it: erased at runtime, so bridge -> catalog stays the sole
@@ -58,6 +59,12 @@ type AntigravityRequestArgs = {
 const randomHex = (): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 
+// Process-local HMACs allow equality comparisons without exposing prompts to dictionary lookup.
+// Fingerprints intentionally change on restart; no prompt or credential state is retained.
+const diagnosticKey = randomBytes(32);
+const fingerprint = (value: unknown): string =>
+  createHmac('sha256', diagnosticKey).update(JSON.stringify(value ?? null)).digest('hex').slice(0, 16);
+
 // ----------------------------- Request (the daily-first host chain) ----------------------------- //
 
 /*
@@ -68,7 +75,7 @@ const randomHex = (): string =>
  *
  * Shared by antigravityStream and antigravityRequest.
  */
-const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): Promise<Response> => {
+const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): Promise<{ res: Response; requestId: string }> => {
   const token = args.creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
   // The envelope must carry a Cloud Code project — a hard failure at request-build time, not something the
@@ -96,6 +103,16 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
   const body = JSON.stringify(request);
   const headers = antigravityRequestHeaders(token);
   const hosts = antigravityHostChain(args.baseUrl);
+  if (args.log) {
+    const { sessionId, systemInstruction, tools, contents = [], generationConfig, toolConfig } = request.request;
+    args.log(`[bridge] antigravity cache-request ${JSON.stringify({ requestId: request.requestId, model: args.model,
+      sessionHash: fingerprint([args.creds.projectId, sessionId]), systemHash: fingerprint(systemInstruction),
+      toolsHash: fingerprint(tools), configHash: fingerprint({ generationConfig, toolConfig }),
+      contents: contents.length, contentsHash: fingerprint(contents),
+      // ponytail: first 128 contents localize prefix churn; the full hash still detects changes beyond that cap.
+      contentHashes: contents.slice(0, 128).map(fingerprint),
+    })}`);
+  }
 
   for (const [index, host] of hosts.entries()) {
     const isLast = index === hosts.length - 1;
@@ -108,8 +125,8 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
       continue;
     }
     // Keep both host outcomes visible; the final error otherwise hides the primary failure.
-    args.log?.(`[bridge] antigravity upstream ${new URL(host).hostname} status=${res.status} requestBytes=${Buffer.byteLength(body)} contents=${request.request.contents?.length ?? 0} tools=${args.tools?.length ?? 0} thinking=${args.thinkingLevel ?? 'default'}`);
-    if (res.ok) return res;
+    args.log?.(`[bridge] antigravity upstream ${new URL(host).hostname} status=${res.status} requestBytes=${Buffer.byteLength(body)} contents=${request.request.contents?.length ?? 0} tools=${args.tools?.length ?? 0} thinking=${args.thinkingLevel ?? 'default'} requestId=${request.requestId}`);
+    if (res.ok) return { res, requestId: request.requestId };
     const errBody = await res.text().catch(() => '');
     const error = antigravityApiError(res.status, errBody, res.headers.get('retry-after'));
     // A timed 429 goes back to the Bridge's bounded retry; immediately walking hosts would ignore its wait.
@@ -181,13 +198,28 @@ const antigravityChunks = async function* (body: ReadableStream<Uint8Array>): As
   }
 };
 
-// Stream one Antigravity turn as door-neutral BridgeStreamEvents. The state machine — thinking parts
-// dropped, usage kept only on the terminal chunk, tool calls flushed when the iterable ends — is
-// antigravityStreamEvents', unit-tested in antigravity.test.ts. This adds the socket and nothing else.
+// Both paths observe the mapper's real usage once, including missing usage and interrupted consumption.
+// ended describes consumption, not a backend cache verdict or a successful model completion.
+const antigravityEvents = async function* (args: AntigravityRequestArgs, stream: boolean): AsyncGenerator<BridgeStreamEvent> {
+  const { res, requestId } = await antigravityFetch(args, stream);
+  let usage: BridgeUsage | undefined;
+  let ended = false;
+  try {
+    if (stream && !res.body) return;
+    const chunks = stream ? antigravityChunks(res.body!) : oneChunk(await res.json().catch(() => undefined));
+    for await (const event of antigravityStreamEvents(chunks, stream && args.strictCompletion)) {
+      if (event.type === 'usage') usage = event.usage;
+      yield event;
+    }
+    ended = true;
+  } finally {
+    args.log?.(`[bridge] antigravity cache-usage ${JSON.stringify({ requestId, ended, usage: usage ?? null })}`);
+  }
+};
+
+// Stream one Antigravity turn as door-neutral BridgeStreamEvents, with the existing mapper unchanged.
 export const antigravityStream = async function* (args: AntigravityRequestArgs): AsyncGenerator<BridgeStreamEvent> {
-  const res = await antigravityFetch(args, true);
-  if (!res.body) return;
-  yield* antigravityStreamEvents(antigravityChunks(res.body), args.strictCompletion);
+  yield* antigravityEvents(args, true);
 };
 
 // ----------------------------- Non-streaming ----------------------------- //
@@ -196,10 +228,8 @@ export const antigravityStream = async function* (args: AntigravityRequestArgs):
 // drains the single JSON document, so the two paths cannot disagree about what counts as answer text
 // (thinking parts are dropped in exactly one place).
 export const antigravityRequest = async (args: AntigravityRequestArgs): Promise<string> => {
-  const res = await antigravityFetch(args, false);
-  const document = await res.json().catch(() => undefined);
   let text = '';
-  for await (const event of antigravityStreamEvents(oneChunk(document))) {
+  for await (const event of antigravityEvents(args, false)) {
     if (event.type === 'text') text += event.text;
   }
   return text;

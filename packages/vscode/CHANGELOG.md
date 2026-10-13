@@ -4,6 +4,20 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.3] - 2026-10-13
+
+### Fixed
+
+- The bundled Bridge retains explicit cache keys on Grok and API-key Responses routes and preserves validated Grok conversation identity independently of cache keys.
+
+### Added
+
+- Antigravity logs include bounded, process-local prompt fingerprints and observed cache usage for diagnosing stalled reuse. No raw prompt/credential logging or measured cache-recovery claim is introduced.
+
+### Compatibility
+
+- Paired terminal/npm version: **2.2.6**. Desktop protocol remains **5**. This update does not enable routing or change the Antigravity instruction contract.
+
 ## [1.14.2] - 2026-10-12
 
 ### Added
