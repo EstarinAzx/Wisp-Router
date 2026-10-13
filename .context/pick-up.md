@@ -1,19 +1,17 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-09-18
+updated: 2026-10-14
 tags: [context, pick-up]
 ---
 
 # Pick up
 
-Start: read [[overview]] + [[active-work]]. **Wisp2.2.0 and companion1.14.0 are published and installed.** Release tag v2.2.0 is d0a411a; CI35228363121 and public artifact verification pass. Supersedes all candidate-only/failing-desktop batons.
+Start with [[active-work]] for current state and [[overview]] for the code map.
 
-No active release task. Live Bridge shell787e24bf now hosts the installed npm binary on41184; desktop remains enabled. Routes/settings and both sign-ins preserved across install. User can run `wisp serve` next time, and `wisp codex-desktop refresh` after Alias changes; restart desktop after catalog changes. VS Code needs reload for its updated host. No auto-start service added.
+**Repository handoff:** `.context/pick-up.md` is the entry point; `.context/active-work.md` is the current baton on upstream `main`. A local folder named `wisp/` may contain older notes; its name does not make it the current handoff. Traycer keeps detailed task evidence, linked by identifier from the baton.
 
-Evidence: `D:/wisp-release-2.2.0-20260918/verification.json`, `after-handoff.json`, and epic `autobuild/wisp-desktop/release-220/index.md`. Grok desktop acceptance user-confirmed; other external providers, installed extension-host behavior and Traycer GUI Aliases remain unverified. Antigravity excluded intentionally.
-
-Main checkout has unrelated user edits and was not pulled/reset. Keep flows.md, Untitled.canvas, all worktrees and prior candidate evidence. Do not restore obsolete auth/config backups.
+The 2.2.7 release and companion 1.14.4 delivery are complete. Remaining live/UI acceptance is explicitly open in [[active-work]]. Do not resume an old relay, repeat publication or run historical provider probes merely because an older note names them.
 
 ## Related
 

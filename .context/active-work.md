@@ -1,52 +1,51 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-09-18
-tags: [context, active-work]
+updated: 2026-10-14
+tags: [context, active-work, release]
 ---
 
 # Active Work
 
-_Last updated: 2026-09-18 by GPT-6 Astra / Codex (auto)_
-_Release commit: `d0a411a74eb9d260d213a8f81ffbd1b1dd7145fd` (v2.2.0)._
+_Last updated: 2026-10-14 by Codex._
+_Released product source: `9141af08fe95a070c6614f3aa9d06a8afec21671` (`v2.2.7`)._
 
 ## Current focus
 
-Wisp 2.2.0 is published and installed, with companion VSIX 1.14.0. PR223 merged; release CI35228363121 passed four native builds and publication. No remaining release task. These facts supersede candidate-only and desktop-failure batons.
+Wisp terminal/npm **2.2.7** and VS Code companion **1.14.4** are published and installed on the reference operator machine. Delivery and independent review are complete. The original Antigravity cache/effort goal remains open for the unverified behavior below.
+
+This is the repository's current project baton. Start with [[pick-up]]; older local `wisp/` notes and dated investigation handoffs are historical snapshots. Detailed task evidence stays in Traycer, identified below, rather than becoming a second project entry point.
 
 ## State
 
-- **Done:** user-confirmed repaired Grok desktop text/follow-up/tool execution, lag gone; combined native/restart/sign-in checklist user-reported passed. Other external providers are not individually desktop-verified.
-- **Verified:** fresh core1232/TUI126, types/VSIXcompile, both actual CLI0.154 synthetic signed checks; independent final release review. All five downloaded public assets match GitHub SHA256; all four binaries match tag CI. npm shell/all four platform manifests available2.2.0; downloaded Windows npm binary matches standalone; packaged checks pass.
-- **Installed:** npm2.2.0; VSIX1.14.0. Installed binary and extension bundle match downloaded release. Reload VS Code to activate the new extension host; installed extension-host behavior remains unverified.
-- **Live Bridge:** owned shell787e24bf-1023-4f5e-aee9-e26ee1f4c81f now runs installed npm platform binary, not candidate. Port41184, integration enabled. No auto-start service; after reboot user runs `wisp serve` and keeps it running.
-- **Preserved:** Wisp config/auth and Codex config/auth identical across install and host switch. Original earlier baseline Codex config changed concurrently before install; preserved latest instead of restoring. Existing Grok4.6(Wisp) Alias retained; `my-grok` was only an example and never created by agent.
+- **Delivered:** [PR #228](https://github.com/EstarinAzx/Wisp-Router/pull/228) merged; [release v2.2.7](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.7) published. Companion 1.14.4 ships the same shared Bridge changes; Wisp Slot is unchanged.
+- **Changes:** eligible Antigravity tiered targets expose Low/Medium/High, and Responses preserves the selected effort. The experimental `wisp antigravity-compat on|off|status` option defaults off. See the [release notes](../docs/releases/v2.2.7.md) for the accepted reminder-priority/omission tradeoff and limits.
+- **Verified delivery:** four native tag builds and packaged smokes, all five GitHub asset digests, all five npm tarball integrities/payloads, the Windows download fallback, installed npm/VSIX bytes and isolated package behavior passed. Independent delivery review found no actionable defects.
+- **Reference runtime at delivery:** terminal 2.2.7/companion 1.14.4 installed; Desktop integration and client fallback off, no persistent Bridge running. Auth/settings and original research were preserved. This is an observation from 2026-10-13 UTC, not a command to change another installation or evidence of its current runtime.
+- **Open acceptance:** actual Desktop picker/selection, real target effort/allocation, meaningful fallback cache benefit/historical plateau repair and actual VS Code host activation remain unverified.
+- **Automation:** the release relay stopped at that acceptance boundary after leg 15. No release job, reviewer or provider experiment remains assigned.
 
 ## Pick up here
 
-No active release work. For verification/rollback details read `D:/wisp-release-2.2.0-20260918/verification.json`, `verification-commands.json`, `immediate-before-install.json`, `after-handoff.json` and epic artifact `autobuild/wisp-desktop/release-220/index.md`. Public release: https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.0.
+Work from upstream `main` and this baton for the next explicitly scoped task. Publication/install need no repeat; never move the published tag or rerun old diagnostic scripts as a default next step.
 
-If adding supported aliases, use existing routing commands then `wisp codex-desktop refresh` and restart desktop. Antigravity remains excluded; renaming an Alias cannot bypass it. Preserve exact routes, credentials and current effort/preferences. No need to rerun enable or old diagnostic trials.
+All **eight provider experiments are CLOSED**: 21 generation requests, 8 refreshes, 1 metadata request and 1 count request; 336000 prompt/86016 output reservations. Known reported prompt totals 62993 plus unknown consumption; full output is unknown. The latest effort check ended at Low HTTP 429, with Medium/High unsent; the earlier Claude fallback comparison ended with SAFETY. Causes, actual target acceptance and cache benefit are not established. Do not retry, reconstruct/resubmit, change hosts/instructions/caps, relax guards or create a replacement allowance from these old records.
+
+Actual UI checks remain deferred to an allowed observation path. Future provider acceptance needs a separately scoped authorization. Preserve the settled opt-in tradeoff; do not ask to approve it again. Preserve current credentials/settings, uncommitted research and old evidence; inspect fresh workspace/runtime identity before any state change.
+
+## Evidence
+
+- [Release notes](../docs/releases/v2.2.7.md), [native tag workflow](https://github.com/EstarinAzx/Wisp-Router/actions/runs/38477827141) and [merged source](https://github.com/EstarinAzx/Wisp-Router/commit/9141af08fe95a070c6614f3aa9d06a8afec21671).
+- Detailed external records belong to Traycer task `1702a7c7-a431-43c2-ab5f-79d9cf189643`. Within its artifacts, read `release-227/publication/index.md` and `release-227/publication/review/index.md` for verified delivery; `release-227/handoff/index.md` retains the stopped task checkpoint.
+- Within the same task, `release-227/instruction-contract/index.md` records the settled opt-in decision; `effort-candidate/`, `effort-acceptance/` and `live-client-comparison/` under `release-227/` retain bounded acceptance results and their reviews. These are task artifact identifiers, not repository paths. A fresh clone can use the public release notes; connected agents can locate the detailed records through Traycer.
 
 ## Skills for next session
 
-- preset pick-up; verification-before-completion for follow-up verification.
-- systematic-debugging only for a new reproduced failure.
-
-## Open questions
-
-None blocking release. Installed VS Code host and Traycer GUI Alias support remain separate/unverified.
-
-## Recent context
-
-- User explicitly authorized release/publication and installed-copy upgrade; did not request auto-start service.
-- Existing workflow rerun hazard: a pre-existing release bypasses asset validation. This was a fresh release; never rerun publication on an existing release without checking exact assets. Independent review at epic release-final-review.
-- Main checkout was not pulled/reset because it contains user-owned context edits. Application source is on origin/main and v2.2.0; preserve main .context/flows.md and Untitled.canvas. All worktrees and previous candidate evidence retained.
-- Computer-use guidance prohibits automating ChatGPT desktop UI; UI acceptance was supplied by user, not inferred from synthetic checks.
+Use the project's existing preset pick-up/context workflow to read this baton. Load implementation, debugging or verification skills only for the newly assigned work; reading this note does not resume a closed experiment.
 
 ## Related
 
-- [[overview]]
 - [[pick-up]]
+- [[overview]]
 - [[decisions]]
 - [[release-follow-ups]]
