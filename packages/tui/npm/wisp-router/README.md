@@ -1,5 +1,7 @@
 # wisp-router
 
+**2.2.6:** preserves explicit provider cache keys and Grok conversation identity, and adds Antigravity cache diagnostics. No live cache-hit or quota-recovery improvement is claimed. [Diagnostic reference](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/provider-caching.md).
+
 **2.2.5:** adds signed-in Codex Desktop voice signaling and `/gpt-desktop on` / `/gpt-desktop off` in the TUI. These commands reuse reversible setup and leave the Bridge's running state unchanged. `on` enables qualified Antigravity compatibility for `gemini-3.8-flash-tiered`: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Native model names keep their native capabilities and sign-in; other clients retain their existing routes. Installation and running-Bridge handover are separate actions. [Setup, limits and rollback](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 
 Update the setup command and serving Bridge together: desktop protocol 5 requires terminal 2.2.5 or companion VSIX 1.14.2. Protocol-3 setups need journaled disable then enable to add voice settings. Restart Desktop after configuration changes and coordinate any Bridge handover around active clients. Native/account refresh still requires disable/discover/enable. Strict-mode Antigravity and unqualified targets remain excluded. Native context limits remain in force; this release does not unlock a full 1M usable window. Slot is unchanged.
