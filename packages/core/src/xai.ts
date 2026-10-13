@@ -145,7 +145,7 @@ export const xaiResponsesUrl = (baseUrl: string, model: string): string =>
   isGrokCliProxyModel(model) ? `${baseUrl}/responses` : XAI_PUBLIC_RESPONSES_URL;
 
 // Request headers. Bearer always; proxy models add the x-grok-* CLI-identifying set the subscription proxy
-// validates. x-grok-conv-id keys the proxy's cache — one per stream.
+// validates. x-grok-conv-id keys the proxy's cache — stable per conversation when the caller supplies identity.
 export const xaiRequestHeaders = (model: string, bearer: string, sessionId: string): Record<string, string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

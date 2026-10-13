@@ -188,6 +188,25 @@ const runServer = async (deps: BridgeDeps, fn: (port: number) => Promise<void>):
 describe('Bridge — Grok dispatch (#95)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it('keeps Claude conversation identity on the Grok wire and isolates missing or invalid identity', async () => {
+    const sessions: (string | null)[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      sessions.push(new Headers(init.headers).get('x-grok-conv-id')); return grokSse();
+    });
+    const a = '11111111-1111-4111-8111-111111111111';
+    const b = '22222222-2222-4222-8222-222222222222';
+    await runServer(makeDeps({}), async port => {
+      for (const session of [a, a, b, undefined, undefined, 'invalid']) {
+        const metadata = session ? { user_id: JSON.stringify({ session_id: session }) } : undefined;
+        expect((await post(port, '/v1/messages', { model: 'xai', stream: true, metadata,
+          messages: [{ role: 'user', content: 'same prompt' }] })).status).toBe(200);
+      }
+    });
+    expect(sessions.slice(0, 3)).toEqual([a, a, b]);
+    expect(new Set(sessions.slice(3)).size).toBe(3);
+    for (const session of sessions.slice(3)) expect(session).toMatch(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i);
+  });
+
   // OpenAI door: a Grok Target streams its reply back as OpenAI chat.completion SSE.
   it('streams a Grok Target through the OpenAI door (/v1/chat/completions)', async () => {
     vi.stubGlobal('fetch', async () => grokSse());

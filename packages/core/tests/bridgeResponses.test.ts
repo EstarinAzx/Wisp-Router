@@ -308,14 +308,22 @@ describe('Responses public HTTP contract', () => {
       expect(seen[3].model).toBe('other-model');
     }, provider => ({ providers: [provider, { ...provider, id: 'other', defaultModel: 'other-model' }], activeProviderId: () => active }));
   });
-  it('preserves the caller cache key and distinct session identities through Codex adapter requests', async () => {
+  it('forwards an explicit cache key on the keyed wire without inventing a default', async () => {
+    await withBridge((_body, res) => answer(res), async (port, seen) => {
+      expect((await post(port, native({ prompt_cache_key: 'caller-cache-key' }))).status).toBe(200);
+      expect((await post(port, native())).status).toBe(200);
+      expect(seen[0].prompt_cache_key).toBe('caller-cache-key');
+      expect(seen[1]).not.toHaveProperty('prompt_cache_key');
+    });
+  });
+  it.each(['codex', 'xai'] as const)('preserves the caller cache key and distinct session identities through %s adapter requests', async kind => {
     const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [{ id: 'gpt-6-astra', name: 'gpt-6-astra', visible: true, reasoningEfforts: ['low'], defaultEffort: 'low' }] });
     const sessions: unknown[] = [];
     try {
-      await withBridge((_body, res) => { sessions.push(res.req.headers.session_id); wireAnswer('codex', res); }, async (port, seen) => {
+      await withBridge((_body, res) => { sessions.push(res.req.headers[kind === 'codex' ? 'session_id' : 'x-grok-conv-id']); wireAnswer('codex', res); }, async (port, seen) => {
         // Separate conversations may intentionally share a cache key; it is not their session identity.
         for (const session of ['11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', 'invalid-session', undefined]) {
-          expect((await post(port, native({ prompt_cache_key: 'shared-cache-key' }), session)).status).toBe(200);
+          expect((await post(port, native({ prompt_cache_key: 'shared-cache-key', reasoning: {} }), session)).status).toBe(200);
           expect(seen.at(-1).prompt_cache_key).toBe('shared-cache-key');
         }
         expect(sessions.slice(0, 3)).toEqual(['11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']);
@@ -323,7 +331,10 @@ describe('Responses public HTTP contract', () => {
         expect(sessions[3]).not.toBe(sessions[4]);
         for (const key of [null, 42, {}, '']) expect((await post(port, native({ prompt_cache_key: key }))).status).toBe(400);
         expect(seen).toHaveLength(5);
-      }, wireDeps('codex'));
+      }, provider => kind === 'codex' ? wireDeps('codex')(provider) : {
+        providers: [{ ...provider, kind: 'xai-oauth', defaultModel: 'grok-build' }],
+        xaiCreds: async () => ({ accessToken: 'synthetic' }),
+      });
     } finally { discovery.mockRestore(); }
   });
   it('forwards context without inventing effort when Codex has no effort metadata', async () => {

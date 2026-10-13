@@ -256,9 +256,13 @@ describe('antigravityStream — the host chain', () => {
     const lines: string[] = [];
     await expect(collect(antigravityStream({ ...turn(), log: line => lines.push(line) })))
       .rejects.toThrow(/Antigravity API error 429/);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('daily-cloudcode-pa.googleapis.com status=503');
-    expect(lines[1]).toContain('cloudcode-pa.googleapis.com status=429');
+    const hosts = lines.filter(line => line.startsWith('[bridge] antigravity upstream '));
+    expect(hosts).toHaveLength(2);
+    expect(hosts[0]).toContain('daily-cloudcode-pa.googleapis.com status=503');
+    expect(hosts[1]).toContain('cloudcode-pa.googleapis.com status=429');
+    const diagnostic = lines.find(line => line.startsWith('[bridge] antigravity cache-request '))!;
+    const { requestId } = JSON.parse(diagnostic.slice(diagnostic.indexOf('{')));
+    for (const host of hosts) expect(host).toContain(`requestId=${requestId}`);
     expect(lines.join('\n')).not.toMatch(/test-token|example-project-1|weather in Paris/);
   });
 
@@ -274,6 +278,91 @@ describe('antigravityStream — the host chain', () => {
     await expect(collect(antigravityStream({ ...turn(), baseUrl: 'https://example.test' }))).rejects.toThrow(/503/);
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe('https://example.test/v1internal:streamGenerateContent?alt=sse');
+  });
+});
+
+describe('Antigravity cache diagnostics', () => {
+  const records = (logs: string[], kind: 'request' | 'usage') => logs
+    .filter(line => line.startsWith(`[bridge] antigravity cache-${kind} `))
+    .map(line => JSON.parse(line.slice(line.indexOf('{'))));
+  const cachedSse = 'data: {"response":{"candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10000,"cachedContentTokenCount":8000,"candidatesTokenCount":10,"thoughtsTokenCount":20}}}\r\n\r\n';
+
+  it('locates changed prompt components without logging their contents or account/session identity', async () => {
+    const logs: string[] = [];
+    const calls = stubFetch(Array.from({ length: 6 }, () => sseResponse(cachedSse)));
+    const messages = [{ role: 'system' as const, content: 'PRIVATE_SYSTEM' }, { role: 'user' as const, content: 'PRIVATE_USER' }];
+    const tools = [{ name: 'private_tool', description: 'PRIVATE_TOOL', inputSchema: { type: 'object' } }];
+    const args = { ...turn(), creds: creds({ accessToken: 'PRIVATE_BEARER', projectId: 'PRIVATE_PROJECT' }), messages, tools, log: (line: string) => logs.push(line) };
+    const variants = [
+      args, args,
+      { ...args, messages: [...messages, { role: 'assistant' as const, content: 'PRIVATE_ANSWER' }, { role: 'user' as const, content: 'next' }] },
+      { ...args, messages: [...messages, { role: 'system' as const, content: 'PRIVATE_LATE_NOTE' }] },
+      { ...args, tools: [{ ...tools[0], description: 'changed tool' }] },
+      { ...args, messages: [messages[0], { ...messages[1], content: 'changed first user' }] },
+    ];
+    for (const args of variants) expect(await collect(antigravityStream(args))).toEqual([
+      { type: 'text', text: 'OK' },
+      { type: 'usage', usage: { input_tokens: 2000, cache_read_input_tokens: 8000, cache_creation_input_tokens: 0, output_tokens: 30 } },
+    ]);
+    const requests = records(logs, 'request');
+    const usage = records(logs, 'usage');
+    expect(requests).toHaveLength(6);
+    expect(usage).toHaveLength(6);
+    for (const [index, request] of requests.entries()) {
+      const wire = JSON.parse(calls[index].init.body as string);
+      expect(request.requestId).toBe(wire.requestId);
+      expect(usage[index]).toMatchObject({ requestId: wire.requestId, ended: true, usage: {
+        input_tokens: 2000, cache_read_input_tokens: 8000, cache_creation_input_tokens: 0, output_tokens: 30,
+      } });
+      expect(request.sessionHash).toMatch(/^[a-f0-9]{16}$/);
+      expect(logs.join('\n')).not.toContain(wire.request.sessionId);
+    }
+    for (const field of ['sessionHash', 'systemHash', 'toolsHash', 'configHash', 'contentsHash', 'contentHashes']) {
+      expect(requests[0][field]).toEqual(requests[1][field]);
+    }
+    expect(requests[2].sessionHash).toBe(requests[0].sessionHash);
+    expect(requests[2].contentHashes.slice(0, 1)).toEqual(requests[0].contentHashes);
+    expect(requests[2].contentsHash).not.toBe(requests[0].contentsHash);
+    expect(requests[3].systemHash).not.toBe(requests[0].systemHash);
+    expect(requests[3].contentsHash).toBe(requests[0].contentsHash);
+    expect(requests[4].toolsHash).not.toBe(requests[0].toolsHash);
+    expect(requests[4].systemHash).toBe(requests[0].systemHash);
+    expect(requests[5].contentHashes[0]).not.toBe(requests[0].contentHashes[0]);
+    expect(requests[5].sessionHash).not.toBe(requests[0].sessionHash);
+    for (const secret of ['PRIVATE_SYSTEM', 'PRIVATE_USER', 'PRIVATE_TOOL', 'private_tool', 'PRIVATE_ANSWER',
+      'PRIVATE_LATE_NOTE', 'PRIVATE_BEARER', 'PRIVATE_PROJECT']) expect(logs.join('\n')).not.toContain(secret);
+  });
+
+  it('bounds individual content fingerprints while retaining the full history fingerprint', async () => {
+    const logs: string[] = [];
+    stubFetch([sseResponse(cachedSse), sseResponse(cachedSse)]);
+    const messages = Array.from({ length: 130 }, (_, index) => ({ role: 'user' as const, content: String(index) }));
+    await collect(antigravityStream({ ...turn(), messages, log: line => logs.push(line) }));
+    await collect(antigravityStream({ ...turn(), messages: [...messages.slice(0, -1), { role: 'user', content: 'changed past cap' }], log: line => logs.push(line) }));
+    const requests = records(logs, 'request');
+    expect(requests).toHaveLength(2);
+    const [first, second] = requests;
+    expect(first.contents).toBe(130);
+    expect(first.contentHashes).toHaveLength(128);
+    expect(first.contentHashes).toEqual(second.contentHashes);
+    expect(first.contentsHash).not.toBe(second.contentsHash);
+  });
+
+  it.each([true, false])('reports unavailable usage explicitly on stream=%s without changing the reply', async stream => {
+    const logs: string[] = [];
+    const body = { response: { candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }] } };
+    stubFetch([stream ? sseResponse(`data: ${JSON.stringify(body)}\r\n\r\n`) : new Response(JSON.stringify(body))]);
+    const args = { ...turn(), log: (line: string) => logs.push(line) };
+    if (stream) expect(await collect(antigravityStream(args))).toEqual([{ type: 'text', text: 'OK' }]);
+    else expect(await antigravityRequest(args)).toBe('OK');
+    expect(records(logs, 'usage')).toEqual([{ requestId: expect.any(String), ended: true, usage: null }]);
+  });
+
+  it('records an interrupted stream without inventing cached tokens', async () => {
+    const logs: string[] = [];
+    stubFetch([sseResponse('data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}}\r\n\r\n')]);
+    await expect(collect(antigravityStream({ ...turn(), strictCompletion: true, log: line => logs.push(line) }))).rejects.toThrow(/before completion/);
+    expect(records(logs, 'usage')).toEqual([{ requestId: expect.any(String), ended: false, usage: null }]);
   });
 });
 
