@@ -355,4 +355,24 @@ describe('quota storage', () => {
       expect(existsSync(lock)).toBe(false);
     } finally { remove.mockRestore(); }
   });
+
+  test('recovery fences new acquisitions when the observed owner exits and removes its lock', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 999999 }));
+    let contender: Promise<unknown> | undefined;
+    const probe = vi.spyOn(process, 'kill').mockImplementation(() => {
+      unlinkSync(lock); // The observed owner finished between the read and the PID probe.
+      contender = home().withQuotaRefreshLock(async () => 'stole the gap').catch(error => error);
+      throw Object.assign(new Error('owner exited'), { code: 'ESRCH' });
+    });
+    try {
+      const result = await h.withQuotaRefreshLock(async () => 'recovered').catch(error => error);
+      expect(await contender).toBeInstanceOf(Error);
+      expect(String(await contender)).toMatch(/busy/i);
+      expect(result).toBe('recovered');
+      expect(existsSync(lock)).toBe(false);
+    } finally { probe.mockRestore(); await contender; }
+  });
 });

@@ -1,4 +1,4 @@
-import { fetchAccountQuota, QuotaRefreshBusyError, type QuotaCache, type QuotaProvider, type WispHome } from '@wisp/core';
+import { fetchAccountQuota, selectQuotaReading, QuotaRefreshBusyError, type QuotaCache, type QuotaProvider, type WispHome, type WispStatus } from '@wisp/core';
 import { home, quotaCurrent } from './store';
 
 export type QuotaCommandDeps = {
@@ -17,12 +17,13 @@ const errors = {
   invalid_response: 'quota response was not recognized; the last successful reading is retained.',
 };
 
-const display = (cache: QuotaCache, revision: string | undefined, now: number): string[] => providers.flatMap(provider => {
-  const reading = cache.providers[provider]?.reading;
-  if (!revision || !reading || reading.authRevision !== revision || now < reading.updatedAt || now - reading.updatedAt > 86400000) {
+const display = (cache: QuotaCache, status: WispStatus | undefined, revision: string | undefined, now: number): string[] => providers.flatMap(provider => {
+  const selected = selectQuotaReading(provider, cache, status, revision, now);
+  if (!selected) {
     return [`${provider}: unavailable. Use quota refresh to update.`];
   }
-  return [`${provider}: updated ${Math.floor((now - reading.updatedAt) / 1000)}s ago.`, ...reading.meters.map(meter =>
+  const { reading, source } = selected;
+  return [`${provider}: updated ${Math.floor((now - reading.updatedAt) / 1000)}s ago (${source}).`, ...reading.meters.map(meter =>
     `  ${meter.label}: ${meter.percent}%${meter.resetAt === undefined ? '' : `; resets ${new Date(meter.resetAt * 1000).toISOString()}`}`)];
 });
 
@@ -32,7 +33,7 @@ export const runQuota = async (args: string[], deps?: QuotaCommandDeps): Promise
   }
   const d = deps ?? { home, current: quotaCurrent, now: Date.now, fetch: fetchAccountQuota };
   try {
-    if (!args.length) return { exitCode: 0, lines: display(d.home.readQuota(), d.home.quotaAuthRevision(), d.now()) };
+    if (!args.length) return { exitCode: 0, lines: display(d.home.readQuota(), d.home.readStatus(), d.home.quotaAuthRevision(), d.now()) };
     if (d.signal?.aborted) return { exitCode: 1, lines: ['Quota refresh cancelled.'] };
     return await d.home.withQuotaRefreshLock(async () => {
       const cache = d.home.readQuota();
@@ -92,7 +93,7 @@ export const runQuota = async (args: string[], deps?: QuotaCommandDeps): Promise
           d.home.writeQuota(cache);
         }
       }
-      return { exitCode, lines: [...lines, ...display(cache, d.home.quotaAuthRevision(), d.now())] };
+      return { exitCode, lines: [...lines, ...display(cache, d.home.readStatus(), d.home.quotaAuthRevision(), d.now())] };
     });
   } catch (error) {
     return { exitCode: 1, lines: [error instanceof QuotaRefreshBusyError ? 'Quota refresh is busy.' : 'Could not read or save quota cache.'] };

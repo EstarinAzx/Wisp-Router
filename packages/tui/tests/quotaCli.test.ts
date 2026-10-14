@@ -52,6 +52,22 @@ test('cached display is read-only and refuses expired, future or differently bou
   expect(calls).toEqual(['codex']);
 });
 
+test('display selects whole passive readings without changing context or renewing credentials', async () => {
+  await runQuota(['refresh', 'codex'], deps);
+  now += 1000;
+  home.writeStatus({ updatedAt: now, providerId: 'codex', model: 'fixture', contextPercent: 17,
+    authRevision: home.quotaAuthRevision(), meters: [{ label: '7d', percent: 71 }] });
+  const before = readFileSync(join(dir, 'status.json'), 'utf8');
+  deps.current = async () => { throw new Error('No renewal'); };
+  const result = await runQuota([], deps);
+  expect(result.lines.join('\n')).toContain('71%');
+  expect(result.lines.join('\n')).not.toContain('42%');
+  expect(readFileSync(join(dir, 'status.json'), 'utf8')).toBe(before);
+  expect(calls).toEqual(['codex']);
+  home.writeAuth({ codex: { accessToken: 'different-token' } });
+  expect((await runQuota([], deps)).lines.join('\n')).not.toMatch(/42%|71%/);
+});
+
 test('reserves the five-minute floor before outbound work and keeps it across instances', async () => {
   home.writeConfig({ provider: 'groq', effort: 'high' });
   home.writeStatus({ updatedAt: 123, providerId: 'groq', model: 'test', contextPercent: 17 });
@@ -243,6 +259,12 @@ test('two processes cannot duplicate a refresh; dead owners recover without bypa
     import { runQuota } from ${JSON.stringify(join(root, 'packages/tui/src/quotaCli.ts'))};
     import { appendFileSync, existsSync } from 'fs';
     const home = new WispHome(${JSON.stringify(dir)});
+    let lockError;
+    const lock = home.withQuotaRefreshLock;
+    home.withQuotaRefreshLock = async action => {
+      try { return await lock(action); }
+      catch (error) { lockError = { code: error.code, message: error.message }; throw error; }
+    };
     const result = await runQuota(['refresh', 'codex'], { home, now: () => 1000000,
       current: async () => home.readAuth().codex,
       fetch: async () => {
@@ -250,7 +272,7 @@ test('two processes cannot duplicate a refresh; dead owners recover without bypa
         while (!existsSync(${JSON.stringify(gate)})) await Bun.sleep(10);
         return { ok: true, meters: [{ label: '5h', percent: 42 }] };
       } });
-    console.log(JSON.stringify(result));
+    console.log(JSON.stringify({ ...result, lockError }));
   `);
   const launch = () => Bun.spawn([process.execPath, script], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
   const first = launch();
@@ -270,7 +292,7 @@ test('two processes cannot duplicate a refresh; dead owners recover without bypa
       return JSON.parse(await new Response(child.stdout).text());
     }));
     expect(results.some(result => result.exitCode === 0)).toBe(true);
-    expect(results.every(result => result.exitCode === 0 || result.lines.join('\n').includes('busy'))).toBe(true);
+    expect(results.every(result => result.exitCode === 0 || result.lines.join('\n').includes('busy')), JSON.stringify(results)).toBe(true);
     expect(readFileSync(started, 'utf8').trim().split('\n')).toHaveLength(1);
     expect(home.readQuota().providers.codex?.nextAllowedAt).toBe(1300000);
     expect(existsSync(join(dir, 'quota-refresh.lock'))).toBe(false);

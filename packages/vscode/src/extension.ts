@@ -1086,6 +1086,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     log: (m) => output.appendLine(m),
     // #171: the statusline snapshot — same store, same file, whichever face hosts the Bridge.
     recordStatus: (status) => home.writeStatus(status),
+    authRevision: () => home.quotaAuthRevision(),
   });
 
   context.subscriptions.push(

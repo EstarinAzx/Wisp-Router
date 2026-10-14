@@ -1,5 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import { parseAccountQuota, parseQuotaCache } from '../src/index';
+import { parseAccountQuota, parseQuotaCache, selectQuotaReading, type QuotaCache, type WispStatus } from '../src/index';
+
+describe('selectQuotaReading', () => {
+  const revision = 'v1:1:2:3:4:5';
+  const cache: QuotaCache = { schema: 1, providers: { codex: { nextAllowedAt: 999999,
+    reading: { updatedAt: 200, authRevision: revision, meters: [{ label: '5h', percent: 42 }] },
+  } } };
+  const status: WispStatus = { updatedAt: 100, providerId: 'codex', model: 'fixture', authRevision: revision,
+    contextPercent: 17, contextTokens: 1700, contextWindow: 10000, meters: [{ label: '7d', percent: 71 }] };
+
+  it('chooses the freshest whole reading, prefers headers on ties and leaves conversation state unchanged', () => {
+    const before = JSON.stringify({ cache, status });
+    expect(selectQuotaReading('codex', cache, status, revision, 1000)).toEqual({ source: 'refresh', reading: cache.providers.codex!.reading });
+    for (const updatedAt of [200, 300]) expect(selectQuotaReading('codex', cache, { ...status, updatedAt }, revision, 1000))
+      .toEqual({ source: 'headers', reading: { updatedAt, authRevision: revision, meters: [{ label: '7d', percent: 71 }] } });
+    expect(JSON.stringify({ cache, status })).toBe(before);
+  });
+
+  it('selects remembered headers even when the active Provider has no meters', () => {
+    const remembered = { updatedAt: 400, model: 'older-model', authRevision: revision, meters: [{ label: '7d', percent: 12 }] };
+    for (const providerId of ['anthropic', 'codex']) {
+      expect(selectQuotaReading('codex', cache, { ...status, providerId, meters: undefined, providers: { codex: remembered } }, revision, 1000))
+        .toEqual({ source: 'headers', reading: { updatedAt: 400, authRevision: revision, meters: remembered.meters } });
+    }
+  });
+
+  it('rejects unknown, invalid and changed bindings for active, remembered and refreshed readings', () => {
+    const withLedger = { ...status, providers: { codex: { ...status, updatedAt: 400 } } };
+    for (const current of [undefined, '', 'unbound', 'v1:1:2:3:4:6'])
+      expect(selectQuotaReading('codex', cache, withLedger, current, 1000)).toBeUndefined();
+    expect(selectQuotaReading('codex', { schema: 1, providers: {} }, { ...status, authRevision: undefined }, revision, 1000)).toBeUndefined();
+  });
+
+  it('rejects future, stale and malformed whole readings, with a 24-hour inclusive boundary', () => {
+    const empty: QuotaCache = { schema: 1, providers: {} };
+    for (const updatedAt of [1001, -1, NaN, Infinity])
+      expect(selectQuotaReading('codex', empty, { ...status, updatedAt }, revision, 1000)).toBeUndefined();
+    expect(selectQuotaReading('codex', cache, undefined, revision, 200 + 86400000)?.source).toBe('refresh');
+    expect(selectQuotaReading('codex', cache, status, revision, 200 + 86400001)).toBeUndefined();
+    for (const meters of [[{ label: '5h', percent: 101 }], [{ label: 'PRIVATE', percent: 2 }],
+      [{ label: '5h', percent: 42 }, { label: '5h', percent: 71 }]]) {
+      expect(selectQuotaReading('codex', empty, { ...status, meters }, revision, 1000)).toBeUndefined();
+    }
+  });
+});
 
 // Synthetic values; kind/group/scope witnessed in #201's follow-up evidence:
 // https://github.com/getpaseo/paseo/issues/2302 (not fresh Wisp auth acceptance).

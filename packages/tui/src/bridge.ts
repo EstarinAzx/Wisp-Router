@@ -96,5 +96,6 @@ export const createTuiBridge = (log: (message: string) => void) => {
     // #171: the statusline snapshot lands in the same store the config does, so the wisp-slot statusline
     // script reads it straight out of ~/.wisp without knowing which face is hosting.
     recordStatus: (status) => home.writeStatus(status),
+    authRevision: () => home.quotaAuthRevision(),
   });
 };

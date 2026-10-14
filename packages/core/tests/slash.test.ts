@@ -3,6 +3,11 @@
 import { describe, it, expect } from 'vitest';
 import { parseSlash, suggestSlash, completeSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
 
+it('completes quota without running it and preserves explicit refresh arguments', () => {
+  expect(completeSlash('/quo', 0)).toBe('/quota ');
+  expect(parseSlash('/quota refresh codex')).toEqual({ command: 'quota', args: ['refresh', 'codex'] });
+});
+
 // A fixed list so filter tests never churn when the real palette grows.
 const cmds: SlashCommandDef[] = [
   { name: 'providers', description: 'pick provider' },

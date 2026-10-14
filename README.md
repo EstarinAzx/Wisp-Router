@@ -139,6 +139,20 @@ The option defaults to off. Use **`wisp antigravity-compat status`** to inspect 
 
 In the TUI, **`/antigravity-compat`** (or **`/antigravity-compat status`**) opens the current setting and guidance without changing it. Add **`on`** or **`off`** to change the same shared setting. Use **↑/↓** to scroll the explanation and **Esc** to return to the palette.
 
+### Account quota
+
+Use **`wisp quota`** or **`/quota`** in the TUI to view cached Claude/Codex usage, reset times and reading age. Viewing it does not contact a Provider. To update it explicitly:
+
+```sh
+wisp quota refresh              # signed-in supported Providers, one at a time
+wisp quota refresh anthropic    # Claude only
+wisp quota refresh codex        # Codex only
+```
+
+The TUI accepts the same arguments after **`/quota`**. **↑/↓** scrolls; **Esc** cancels a pending request or closes the result. Refreshes require a Wisp sign-in, allow at most one usage request per Provider every five minutes, and respect longer server retry deadlines. Failed or cancelled requests retain the last valid reading and its age.
+
+The Slot statusline uses the newest complete reading from a refresh or a model turn, including before your first turn. It never refreshes automatically. Quota refresh does not change routing, models, context usage or the conversation timestamp. Readings expire after 24 hours; changes to stored credentials invalidate older readings. After upgrading, legacy quota snapshots without an account binding stay unavailable until an explicit refresh or a new metered turn from the upgraded Bridge.
+
 ### VS Code extension
 
 Download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then open **Extensions → ⋯ → Install from VSIX…** in VS Code. The extension is not on the Marketplace yet.

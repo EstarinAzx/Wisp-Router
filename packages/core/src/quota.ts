@@ -1,4 +1,4 @@
-import { quotaWindowLabel, type QuotaMeter } from './status';
+import { quotaWindowLabel, QUOTA_LEDGER_MAX_AGE_MS, type QuotaMeter, type WispStatus } from './status';
 
 export type QuotaProvider = 'anthropic' | 'codex';
 export type QuotaReading = { updatedAt: number; authRevision: string; meters: QuotaMeter[] };
@@ -43,6 +43,27 @@ export const parseQuotaCache = (raw: unknown): QuotaCache => {
     };
   }
   return cache;
+};
+
+// Each observation stands alone. Reuse the cache validator for passive/legacy on-disk snapshots too.
+export const selectQuotaReading = (
+  provider: QuotaProvider, cache: QuotaCache, status: WispStatus | undefined,
+  authRevision: string | undefined, now: number,
+): { reading: QuotaReading; source: 'refresh' | 'headers' } | undefined => {
+  if (!authRevision || !/^v1:\d+:\d+:\d+:\d+:\d+$/.test(authRevision) || !epochMs(now)) return undefined;
+  let selected: ReturnType<typeof selectQuotaReading>;
+  const candidates = [
+    { source: 'refresh' as const, reading: cache?.schema === 1 ? cache.providers?.[provider]?.reading : undefined },
+    { source: 'headers' as const, reading: status?.providers?.[provider] },
+    { source: 'headers' as const, reading: status?.providerId === provider ? status : undefined },
+  ];
+  for (const candidate of candidates) {
+    const reading = parseQuotaCache({ schema: 1, providers: { [provider]: { reading: candidate.reading } } }).providers[provider]?.reading;
+    if (!reading || reading.authRevision !== authRevision || now < reading.updatedAt
+      || now - reading.updatedAt > QUOTA_LEDGER_MAX_AGE_MS) continue;
+    if (!selected || reading.updatedAt >= selected.reading.updatedAt) selected = { reading, source: candidate.source };
+  }
+  return selected;
 };
 
 const isoSeconds = (value: unknown): number | undefined => {

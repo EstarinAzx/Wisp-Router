@@ -113,6 +113,104 @@ test.each([[40, 24], [100, 32]])('TUI compatibility guidance and errors remain r
   expect(result.code).toBe(0);
 });
 
+test('actual quota CLI and Node Slot agree on the same real auth-file revision before any turn', () => {
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ codex: { accessToken: 'fixture-token', accountId: 'fixture-account' } }));
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ routing: { families: { sonnet: { providerId: 'codex', model: 'fixture' } } } }));
+  const before = readFileSync(join(home, 'config.json'), 'utf8');
+  const invoke = (fail: boolean) => run(['--eval', `
+    import assert from 'node:assert/strict';
+    let calls = 0;
+    const realNow = Date.now();
+    Date.now = () => realNow + ${fail ? 300001 : 0};
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'https://chatgpt.com/backend-api/wham/usage');
+      assert.equal(init.redirect, 'manual');
+      calls++;
+      return ${fail ? "new Response('PRIVATE upstream error', { status: 429 })" : "Response.json({ rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000, reset_at: 2000000000 }, secondary_window: null } })"};
+    };
+    process.argv = [process.execPath, 'wisp', 'quota', 'refresh', 'codex'];
+    await import('./packages/tui/src/index.tsx');
+    assert.equal(calls, 1);
+  `], root, 3000);
+  const success = invoke(false);
+  expect(success.err).toBe('');
+  expect(success.code).toBe(0);
+  expect(success.out).toContain('42%');
+  const reading = JSON.parse(readFileSync(join(home, 'quota.json'), 'utf8')).providers.codex.reading;
+  const failed = invoke(true);
+  expect(failed.code).toBe(1);
+  expect(failed.out).toContain('42%');
+  expect(failed.out + failed.err).not.toContain('PRIVATE');
+  expect(JSON.parse(readFileSync(join(home, 'quota.json'), 'utf8')).providers.codex.reading).toEqual(reading);
+  const slot = Bun.spawnSync(['node', join(root, 'plugins/slot/statusline/wisp-statusline.js')], {
+    env: { ...process.env, WISP_HOME: home, ANTHROPIC_BASE_URL: 'http://127.0.0.1:41184' },
+    stdin: new TextEncoder().encode(JSON.stringify({ model: { id: 'claude-sonnet-fixture' } })), timeout: 3000,
+  });
+  expect(slot.exitCode).toBe(0);
+  expect(slot.stdout.toString()).toContain('42%');
+  expect(slot.stdout.toString()).toContain('just now');
+  expect(slot.stdout.toString()).not.toContain('ctx');
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe(before);
+  expect(existsSync(join(home, 'status.json'))).toBe(false);
+});
+
+test.each([[40, 24], [100, 32]])('TUI quota is explicit, scrollable and cancellable at %sx%s', (width, height) => {
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    import { readFileSync, existsSync } from 'fs';
+    import { join } from 'path';
+    const { home } = await import('./src/store');
+    home.writeAuth({ codex: { accessToken: 'fixture-token', accountId: 'fixture-account' } });
+    home.writeQuota({ schema: 1, providers: { codex: { nextAllowedAt: 0,
+      reading: { updatedAt: Date.now(), authRevision: home.quotaAuthRevision(), meters: [{ label: '5h', percent: 42, resetAt: 2000000000 }] } } } });
+    let calls = 0, aborted = false, finish;
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'https://chatgpt.com/backend-api/wham/usage');
+      calls++;
+      return await new Promise(resolve => {
+        finish = () => resolve(Response.json({ rate_limit: { primary_window: { used_percent: 99, limit_window_seconds: 18000 } } }));
+        init.signal.addEventListener('abort', () => { aborted = true; finish(); }, { once: true });
+      });
+    };
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: ${width}, height: ${height} });
+    const frame = () => ui.captureCharFrame().replace(/[│╭╮╰╯─█]/g, ' ').replace(/\\s+/g, ' ');
+    const key = async name => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const command = async text => { await act(async () => ui.mockInput.typeText(text)); await key('RETURN'); };
+    try {
+      await ui.renderOnce();
+      await command('/quota');
+      let frames = frame();
+      for (let i = 0; i < 25; i++) { await key('ARROW_DOWN'); frames += frame(); }
+      assert(frames.includes('42%') && frames.includes('2033-05-18'), frames);
+      assert.equal(calls, 0);
+      await key('ESCAPE');
+      await command('/quota refresh codex');
+      assert.equal(calls, 1);
+      assert(frame().includes('Esc cancels'), frame());
+      await key('ESCAPE');
+      assert(aborted, 'Escape must abort the request');
+      await act(async () => { await new Promise(r => setTimeout(r, 20)); }); await ui.renderOnce();
+      assert(!frame().includes('99%') && !frame().includes('Esc cancels'), frame());
+      assert.equal(home.readQuota().providers.codex.reading.meters[0].percent, 42);
+      assert(home.readQuota().providers.codex.nextAllowedAt > Date.now());
+      assert(!existsSync(join(process.env.WISP_HOME, 'quota-refresh.lock')));
+      await command('/quota refresh codex');
+      assert.equal(calls, 1);
+      assert(frame().includes('refresh available'), frame());
+      await key('ESCAPE');
+      await command('/quota invalid');
+      assert(frame().includes('Usage:'), frame());
+      assert.equal(calls, 1);
+      assert(!existsSync(join(process.env.WISP_HOME, 'status.json')));
+    } finally { finish?.(); await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe('');
+  expect(result.code).toBe(0);
+});
+
 test('Codex CLI writes preserve aliases, snapshots and unknown fields, without requiring discovery', () => {
   const config = { future: 'keep', routing: { families: {}, aliases: [
     { name: 'codex', target: { providerId: 'custom', model: 'legacy' } },

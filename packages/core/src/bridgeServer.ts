@@ -117,6 +117,7 @@ export type BridgeDeps = {
   // — a host that omits it simply produces no live statusline, never an error, and the Bridge never reads it
   // back: this is write-only telemetry consumed by an out-of-process script.
   recordStatus?: (status: WispStatus) => void;
+  authRevision?: () => string | undefined;
 };
 
 // A local process that already holds the secret is the threat model (per the PRD security note), but an
@@ -957,6 +958,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // #168: same bounded retry as the OpenAI door, over this door's own request shaping. Only the eager base
       // pass is retried — an advisor continuation pass below is mid-conversation, so content has already been
       // delivered and re-opening it would discard the turn.
+      // Renewal or an account change during this turn invalidates quota, never relabels old meters.
+      const authRevision = deps.authRevision?.();
       const result = await openPrimed(provider, executorFor(provider), controller, () =>
         startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller, (m) => { quotaMeters = m; }));
       if (!result.ok) return sendError(res, result.status, result.message);
@@ -1022,7 +1025,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // every context field rather than writing a zero.
       // ponytail: streaming path only. The non-streaming branch above is Claude Code's /model validation
       // probe, not a turn — recording it would overwrite a real reading with a probe's.
-      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters, contextWindow: result.contextWindow }));
+      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters, contextWindow: result.contextWindow, authRevision }));
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.

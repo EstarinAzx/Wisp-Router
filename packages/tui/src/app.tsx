@@ -28,14 +28,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
-  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
+  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel, fetchAccountQuota,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias, withCodexModelRoute,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
 import { fetchEffortOptions } from './modelFetch';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth, quotaCurrent } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow, RoutingSection } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
@@ -57,6 +57,7 @@ import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
 import { antigravityCompatResult } from './antigravityCompat';
+import { runQuota } from './quotaCli';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -99,6 +100,7 @@ export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  useEffect(() => () => { if (mode.kind === 'info') mode.abort?.abort(); }, [mode]);
   const [line, setLine] = useState('');       // live palette input, drives suggestions
   const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
@@ -390,6 +392,16 @@ export const App = () => {
         setMode({ kind: 'info', title: 'Antigravity compatibility', lines: result.lines });
         return;
       }
+      case 'quota': {
+        const abort = new AbortController();
+        const loading: Mode = { kind: 'info', title: 'Account quota', lines: ['Reading quota…'], abort };
+        setStatus('');
+        setMode(loading);
+        void runQuota(target.args, { home, current: quotaCurrent, now: Date.now, fetch: fetchAccountQuota, signal: abort.signal })
+          .then(result => setMode(current => current === loading && !abort.signal.aborted
+            ? { kind: 'info', title: 'Account quota', lines: result.lines } : current));
+        return;
+      }
       case 'gpt-desktop': {
         if (desktopChanging.current) { setStatus('Desktop setup is already running.'); return; }
         desktopChanging.current = true;
@@ -518,6 +530,7 @@ export const App = () => {
       // get a real cancel (it would otherwise keep polling for 15 min and sign the user in after the fact).
       if (mode.kind === 'signin-wait') { signinSeq.current++; signinAbort.current?.abort(); }
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
+      if (mode.kind === 'info') mode.abort?.abort();
       // Routing steps back one level per Esc (#79): sub-screen → its section → overview → palette.
       // The provider-menu chain does the same (#106): entry/wait → menu → list → palette.
       mode.kind === 'input' ? exitTui()
@@ -626,7 +639,7 @@ export const App = () => {
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
 
       {/* Reserve 18 rows for splash, caption, outer padding, panel frame/padding and close hint. */}
-      {mode.kind === 'info' && <InfoScreen title={mode.title} lines={mode.lines} cols={panelCols} maxRows={termHeight - 18} />}
+      {mode.kind === 'info' && <InfoScreen title={mode.title} lines={mode.lines} cols={panelCols} maxRows={termHeight - 18} pending={!!mode.abort} />}
 
       {mode.kind === 'routing' && (
         <RoutingScreen cols={panelCols} onPick={(section) => setMode({ kind: 'routing-section', section })} />

@@ -128,14 +128,14 @@ export class WispHome {
     };
     let fd: number | undefined;
     try {
-      try { fd = open(path); }
-      catch (error) {
-        if (!(error instanceof QuotaRefreshBusyError)) throw error;
-        // Elect ONE reclaimer before inspecting the owner. Two stat/unlink reclaimers could otherwise
-        // remove a newly acquired live lock. No age-based stealing, even for an ancient lock.
-        const recovery = `${path}.reclaim`;
-        const guard = open(recovery);
-        try {
+      // Every acquisition shares the guard, including the empty-file fast path. Otherwise a departing
+      // owner can remove its lock after our read and let another caller acquire a lock we would delete.
+      const recovery = `${path}.reclaim`;
+      const guard = open(recovery);
+      try {
+        try { fd = open(path); }
+        catch (error) {
+          if (!(error instanceof QuotaRefreshBusyError)) throw error;
           let owner: unknown;
           try { owner = JSON.parse(readFileSync(path, 'utf8')); }
           catch (readError) {
@@ -148,16 +148,20 @@ export class WispHome {
             try { process.kill(pid, 0); }
             catch (probeError) { dead = (probeError as NodeJS.ErrnoException).code === 'ESRCH'; }
             if (!dead) throw new QuotaRefreshBusyError();
-            unlinkSync(path);
+            try { unlinkSync(path); }
+            catch (removeError) {
+              // The dead owner may have removed its own lock before exiting. The guard prevents replacement.
+              if ((removeError as NodeJS.ErrnoException).code !== 'ENOENT') throw removeError;
+            }
           }
           fd = open(path);
-        } finally {
-          try { closeSync(guard); } finally { unlinkSync(recovery); }
         }
-        // ponytail: a crash during recovery (or before writing a PID) fails closed as busy; manual
-        // recovery after all Wisp processes stop avoids an unsafe second layer of lock stealing.
+        writeFileSync(fd, JSON.stringify({ pid: process.pid }));
+      } finally {
+        try { closeSync(guard); } finally { unlinkSync(recovery); }
       }
-      writeFileSync(fd, JSON.stringify({ pid: process.pid }));
+      // ponytail: a crash holding the guard fails closed as busy; manual recovery after all Wisp
+      // processes stop avoids an unsafe second layer of lock stealing.
       return await action();
     } finally {
       if (fd !== undefined) { try { closeSync(fd); } finally { unlinkSync(path); } }
