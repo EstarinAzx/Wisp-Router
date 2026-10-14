@@ -17,8 +17,8 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, watch, writeFileSync, type FSWatcher } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { randomBytes } from 'crypto';
-import { isUnusableStore, parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
+import { createHmac, randomBytes } from 'crypto';
+import { isUnusableStore, parseWispAuth, parseWispConfig, planSecretsMigration, serializeWispStore, type GeminiReplayContext, type SecretSlots, type WispAuth, type WispConfig } from './home';
 import { mergeStatus, type WispStatus } from './status';
 import { parseQuotaCache, type QuotaCache } from './quota';
 
@@ -96,7 +96,89 @@ export class WispHome {
   readAuth = (): WispAuth => parseWispAuth(this.readRaw(AUTH_FILE));
   authExists = (): boolean => existsSync(this.path(AUTH_FILE));
   // Secrets file — owner-only (0o600) per ADR-0002.
-  writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, parseWispAuth, patch, 0o600);
+  writeAuth = (patch: Partial<WispAuth>): WispAuth => {
+    if (Object.prototype.hasOwnProperty.call(patch, 'geminiApi')) throw new Error('Gemini credential bundle is reserved.');
+    return this.withAuthLock(() => {
+      const next = { ...this.authForWrite(), ...patch };
+      this.writeRaw(AUTH_FILE, serializeWispStore(next), 0o600);
+      return next;
+    });
+  };
+
+  private withAuthLock = <T>(action: () => T): T => {
+    this.ensureDir();
+    const path = this.path('auth.lock');
+    let fd: number;
+    try { fd = openSync(path, 'wx', 0o600); }
+    catch { throw new Error('Wisp auth is busy or inaccessible. Stop all Wisp writers before inspecting an orphan auth.lock.'); }
+    // ponytail: cooperative local writers only; no age-based lock stealing or manual rollback defense.
+    try { return action(); }
+    finally { try { closeSync(fd); } finally { unlinkSync(path); } }
+  };
+
+  private authForWrite = (): WispAuth => {
+    let raw: string | undefined;
+    try { raw = readFileSync(this.path(AUTH_FILE), 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (isUnusableStore(raw)) throw new Error('auth.json could not be read as JSON. Repair it before writing credentials.');
+    return parseWispAuth(raw);
+  };
+
+  private geminiBundle = (auth: WispAuth): WispAuth['geminiApi'] => {
+    if (!Object.prototype.hasOwnProperty.call(auth, 'geminiApi')) return undefined;
+    const b = auth.geminiApi;
+    const base64 = (v: unknown, length: number): boolean => typeof v === 'string' &&
+      /^[A-Za-z0-9_-]+$/.test(v) && Buffer.from(v, 'base64url').length === length && Buffer.from(v, 'base64url').toString('base64url') === v;
+    if (!b || b.version !== 1 || !base64(b.lifetime, 16) || !base64(b.replayKey, 32) ||
+      typeof b.apiKey !== 'string' || !/^[\x21-\x7e]+$/.test(b.apiKey) ||
+      Object.keys(b).some(k => !['version', 'lifetime', 'replayKey', 'apiKey'].includes(k))) {
+      throw new Error('Invalid Gemini credential bundle; repair the auth store.');
+    }
+    return b;
+  };
+
+  private geminiContext = (b: NonNullable<WispAuth['geminiApi']>): GeminiReplayContext => ({
+    lifetime: b.lifetime, key: b.replayKey,
+    credentialBinding: createHmac('sha256', Buffer.from(b.replayKey, 'base64url')).update(`gemini-api\0${b.apiKey}`).digest('base64url'),
+  });
+
+  geminiReplayContext = (): GeminiReplayContext | undefined => this.withAuthLock(() => {
+    const b = this.geminiBundle(this.authForWrite());
+    return b && this.geminiContext(b);
+  });
+
+  saveGeminiApiKey = (apiKey: string, expectedLifetime: string | null): void => this.withAuthLock(() => {
+    if (typeof apiKey !== 'string' || !/^[\x21-\x7e]+$/.test(apiKey)) throw new Error('Gemini API key must be nonempty printable ASCII without spaces.');
+    const auth = this.authForWrite();
+    const old = this.geminiBundle(auth);
+    if ((old?.lifetime ?? null) !== expectedLifetime) throw new Error('Gemini credentials changed; reopen key setup.');
+    auth.geminiApi = { version: 1, lifetime: randomBytes(16).toString('base64url'), replayKey: randomBytes(32).toString('base64url'), apiKey };
+    this.writeRaw(AUTH_FILE, serializeWispStore(auth), 0o600);
+  });
+
+  removeGeminiApiKey = (expectedLifetime: string): void => this.withAuthLock(() => {
+    const auth = this.authForWrite();
+    if (!expectedLifetime || this.geminiBundle(auth)?.lifetime !== expectedLifetime) throw new Error('Gemini credentials changed; reopen key setup.');
+    delete auth.geminiApi;
+    this.writeRaw(AUTH_FILE, serializeWispStore(auth), 0o600);
+  });
+
+  geminiCredentials = (expected: GeminiReplayContext): string => this.withAuthLock(() => {
+    const b = this.geminiBundle(this.authForWrite());
+    if (!b) throw new Error('Gemini API credentials are missing.');
+    const current = this.geminiContext(b);
+    if (current.lifetime !== expected.lifetime || current.key !== expected.key || current.credentialBinding !== expected.credentialBinding) {
+      throw new Error('Gemini credentials changed; start a new conversation.');
+    }
+    return b.apiKey;
+  });
+
+  assertGeminiCurrent = (expected: GeminiReplayContext): void => { this.geminiCredentials(expected); };
+
+  migrateSecrets = (slots: SecretSlots): void => this.withAuthLock(() => {
+    const next = planSecretsMigration({ auth: this.authForWrite(), slots });
+    if (next) this.writeRaw(AUTH_FILE, serializeWispStore(next), 0o600);
+  });
 
   quotaAuthRevision = (): string | undefined => {
     try {

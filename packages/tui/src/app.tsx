@@ -29,7 +29,7 @@ import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@open
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel, fetchAccountQuota,
-  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
+  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider, isGeminiApiProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias, withCodexModelRoute,
   type Provider, type EffortLevel, type Target,
@@ -57,6 +57,7 @@ import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
 import { antigravityCompatResult } from './antigravityCompat';
+import { geminiInstructionsResult } from './geminiInstructions';
 import { runQuota } from './quotaCli';
 import pkg from '../package.json';
 
@@ -104,6 +105,11 @@ export const App = () => {
   const [line, setLine] = useState('');       // live palette input, drives suggestions
   const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
+  const startKeyEntry = (provider: Provider, origin?: 'menu') => {
+    try { setMode({ kind: 'key-entry', provider, origin,
+      ...(isGeminiApiProvider(provider) ? { expectedLifetime: home.geminiReplayContext()?.lifetime ?? null } : {}) }); }
+    catch (error) { setMode({ kind: 'info', title: 'Gemini credentials', lines: [String(error)] }); }
+  };
   const [status, setStatusRaw] = useState('');
   const inputRef = useRef<InputRenderable>(null);
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
@@ -335,7 +341,7 @@ export const App = () => {
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
         if (target.args[1]) setStatus('Never paste keys in the palette — enter it masked below.');
-        setMode(p ? { kind: 'key-entry', provider: p } : { kind: 'key-pick' });
+        if (p) startKeyEntry(p); else setMode({ kind: 'key-pick' });
         return;
       }
       case 'model': {
@@ -390,6 +396,12 @@ export const App = () => {
         const result = antigravityCompatResult(target.args);
         setStatus('');
         setMode({ kind: 'info', title: 'Antigravity compatibility', lines: result.lines });
+        return;
+      }
+      case 'gemini-instructions': {
+        const result = geminiInstructionsResult(target.args);
+        setStatus('');
+        setMode({ kind: 'info', title: 'Gemini instructions', lines: result.lines });
         return;
       }
       case 'quota': {
@@ -552,8 +564,8 @@ export const App = () => {
       const done = mode.origin === 'menu' ? backToProviders : backToInput;
       const value = secret.trim();
       if (!value) { done('Empty — key unchanged.'); return; }
-      saveKey(mode.provider, value);
-      done(`Key saved for ${mode.provider.label}.`);
+      try { saveKey(mode.provider, value, mode.expectedLifetime); done(`Key saved for ${mode.provider.label}.`); }
+      catch (error) { done(String(error)); }
       return;
     }
     if (key.name === 'backspace') { setSecret((s) => s.slice(0, -1)); return; }
@@ -600,14 +612,14 @@ export const App = () => {
         <ProviderMenuScreen
           provider={mode.provider}
           onDone={backToProviders}
-          onSetKey={() => setMode({ kind: 'key-entry', provider: mode.provider, origin: 'menu' })}
+          onSetKey={() => startKeyEntry(mode.provider, 'menu')}
           onSignIn={() => startSignIn(mode.provider, () => backToProviders(`Signed in — ${mode.provider.label} is ready.`), 'menu')}
           onSignOut={() => doSignOut(mode.provider, 'menu')}
         />
       )}
 
       {mode.kind === 'key-pick' && (
-        <KeyPickScreen onPick={(p) => setMode({ kind: 'key-entry', provider: p })} />
+        <KeyPickScreen onPick={(p) => startKeyEntry(p)} />
       )}
 
       {mode.kind === 'key-entry' && <KeyEntryScreen provider={mode.provider} secret={secret} />}

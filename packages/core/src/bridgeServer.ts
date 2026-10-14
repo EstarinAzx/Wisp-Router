@@ -42,6 +42,11 @@ import {
 } from './catalog';
 import { codexStream } from './codexClient';
 import { parseResponsesRequest, parseDesktopResponsesRequest, createResponsesEncoder, responsesRejectionDiagnostic } from './bridgeResponses';
+import { isGeminiApiProvider } from './catalog';
+import { preflightGeminiResponses, prepareGeminiReplay, finishGeminiResponses } from './geminiResponses';
+import { requestGeminiInteraction } from './geminiInteractionsClient';
+import { GeminiInteractionError } from './geminiInteractions';
+import type { GeminiReplayContext } from './home';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import { antigravityStream } from './antigravityClient';
@@ -71,6 +76,12 @@ export const DEFAULT_BRIDGE_PORT = 41184;
 // The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is handed
 // the catalog plus pure getters so it never touches secrets or config directly.
 export type BridgeDeps = {
+  gemini?: {
+    replayContext: () => GeminiReplayContext | undefined;
+    credentials: (expected: GeminiReplayContext) => string | Promise<string>;
+    assertCurrent: (expected: GeminiReplayContext) => void | Promise<void>;
+    instructionPolicy: () => string;
+  };
   // Opt-in Messages capability rejection; the client owns reminder fallback and its priority tradeoff.
   antigravityClientFallback?: () => boolean;
   desktopNativeModels?: () => string[] | undefined;
@@ -213,12 +224,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // (Codex #39, Anthropic #40) are usable when signed in. caps is omitted: the list only needs ids/labels, so
   // the conservative default windows are fine (no models.dev fetch to stall on).
   const computeModelInfos = async () => {
-    const keyedPairs = await Promise.all(deps.providers.map(async (p) =>
+    const keyedPairs = await Promise.all(deps.providers.filter(p => !isGeminiApiProvider(p)).map(async (p) =>
       [p.id, isCodexProvider(p) ? await deps.codexSignedIn()
         : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
         : isXaiProvider(p) ? await (deps.xaiSignedIn?.() ?? false)
         : isAntigravityProvider(p) ? await (deps.antigravitySignedIn?.() ?? false) : !!(await deps.keyFor(p))] as const));
-    return buildChatModelInfos(deps.providers, {
+    return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed: Object.fromEntries(keyedPairs),
       modelMap: deps.modelMap(),
       customBaseUrl: deps.customBaseUrl(),
@@ -272,7 +283,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   };
 
   // The Routing-map Alias names (#52), read live so a panel edit shows up on the next list fetch.
-  const aliasNames = (): string[] => deps.routingMap().aliases.map((a) => a.name);
+  const listedAliases = () => deps.routingMap().aliases.filter(a => !deps.providers.some(p => p.id === a.target.providerId && isGeminiApiProvider(p)));
+  const aliasNames = (): string[] => listedAliases().map((a) => a.name);
 
   // GET /v1/models — the OpenAI-door discovery list (one entry per usable Provider id, then the Aliases).
   const handleModels = async (res: http.ServerResponse): Promise<void> =>
@@ -289,7 +301,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const handleAnthropicModels = async (res: http.ServerResponse): Promise<void> =>
     sendJson(res, 200, buildAnthropicModelsList(
       await computeModelInfos(),
-      deps.routingMap().aliases.map((a) => ({ name: a.name, model: deps.aliasPickerShowsModel() ? a.target.model : undefined })),
+      listedAliases().map((a) => ({ name: a.name, model: deps.aliasPickerShowsModel() ? a.target.model : undefined })),
       deps.aliasOnlyModels(),
     ));
 
@@ -590,6 +602,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const { provider, pinnedModel } = route;
+    if (isGeminiApiProvider(provider)) return sendError(res, 400, 'Gemini API is available only on the qualified custom Responses route.');
     const executor = executorFor(provider);
 
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
@@ -659,6 +672,40 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     };
     try {
       const raw = await readBody(req); body = JSON.parse(raw);
+      if (!signedDesktop && typeof body?.model === 'string') {
+        try { route = routeFor(body.model); }
+        catch { return sendError(res, 500, 'internal error'); }
+        if (route && isGeminiApiProvider(route.provider)) {
+          try {
+            controller.signal.throwIfAborted();
+            const seam = deps.gemini;
+            if (!seam) throw new Error('Gemini host unavailable');
+            const preflight = preflightGeminiResponses(body, req.rawHeaders, route.provider,
+              route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider), seam.instructionPolicy(), deps.effort());
+            const context = seam.replayContext();
+            if (!context) throw new Error('Gemini key unavailable');
+            const prepared = prepareGeminiReplay(preflight, context);
+            const apiKey = await seam.credentials(context);
+            controller.signal.throwIfAborted();
+            await seam.assertCurrent(context);
+            controller.signal.throwIfAborted();
+            const result = await requestGeminiInteraction({ request: prepared.request, apiKey, signal: controller.signal });
+            controller.signal.throwIfAborted();
+            await seam.assertCurrent(context);
+            controller.signal.throwIfAborted();
+            const output = finishGeminiResponses(prepared, result, `resp_${crypto.randomBytes(12).toString('hex')}`);
+            // Whole output is buffered/validated before any executable frame; no await separates this check and delivery.
+            if (prepared.parsed.stream) {
+              res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+              res.end(output.frames);
+            } else sendJson(res, 200, output.response);
+          } catch (error) {
+            if (!controller.signal.aborted) sendError(res, error instanceof GeminiInteractionError && error.code !== 'invalid_request' ? (error.status ?? 502) : 400,
+              'Gemini Responses refused. Check the session, instruction policy, replay history and current API credentials.', 'gemini_request_refused');
+          }
+          return;
+        }
+      }
       if (signedDesktop) {
         if (!body || typeof body.model !== 'string' || !body.model.trim()) return sendError(res, 400, 'A nonempty model is required');
         const native = deps.desktopNativeModels?.();
@@ -801,6 +848,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     parsed: BridgeAnthropicRequest, provider: Provider, pinnedModel: string | undefined, controller: AbortController,
     onQuota?: (meters: QuotaMeter[]) => void,
   ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent>; model: string; contextWindow?: number }> => {
+    if (isGeminiApiProvider(provider)) return { ok: false, status: 400, message: 'Gemini API is unavailable for Messages and advisor requests.' };
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
     const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
@@ -903,6 +951,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
+    if (isGeminiApiProvider(provider)) return sendError(res, 400, 'Gemini API is available only on the qualified custom Responses route.');
 
     // Antigravity hoists positioned instructions into the global prefix. Opted-in clients must rebuild
     // these themselves; never silently rewrite them here or spend credentials on the rejected request.

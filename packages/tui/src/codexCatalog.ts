@@ -167,6 +167,8 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
   return target => {
     const p = PROVIDERS.find(p => p.id === target.providerId);
     if (!p) return undefined;
+    if (p.kind === 'gemini-interactions') return target.model === 'gemini-4-argon'
+      ? { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', vision: false } : undefined;
     if (p.kind === 'codex') {
       const info = codex?.models.find(m => m.id === target.model);
       return info ? { contextInput: info.contextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;

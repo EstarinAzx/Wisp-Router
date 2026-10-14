@@ -74,6 +74,7 @@ export const antigravityAuth = new AntigravityAuth(
 // exists as a shared function: its credential is an OAuth access token rather than a keys-map entry, and
 // resolving that in only some of the paths is how a signed-in user gets a silent 401 from the others.
 export const bearerFor = async (p: Provider): Promise<string> => {
+  if (p.id === 'gemini-api' || p.kind === 'gemini-interactions') throw new Error('Gemini API credentials are only available through the qualified Responses adapter.');
   if (isKimiProvider(p)) return kimiAuth.bearer();
   const stored = home.readAuth().keys?.[resolveKeyId(p)];
   return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';

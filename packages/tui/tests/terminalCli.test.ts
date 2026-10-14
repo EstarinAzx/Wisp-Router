@@ -113,6 +113,41 @@ test.each([[40, 24], [100, 32]])('TUI compatibility guidance and errors remain r
   expect(result.code).toBe(0);
 });
 
+test('Gemini key entry captures a lifetime and refuses a stale save in the real App', () => {
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    globalThis.fetch = async () => { throw Error('network forbidden'); };
+    const { home } = await import('./src/store');
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: 40, height: 24 });
+    const key = async name => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const type = async text => { await act(async () => ui.mockInput.typeText(text)); };
+    try {
+      await ui.renderOnce(); await type('/key gemini-api'); await key('RETURN');
+      await type('first-key'); await key('RETURN');
+      const first = home.geminiReplayContext(); assert(first);
+      assert.equal(home.geminiCredentials(first), 'first-key');
+      assert.equal(home.readAuth().keys?.['gemini-api'], undefined);
+      await type('/key gemini-api'); await key('RETURN'); await type('stale-key');
+      home.saveGeminiApiKey('replacement', first.lifetime);
+      await key('RETURN');
+      assert.equal(home.geminiCredentials(home.geminiReplayContext()), 'replacement');
+      assert(ui.captureCharFrame().includes('changed'), ui.captureCharFrame());
+      await type('/gemini-instructions status'); await key('RETURN');
+      assert(ui.captureCharFrame().includes('strict'), ui.captureCharFrame());
+      await key('ESCAPE');
+      await type('/gemini-instructions prepend-leading-developer-v1'); await key('RETURN');
+      assert.equal(home.readConfig().bridge.geminiApiInstructions, 'prepend-leading-developer-v1');
+      let frames = ui.captureCharFrame();
+      for (let i = 0; i < 30; i++) { await key('ARROW_DOWN'); frames += ui.captureCharFrame(); }
+      assert(frames.replace(/[│╭╮╰╯─█▀▄]/g, ' ').replace(/\\s+/g, ' ').includes('not preserved'), frames);
+    } finally { await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe(''); expect(result.code).toBe(0);
+});
+
 test('actual quota CLI and Node Slot agree on the same real auth-file revision before any turn', () => {
   writeFileSync(join(home, 'auth.json'), JSON.stringify({ codex: { accessToken: 'fixture-token', accountId: 'fixture-account' } }));
   writeFileSync(join(home, 'config.json'), JSON.stringify({ routing: { families: { sonnet: { providerId: 'codex', model: 'fixture' } } } }));

@@ -29,7 +29,7 @@ export type Mode =
   // returns into the /providers flow instead of the palette (#106).
   | { kind: 'provider-menu'; provider: Provider }
   | { kind: 'key-pick' }
-  | { kind: 'key-entry'; provider: Provider; origin?: 'menu' }
+  | { kind: 'key-entry'; provider: Provider; origin?: 'menu'; expectedLifetime?: string | null }
   | { kind: 'model-loading'; provider: Provider }
   | { kind: 'model-pick'; provider: Provider; options: string[] }
   | { kind: 'model-free'; provider: Provider }

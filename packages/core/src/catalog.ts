@@ -49,7 +49,7 @@ export type Provider = {
   // it exists only to tell the faces "offer sign-in, not a key field". No request path dispatches on it.
   // 'antigravity-oauth' (#188) is a THIRD wire — Gemini generateContent in a Cloud Code envelope — so it
   // branches off the OpenAI-chat path like Codex/Anthropic/Grok do.
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth' | 'gemini-interactions';
   // Context/vision carry no per-row hints — both come from the ACTIVE model via models.dev (catalogKey).
 };
 
@@ -57,6 +57,7 @@ export type Provider = {
 
 // The one Provider whose base URL is user-supplied (machine-scoped wisp.baseUrl), not hardcoded.
 export const CUSTOM_ID = 'custom';
+export const isGeminiApiProvider = (provider: Provider): boolean => provider.id === 'gemini-api' || provider.kind === 'gemini-interactions';
 
 // ----------------------------- Provider catalog data ----------------------------- //
 
@@ -107,6 +108,7 @@ export const PROVIDERS: Provider[] = [
   // gemini-3.1-pro-low, NOT the `recommended: true` gemini-3.1-pro-high — that row is listed and 400s on
   // every request shape tried (#186). The catalog is advisory: being listed does not make a row servable.
   { id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth' },
+  { id: 'gemini-api', label: 'Gemini API', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-4-argon', apiKeyEnv: '', kind: 'gemini-interactions' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },
@@ -527,7 +529,7 @@ export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): stri
 // The fixed vocabularies for providers without effort discovery. Codex callers supply their selected
 // model's reasoningEfforts instead; no metadata means no advertised effort choices.
 export const effortOptionsFor = (provider: Provider): EffortLevel[] =>
-  isCodexProvider(provider) ? [] : isAnthropicProvider(provider)
+  isGeminiApiProvider(provider) ? ['low', 'medium', 'high'] : isCodexProvider(provider) ? [] : isAnthropicProvider(provider)
     ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['low', 'medium', 'high', 'xhigh'];
 
 // ----------------------------- PKCE + state (OAuth) ----------------------------- //

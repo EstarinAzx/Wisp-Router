@@ -63,6 +63,8 @@ const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
 export const createTuiBridge = (log: (message: string) => void) => {
   let loggingStarted = false;
   return createBridgeServer({
+    gemini: { replayContext: home.geminiReplayContext, credentials: home.geminiCredentials, assertCurrent: home.assertGeminiCurrent,
+      instructionPolicy: () => home.readConfig().bridge?.geminiApiInstructions ?? 'strict' },
     antigravityClientFallback: () => home.readConfig().bridge?.antigravityClientFallback === true,
     desktopNativeModels: readDesktopNativeModels,
     desktopAntigravityHoisting: readDesktopAntigravityHoisting,

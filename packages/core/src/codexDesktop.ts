@@ -11,6 +11,7 @@ export const DESKTOP_PROTOCOL = 5;
 // Existing-auth live and Desktop tool/follow-up qualification: docs/codex-desktop.md.
 const qualifiedAntigravityTargets: readonly Target[] = [{ providerId: 'antigravity', model: 'gemini-3.8-flash-tiered' }];
 export const desktopTargetIssue = (provider: Provider, model?: string, hoisting = false, admittedTargets = qualifiedAntigravityTargets): string | undefined => {
+  if (provider.id === 'gemini-api' || provider.kind === 'gemini-interactions') return 'Gemini API is not qualified for signed Desktop.';
   if (provider.kind !== 'antigravity-oauth') return undefined;
   if (!hoisting) return 'Antigravity cannot preserve signed desktop instruction ordering. Select a supported Provider for desktop; the existing Wisp route is unchanged for other clients.';
   // Release admission is explicit, not inferred from an upstream catalog or mutable Alias name.

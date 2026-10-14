@@ -30,6 +30,107 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 // The sandbox path points at a subdir that does NOT exist yet — creation on demand is part of the contract.
 const home = () => new WispHome(join(dir, '.wisp'));
 
+describe('Gemini credential lifetime', () => {
+  test('metadata omits the bearer, survives restart and rotates even for the same key', () => {
+    const h = home();
+    expect(h.geminiReplayContext()).toBeUndefined();
+    h.writeAuth({ keys: { other: 'kept' }, bridgeSecret: 'bridge' });
+    h.saveGeminiApiKey('synthetic-key', null);
+    const first = h.geminiReplayContext()!;
+    expect(Object.keys(first).sort()).toEqual(['credentialBinding', 'key', 'lifetime']);
+    expect(first.lifetime).toMatch(/^[\w-]{22}$/);
+    expect(first.key).toMatch(/^[\w-]{43}$/);
+    expect(home().geminiReplayContext()).toEqual(first);
+    expect(h.geminiCredentials(first)).toBe('synthetic-key');
+    h.saveGeminiApiKey('synthetic-key', first.lifetime);
+    const second = h.geminiReplayContext()!;
+    expect(second).not.toEqual(first);
+    expect(() => h.geminiCredentials(first)).toThrow();
+    expect(() => h.saveGeminiApiKey('stale', first.lifetime)).toThrow();
+    expect(() => h.removeGeminiApiKey(first.lifetime)).toThrow();
+    h.removeGeminiApiKey(second.lifetime);
+    expect(h.geminiReplayContext()).toBeUndefined();
+    h.saveGeminiApiKey('synthetic-key', null);
+    expect(() => h.assertGeminiCurrent(second)).toThrow();
+    expect(h.readAuth().keys).toEqual({ other: 'kept' });
+    expect(h.readAuth().bridgeSecret).toBe('bridge');
+  });
+
+  test('an unrelated writer cannot restore an old credential lifetime at rename', () => {
+    const a = home(), b = home();
+    a.saveGeminiApiKey('old-key', null);
+    const first = a.geminiReplayContext()!;
+    const rename = fs.renameSync;
+    let guarded = false;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to).endsWith('auth.json')) {
+        try { b.saveGeminiApiKey('new-key', first.lifetime); }
+        catch { guarded = true; }
+      }
+      rename(from, to);
+    });
+    try { a.writeAuth({ bridgeSecret: 'sibling' }); } finally { spy.mockRestore(); }
+    expect(guarded).toBe(true);
+    b.saveGeminiApiKey('new-key', first.lifetime);
+    a.writeAuth({ keys: { sibling: 'kept' } });
+    expect(() => a.assertGeminiCurrent(first)).toThrow();
+    expect(a.geminiCredentials(a.geminiReplayContext()!)).toBe('new-key');
+    expect(a.readAuth().bridgeSecret).toBe('sibling');
+  });
+
+  test('generic snapshots cannot write the reserved bundle; migration reads under the guard', () => {
+    const h = home();
+    h.saveGeminiApiKey('old', null);
+    const stale = h.readAuth();
+    h.saveGeminiApiKey('new', h.geminiReplayContext()!.lifetime);
+    expect(() => h.writeAuth(stale)).toThrow(/reserved/i);
+    h.migrateSecrets({ keys: { migrated: 'key' }, bridgeSecret: 'bridge' });
+    expect(h.geminiCredentials(h.geminiReplayContext()!)).toBe('new');
+    expect(h.readAuth().keys).toEqual({ migrated: 'key' });
+    expect(h.readAuth().bridgeSecret).toBe('bridge');
+  });
+
+  test('missing credentials never use environment or generic keys', () => {
+    const h = home();
+    vi.stubEnv('GEMINI_API_KEY', 'environment');
+    try {
+      h.writeAuth({ keys: { 'gemini-api': 'borrowed' } });
+      expect(h.geminiReplayContext()).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  test('corrupt and partial records refuse without changing bytes', () => {
+    const h = home();
+    h.writeAuth({});
+    const file = join(dir, '.wisp', 'auth.json');
+    for (const raw of ['{broken', '{"geminiApi":null}', '{"geminiApi":{}}', '{"geminiApi":{"version":1,"apiKey":"secret"}}']) {
+      writeFileSync(file, raw);
+      expect(() => h.geminiReplayContext()).toThrow();
+      expect(() => h.saveGeminiApiKey('new', null)).toThrow();
+      expect(readFileSync(file, 'utf8')).toBe(raw);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+    }
+  });
+
+  test('busy and failed writes preserve the store and release only their own guard', () => {
+    const h = home();
+    h.saveGeminiApiKey('old', null);
+    const context = h.geminiReplayContext()!;
+    const lock = join(dir, '.wisp', 'auth.lock');
+    writeFileSync(lock, 'orphan');
+    expect(() => h.geminiReplayContext()).toThrow(/busy/i);
+    expect(() => h.writeAuth({ bridgeSecret: 'no' })).toThrow(/busy/i);
+    expect(() => h.migrateSecrets({ keys: { no: 'no' } })).toThrow(/busy/i);
+    expect(readFileSync(lock, 'utf8')).toBe('orphan');
+    unlinkSync(lock);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('disk full'); });
+    try { expect(() => h.saveGeminiApiKey('new', context.lifetime)).toThrow('disk full'); }
+    finally { spy.mockRestore(); }
+    expect(h.geminiReplayContext()).toEqual(context);
+    expect(readdirSync(join(dir, '.wisp')).filter(n => n.endsWith('.tmp') || n.endsWith('.lock'))).toEqual([]);
+  });
+});
+
 // ----------------------------- wispHomeDir ----------------------------- //
 
 describe('wispHomeDir', () => {
