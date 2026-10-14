@@ -65,6 +65,54 @@ test('antigravity-compat explicitly toggles only the client fallback setting', (
   expect(existsSync(join(home, 'auth.json'))).toBe(false);
 });
 
+test.each([[40, 24], [100, 32]])('TUI compatibility guidance and errors remain reachable at %sx%s', (width, height) => {
+  const config = { future: 'keep', bridge: { port: 4242, aliasOnlyModels: false } };
+  writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    import { readFileSync, readdirSync, writeFileSync } from 'fs';
+    import { join } from 'path';
+    globalThis.fetch = async () => { throw new Error('No networking in compatibility checks'); };
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: ${width}, height: ${height} });
+    const frame = () => ui.captureCharFrame().replace(/[│╭╮╰╯─█]/g, ' ').replace(/\\s+/g, ' ');
+    const file = join(process.env.WISP_HOME, 'config.json');
+    const before = readFileSync(file, 'utf8');
+    const key = async (name) => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const command = async (text) => { await act(async () => ui.mockInput.typeText(text)); await key('RETURN'); };
+    try {
+      await ui.renderOnce();
+      await command('/antigravity-compat');
+      assert(frame().includes('Antigravity client fallback: off'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), before);
+      await key('ESCAPE');
+      assert(!ui.captureCharFrame().includes('Cancelled.'));
+      await command('/antigravity-compat on');
+      assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { ...JSON.parse(before), bridge: { ...JSON.parse(before).bridge, antigravityClientFallback: true } });
+      let frames = frame();
+      for (let i = 0; i < 30; i++) { await key('ARROW_DOWN'); frames += frame(); }
+      for (const copy of ['some feature-specific', 'reminders may be omitted.', 'Start a new Claude', 'behavior is unchanged.', 'Esc closes']) assert(frames.includes(copy), copy + '\\n' + frames);
+      await key('ESCAPE');
+      const enabled = readFileSync(file, 'utf8');
+      await command('/antigravity-compat on off');
+      assert(ui.captureCharFrame().includes('Usage:'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), enabled);
+      await key('ESCAPE');
+      writeFileSync(file, '{broken json');
+      await command('/antigravity-compat off');
+      assert(ui.captureCharFrame().includes('Could not update'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), '{broken json');
+      await key('ESCAPE');
+      assert(!ui.captureCharFrame().includes('Cancelled.'));
+      assert.deepEqual(readdirSync(process.env.WISP_HOME), ['config.json']);
+    } finally { await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe('');
+  expect(result.code).toBe(0);
+});
+
 test('Codex CLI writes preserve aliases, snapshots and unknown fields, without requiring discovery', () => {
   const config = { future: 'keep', routing: { families: {}, aliases: [
     { name: 'codex', target: { providerId: 'custom', model: 'legacy' } },

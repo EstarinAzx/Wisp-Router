@@ -52,10 +52,11 @@ import {
 } from './routingScreens';
 import { PaletteScreen } from './paletteScreen';
 import { TestScreen, streamTestReply } from './testScreen';
-import { BridgeScreen, HelpScreen, LogScreen } from './infoScreens';
+import { BridgeScreen, HelpScreen, InfoScreen, LogScreen } from './infoScreens';
 import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
+import { antigravityCompatResult } from './antigravityCompat';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -117,7 +118,7 @@ export const App = () => {
   const renderer = useRenderer();
   // Live text columns for the hand-wrap helpers: terminal minus the outer padding (2+2) and the
   // PANEL border (1+1). Floored so a pathological width can't produce empty wraps.
-  const { width: termWidth } = useTerminalDimensions();
+  const { width: termWidth, height: termHeight } = useTerminalDimensions();
   const panelCols = Math.max(termWidth - 6, 20);
   // Palette suggestion rows sit outside any PANEL — only the outer padding (2+2) eats width.
   const paletteCols = Math.max(termWidth - 4, 20);
@@ -383,6 +384,12 @@ export const App = () => {
         startTest(route.provider, route.pinnedModel ?? resolveModel(cfg.models ?? {}, route.provider));
         return;
       }
+      case 'antigravity-compat': {
+        const result = antigravityCompatResult(target.args);
+        setStatus('');
+        setMode({ kind: 'info', title: 'Antigravity compatibility', lines: result.lines });
+        return;
+      }
       case 'gpt-desktop': {
         if (desktopChanging.current) { setStatus('Desktop setup is already running.'); return; }
         desktopChanging.current = true;
@@ -522,7 +529,7 @@ export const App = () => {
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
         : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
-        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' ? backToInput() // info screens just close — nothing to cancel
+        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' || mode.kind === 'info' ? backToInput() // info screens just close — nothing to cancel
         : backToInput('Cancelled.');
       return;
     }
@@ -617,6 +624,9 @@ export const App = () => {
       {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} cols={panelCols} />}
 
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
+
+      {/* Reserve 18 rows for splash, caption, outer padding, panel frame/padding and close hint. */}
+      {mode.kind === 'info' && <InfoScreen title={mode.title} lines={mode.lines} cols={panelCols} maxRows={termHeight - 18} />}
 
       {mode.kind === 'routing' && (
         <RoutingScreen cols={panelCols} onPick={(section) => setMode({ kind: 'routing-section', section })} />

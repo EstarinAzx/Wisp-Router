@@ -43,6 +43,7 @@ export type Mode =
   // and can write auth.json — a side effect that must not live in JSX).
   | { kind: 'bridge'; address: string; secret: string }
   | { kind: 'help' }
+  | { kind: 'info'; title: string; lines: string[] }
   // Payload-less: the Log Screen reads the shell-owned ring buffer live (#122).
   | { kind: 'log' }
   // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new

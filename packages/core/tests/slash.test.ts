@@ -69,6 +69,10 @@ describe('suggestSlash — palette filter', () => {
 });
 
 describe('SLASH_COMMANDS — the real palette', () => {
+  it('completes compatibility into its optional argument position', () => {
+    expect(completeSlash('/antigravity-c', 0)).toBe('/antigravity-compat ');
+    expect(SLASH_COMMANDS.find((c) => c.name === 'antigravity-compat')?.args).toBe('[on|off|status]');
+  });
   it('completes the Desktop toggle into its on/off argument position', () => {
     expect(completeSlash('/gpt-d', 0)).toBe('/gpt-desktop ');
   });

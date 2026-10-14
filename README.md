@@ -137,6 +137,8 @@ For Claude Code routed to Antigravity, **`wisp antigravity-compat on`** opts int
 
 The option defaults to off. Use **`wisp antigravity-compat status`** to inspect it or **`wisp antigravity-compat off`** to disable it, then start a new Claude conversation (the client remembers fallback until `/clear` or `/compact`). Both Bridge hosts read `bridge.antigravityClientFallback` in `~/.wisp/config.json` live. It applies only to Messages requests routed to Antigravity; Desktop and Responses keep their existing behavior.
 
+In the TUI, **`/antigravity-compat`** (or **`/antigravity-compat status`**) opens the current setting and guidance without changing it. Add **`on`** or **`off`** to change the same shared setting. Use **↑/↓** to scroll the explanation and **Esc** to return to the palette.
+
 ### VS Code extension
 
 Download the `.vsix` from [Releases](https://github.com/EstarinAzx/Wisp-Router/releases), then open **Extensions → ⋯ → Install from VSIX…** in VS Code. The extension is not on the Marketplace yet.
