@@ -237,9 +237,10 @@ export class CodexAuth {
   // The credentials to use right now: the stored bundle, else — only when the field has NEVER been
   // written (truly first use, not a sign-out tombstone) — a one-time import of the CLI's auth.json
   // (persisted so the next read is fast), refreshed if near expiry. undefined = not signed in.
-  current = async (): Promise<CodexCreds | undefined> => {
+  // Explicit account-quota refresh disables native import even if the store is removed concurrently.
+  current = async (options: { importNative?: boolean } = {}): Promise<CodexCreds | undefined> => {
     let creds = this.store.read();
-    if (creds === undefined) {
+    if (creds === undefined && options.importNative !== false) {
       creds = await this.importAuthJson();
       if (creds) this.store.write(creds);
     }

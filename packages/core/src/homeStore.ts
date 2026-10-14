@@ -14,12 +14,13 @@
  * a torn file; logical races (two-process OAuth refresh) are the callers' job via re-read-before-refresh.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, watch, writeFileSync, type FSWatcher } from 'fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, watch, writeFileSync, type FSWatcher } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { isUnusableStore, parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
 import { mergeStatus, type WispStatus } from './status';
+import { parseQuotaCache, type QuotaCache } from './quota';
 
 // ----------------------------- Paths ----------------------------- //
 
@@ -31,11 +32,15 @@ const AUTH_FILE = 'auth.json';
 // #171: the statusline snapshot. Not config and not a secret — volatile per-turn telemetry, rewritten by
 // the Bridge after every bridged turn, read only by the out-of-process statusline script.
 const STATUS_FILE = 'status.json';
+const QUOTA_FILE = 'quota.json';
+
+export class QuotaRefreshBusyError extends Error {
+  constructor() { super('Quota refresh is busy.'); }
+}
 
 // ----------------------------- WispHome ----------------------------- //
 
-// One handle on the store directory. All methods are sync — the files are tiny and sync keeps the
-// read-merge-write window as small as it can be without locks.
+// Tiny file operations are synchronous. Explicit quota refresh additionally holds a cross-process lock.
 export class WispHome {
   constructor(private readonly dir: string = wispHomeDir()) {}
 
@@ -93,6 +98,72 @@ export class WispHome {
   // Secrets file — owner-only (0o600) per ADR-0002.
   writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, parseWispAuth, patch, 0o600);
 
+  quotaAuthRevision = (): string | undefined => {
+    try {
+      const stat = statSync(this.path(AUTH_FILE), { bigint: true });
+      if (!stat.isFile()) return undefined;
+      // ponytail: any auth-file write invalidates both Providers; add per-Provider revisions if needed.
+      return `v1:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    } catch { return undefined; }
+  };
+
+  readQuota = (): QuotaCache => {
+    try { return parseQuotaCache(JSON.parse(this.readRaw(QUOTA_FILE)?.replace(/^\uFEFF/, '') ?? 'null')); }
+    catch { return { schema: 1, providers: {} }; }
+  };
+
+  writeQuota = (cache: QuotaCache): void => {
+    this.writeRaw(QUOTA_FILE, `${JSON.stringify(parseQuotaCache(cache), null, 2)}\n`, 0o600);
+  };
+
+  withQuotaRefreshLock = async <T>(action: () => Promise<T>): Promise<T> => {
+    this.ensureDir();
+    const path = this.path('quota-refresh.lock');
+    const open = (file: string): number => {
+      try { return openSync(file, 'wx', 0o600); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new QuotaRefreshBusyError();
+        throw error;
+      }
+    };
+    let fd: number | undefined;
+    try {
+      try { fd = open(path); }
+      catch (error) {
+        if (!(error instanceof QuotaRefreshBusyError)) throw error;
+        // Elect ONE reclaimer before inspecting the owner. Two stat/unlink reclaimers could otherwise
+        // remove a newly acquired live lock. No age-based stealing, even for an ancient lock.
+        const recovery = `${path}.reclaim`;
+        const guard = open(recovery);
+        try {
+          let owner: unknown;
+          try { owner = JSON.parse(readFileSync(path, 'utf8')); }
+          catch (readError) {
+            if ((readError as NodeJS.ErrnoException).code !== 'ENOENT') throw new QuotaRefreshBusyError();
+          }
+          if (owner !== undefined) {
+            const pid = (owner as { pid?: unknown } | null)?.pid;
+            if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) throw new QuotaRefreshBusyError();
+            let dead = false;
+            try { process.kill(pid, 0); }
+            catch (probeError) { dead = (probeError as NodeJS.ErrnoException).code === 'ESRCH'; }
+            if (!dead) throw new QuotaRefreshBusyError();
+            unlinkSync(path);
+          }
+          fd = open(path);
+        } finally {
+          try { closeSync(guard); } finally { unlinkSync(recovery); }
+        }
+        // ponytail: a crash during recovery (or before writing a PID) fails closed as busy; manual
+        // recovery after all Wisp processes stop avoids an unsafe second layer of lock stealing.
+      }
+      writeFileSync(fd, JSON.stringify({ pid: process.pid }));
+      return await action();
+    } finally {
+      if (fd !== undefined) { try { closeSync(fd); } finally { unlinkSync(path); } }
+    }
+  };
+
   // The previous snapshot, or undefined when there is none / it does not parse. Unlike config.json and
   // auth.json this file is NEVER protected from overwrite (#182's rule is about stores that hold something
   // the user cannot regenerate) — a corrupt status.json is one turn of telemetry, and the next turn fixes it.
@@ -125,7 +196,7 @@ export class WispHome {
         if (name && !name.endsWith('.json')) return; // ignore our own .tmp churn
         // #171: status.json is rewritten every bridged turn. It is nobody's config, so waking both faces
         // to re-read config.json on each turn would be pure churn.
-        if (name === STATUS_FILE) return;
+        if (name === STATUS_FILE || name === QUOTA_FILE) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(onChange, 100);
       });

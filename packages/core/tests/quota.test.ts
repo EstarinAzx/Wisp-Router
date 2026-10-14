@@ -1,11 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { parseAccountQuota } from '../src/index';
+import { parseAccountQuota, parseQuotaCache } from '../src/index';
 
 // Synthetic values; kind/group/scope witnessed in #201's follow-up evidence:
 // https://github.com/getpaseo/paseo/issues/2302 (not fresh Wisp auth acceptance).
 const session = (overrides: Record<string, unknown> = {}) => ({
   kind: 'session', group: 'session', scope: null, percent: 42,
   resets_at: '2033-05-18T03:33:20.123456+00:00', severity: 'normal', is_active: true, ...overrides,
+});
+
+describe('parseQuotaCache', () => {
+  const reading = { updatedAt: 1000000, authRevision: 'v1:1:2:3:4:5', meters: [{ label: '5h', percent: 42, resetAt: 2000000000 }] };
+  const cache = (value: unknown = reading) => ({ schema: 1, providers: { codex: { reading: value, nextAllowedAt: 1300000 } } });
+
+  it('projects only normalized quota fields on read and write', () => {
+    expect(parseQuotaCache({ ...cache(), email: 'PRIVATE', providers: {
+      codex: { nextAllowedAt: 1300000, token: 'PRIVATE', reading: { ...reading, account: 'PRIVATE',
+        meters: [{ ...reading.meters[0], payload: 'PRIVATE' }] } }, other: { account: 'PRIVATE' },
+    } })).toEqual(cache());
+  });
+
+  it('recovers corrupt or unknown caches without inventing readings', () => {
+    for (const raw of [undefined, null, [], 'broken', {}, { schema: 2, providers: {} }, { schema: 1, providers: [] }]) {
+      expect(parseQuotaCache(raw)).toEqual({ schema: 1, providers: {} });
+    }
+    expect(parseQuotaCache({ schema: 1, providers: { codex: { nextAllowedAt: -1 } } }))
+      .toEqual({ schema: 1, providers: { codex: { nextAllowedAt: 0 } } });
+  });
+
+  it('drops malformed whole readings but preserves their retry deadlines', () => {
+    for (const invalid of [null, { ...reading, updatedAt: NaN }, { ...reading, updatedAt: -1 },
+      { ...reading, authRevision: 'PRIVATE_ACCOUNT' }, { ...reading, authRevision: '' },
+      ...[[], [{ label: 'PRIVATE_LABEL', percent: 42 }], [{ label: '5h', percent: null }],
+        [{ label: '5h', percent: 101 }], [{ label: '5h', percent: Infinity }],
+        [{ label: '5h', percent: 42, resetAt: '2000000000' }], [reading.meters[0], reading.meters[0]],
+      ].map(meters => ({ ...reading, meters })),
+    ]) expect(parseQuotaCache(cache(invalid))).toEqual({ schema: 1, providers: { codex: { nextAllowedAt: 1300000 } } });
+  });
 });
 const window = (overrides: Record<string, unknown> = {}) => ({
   used_percent: 42, limit_window_seconds: 18000, reset_after_seconds: 100,

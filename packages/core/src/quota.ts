@@ -12,6 +12,39 @@ const finite = (value: unknown): value is number => typeof value === 'number' &&
 const epochSeconds = (value: unknown): number | undefined =>
   finite(value) && Number.isSafeInteger(value) && value >= 0 && value <= 8.64e12 ? value : undefined;
 
+const epochMs = (value: unknown): value is number =>
+  finite(value) && Number.isSafeInteger(value) && value >= 0 && value <= 8.64e15;
+
+// Cache input is untrusted too. Project fields rather than carrying arbitrary account data forward.
+export const parseQuotaCache = (raw: unknown): QuotaCache => {
+  const cache: QuotaCache = { schema: 1, providers: {} };
+  if (!record(raw) || raw.schema !== 1 || !record(raw.providers)) return cache;
+  for (const provider of ['anthropic', 'codex'] as const) {
+    const entry = raw.providers[provider];
+    if (!record(entry)) continue;
+    const clean = cache.providers[provider] = { nextAllowedAt: epochMs(entry.nextAllowedAt) ? entry.nextAllowedAt : 0 } as NonNullable<QuotaCache['providers'][QuotaProvider]>;
+    const reading = entry.reading;
+    if (!record(reading) || !epochMs(reading.updatedAt) || typeof reading.authRevision !== 'string'
+      || !/^v1:\d+:\d+:\d+:\d+:\d+$/.test(reading.authRevision)
+      || !Array.isArray(reading.meters) || !reading.meters.length) continue;
+    const meters: QuotaMeter[] = [];
+    const labels = new Set<string>();
+    for (const meter of reading.meters) {
+      if (!record(meter) || typeof meter.label !== 'string' || meter.label.length > 32
+        || !/^\d+(?:\.\d+)?[mhd]$/.test(meter.label) || !(Number(meter.label.slice(0, -1)) > 0)
+        || labels.has(meter.label) || !finite(meter.percent) || meter.percent < 0 || meter.percent > 100
+        || (meter.resetAt !== undefined && epochSeconds(meter.resetAt) === undefined)) break;
+      labels.add(meter.label);
+      meters.push({ label: meter.label, percent: meter.percent,
+        ...(meter.resetAt === undefined ? {} : { resetAt: meter.resetAt as number }) });
+    }
+    if (meters.length === reading.meters.length) clean.reading = {
+      updatedAt: reading.updatedAt, authRevision: reading.authRevision, meters,
+    };
+  }
+  return cache;
+};
+
 const isoSeconds = (value: unknown): number | undefined => {
   if (typeof value !== 'string'
     || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return undefined;

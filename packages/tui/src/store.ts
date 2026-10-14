@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'child_process';
-import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, AntigravityAuth, isKimiProvider, resolveKeyId, type Provider } from '@wisp/core';
+import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, AntigravityAuth, isKimiProvider, resolveKeyId, type Provider, type QuotaProvider } from '@wisp/core';
 
 // ----------------------------- Store ----------------------------- //
 
@@ -47,6 +47,13 @@ export const codexAuth = new CodexAuth(
 export const anthropicAuth = new AnthropicAuth(
   { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
   openExternal, () => {});
+
+// Quota is explicitly tied to Wisp sign-in; even a concurrent auth-file removal must not import native login.
+export const quotaCurrent = async (provider: QuotaProvider): Promise<{ accessToken: string; accountId?: string } | undefined> => {
+  const creds = provider === 'codex' ? await codexAuth.current({ importNative: false }) : await anthropicAuth.current();
+  return creds?.accessToken ? { accessToken: creds.accessToken,
+    ...(provider === 'codex' ? { accountId: (creds as { accountId?: string }).accountId } : {}) } : undefined;
+};
 export const xaiAuth = new XaiAuth(
   { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
   openExternal, () => {});

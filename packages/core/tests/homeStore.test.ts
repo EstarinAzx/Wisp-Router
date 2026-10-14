@@ -10,11 +10,18 @@
  *   - WispConfig / WispAuth (from ./home): what the store reads and writes.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import * as fs from 'fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { WispHome, wispHomeDir } from '../src/homeStore';
+
+vi.mock('fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual };
+});
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wisp-home-')); });
@@ -249,5 +256,103 @@ describe('watch', () => {
     } finally {
       watcher.dispose();
     }
+  });
+});
+
+describe('quota storage', () => {
+  test('auth revision follows replacement/removal without containing credential data', () => {
+    const h = home();
+    expect(h.quotaAuthRevision()).toBeUndefined();
+    h.writeAuth({ codex: { accessToken: 'PRIVATE_TOKEN', accountId: 'PRIVATE_ACCOUNT' } });
+    const first = h.quotaAuthRevision();
+    expect(first).toMatch(/^v1:\d+:\d+:\d+:\d+:\d+$/);
+    expect(h.quotaAuthRevision()).toBe(first);
+    h.writeAuth({ codex: { accessToken: 'PRIVATE_TOKEN', accountId: 'PRIVATE_ACCOUNT' } });
+    expect(h.quotaAuthRevision()).not.toBe(first);
+    unlinkSync(join(dir, '.wisp', 'auth.json'));
+    expect(h.quotaAuthRevision()).toBeUndefined();
+  });
+
+  test('quota is recoverable, sanitized, atomic and owner-only without changing config/status', () => {
+    const h = home();
+    expect(h.readQuota()).toEqual({ schema: 1, providers: {} });
+    h.writeConfig({ provider: 'groq' });
+    h.writeStatus({ updatedAt: 123, providerId: 'groq', model: 'test' });
+    const config = readFileSync(join(dir, '.wisp', 'config.json'), 'utf8');
+    const status = readFileSync(join(dir, '.wisp', 'status.json'), 'utf8');
+    writeFileSync(join(dir, '.wisp', 'quota.json'), '{broken');
+    expect(h.readQuota()).toEqual({ schema: 1, providers: {} });
+    h.writeQuota({ schema: 1, providers: { codex: { nextAllowedAt: 1300000 } }, token: 'PRIVATE' } as any);
+    expect(h.readQuota()).toEqual({ schema: 1, providers: { codex: { nextAllowedAt: 1300000 } } });
+    expect(readFileSync(join(dir, '.wisp', 'quota.json'), 'utf8')).not.toContain('PRIVATE');
+    expect(readFileSync(join(dir, '.wisp', 'config.json'), 'utf8')).toBe(config);
+    expect(readFileSync(join(dir, '.wisp', 'status.json'), 'utf8')).toBe(status);
+    expect(readdirSync(join(dir, '.wisp')).some(file => file.endsWith('.tmp'))).toBe(false);
+    if (process.platform !== 'win32') expect(statSync(join(dir, '.wisp', 'quota.json')).mode & 0o777).toBe(0o600);
+  });
+
+  test('quota writes do not wake the configuration watcher', async () => {
+    const h = home();
+    let changes = 0;
+    const watcher = h.watch(() => { changes++; });
+    try {
+      h.writeQuota({ schema: 1, providers: {} });
+      await new Promise(resolve => setTimeout(resolve, 250));
+      expect(changes).toBe(0);
+    } finally { watcher.dispose(); }
+  });
+
+  test('the exclusive lock is busy for live or unknown owners regardless of age, and releases on failure', async () => {
+    const h = home();
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    await expect(h.withQuotaRefreshLock(async () => {
+      expect(existsSync(lock)).toBe(true);
+      if (process.platform !== 'win32') expect(statSync(lock).mode & 0o777).toBe(0o600);
+      await expect(home().withQuotaRefreshLock(async () => 'duplicate')).rejects.toThrow(/busy/i);
+      throw new Error('action failure');
+    })).rejects.toThrow('action failure');
+    expect(existsSync(lock)).toBe(false);
+    for (const owner of ['', '{broken', '{}', '{"pid":0}', JSON.stringify({ pid: process.pid })]) {
+      writeFileSync(lock, owner);
+      utimesSync(lock, 0, 0);
+      await expect(h.withQuotaRefreshLock(async () => 'duplicate')).rejects.toThrow(/busy/i);
+      expect(readFileSync(lock, 'utf8')).toBe(owner);
+      unlinkSync(lock);
+    }
+  });
+
+  test('a provably exited owner can be reclaimed, but an unknown recovery owner cannot', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    expect(child.status).toBe(0);
+    writeFileSync(lock, JSON.stringify({ pid: Number(child.stdout) }));
+    writeFileSync(`${lock}.reclaim`, '');
+    await expect(h.withQuotaRefreshLock(async () => 'unsafe')).rejects.toThrow(/busy/i);
+    unlinkSync(`${lock}.reclaim`);
+    expect(await h.withQuotaRefreshLock(async () => 'recovered')).toBe('recovered');
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.reclaim`)).toBe(false);
+  });
+
+  test('recovery cleanup failure still releases the newly acquired main lock', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    expect(child.status).toBe(0);
+    writeFileSync(lock, JSON.stringify({ pid: Number(child.stdout) }));
+    const unlink = fs.unlinkSync;
+    // Only the OS cleanup error is injected; acquisition, PID probing and main-lock cleanup stay real.
+    const remove = vi.spyOn(fs, 'unlinkSync').mockImplementation(path => {
+      if (path === `${lock}.reclaim`) throw new Error('recovery cleanup failed');
+      unlink(path);
+    });
+    try {
+      await expect(h.withQuotaRefreshLock(async () => { throw new Error('must not run'); }))
+        .rejects.toThrow('recovery cleanup failed');
+      expect(existsSync(lock)).toBe(false);
+    } finally { remove.mockRestore(); }
   });
 });
