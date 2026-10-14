@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
-import { parseResponsesRequest } from './bridgeResponses';
+import { parseResponsesRequest, encodeResponsesToolCall } from './bridgeResponses';
 import { buildGeminiInteractionRequest, parseGeminiInteraction, type GeminiInteractionArgs, type GeminiInteractionResult, type GeminiStep } from './geminiInteractions';
 import type { GeminiInstructionPolicy, GeminiReplayContext } from './home';
 
@@ -85,7 +85,10 @@ export const preflightGeminiResponses = (value: unknown, rawHeaders: string[], p
       textParts(item.content, item.role === 'user' ? 'input_text' : 'output_text');
     } else if (item.type === 'function_call') {
       fields(item, ['id', 'status', 'type', 'call_id', 'name', 'namespace', 'arguments']); metadata(item);
-    } else if (item.type === 'function_call_output') {
+    } else if (item.type === 'custom_tool_call') {
+      fields(item, ['id', 'status', 'type', 'call_id', 'name', 'namespace', 'input']); metadata(item);
+      check(typeof item.input === 'string');
+    } else if (item.type === 'function_call_output' || item.type === 'custom_tool_call_output') {
       fields(item, ['id', 'type', 'call_id', 'output']); check(typeof item.output === 'string');
       check(item.id === undefined || typeof item.id === 'string');
     } else fail();
@@ -93,9 +96,18 @@ export const preflightGeminiResponses = (value: unknown, rawHeaders: string[], p
   const validateTools = (values: unknown, nested = false): void => {
     check(Array.isArray(values));
     for (const value of values) {
-      const tool = fields(value, ['type', 'name', 'description', 'parameters', 'strict', 'tools']);
+      const tool = fields(value, ['type', 'name', 'description', 'parameters', 'strict', 'tools', 'format']);
       if (tool.type === 'namespace') {
         fields(tool, ['type', 'name', 'description', 'tools']); check(!nested); validateTools(tool.tools, true);
+      } else if (tool.type === 'custom') {
+        fields(tool, ['type', 'name', 'description', 'format']);
+        check(!nested && tool.name === 'apply_patch');
+        const format = fields(tool.format, ['type', 'syntax', 'definition']);
+        check(format.type === 'grammar' && format.syntax === 'lark' && typeof format.definition === 'string');
+        // ponytail: qualify only these observed LF/CRLF grammars; native parsing/policy still owns validation.
+        check(['d6367f4826ed608c424b0a308f3d6163527df63c22513d089b91863552f8bfeb',
+          'ce2574fac05867f519a0ce3bdae50ce7d68b6d2e5f68d3c0c7e75518142d89b3']
+          .includes(createHash('sha256').update(format.definition).digest('hex')));
       } else { fields(tool, ['type', 'name', 'description', 'parameters', 'strict']); check(tool.type === 'function' && (tool.strict === undefined || tool.strict === false)); }
     }
   };
@@ -128,10 +140,7 @@ const visible = (result: GeminiInteractionResult, p: Preflight): Item[] => {
     if (step.type === 'model_output' && step.content?.length) {
       items.push({ type: 'message', role: 'assistant', content: step.content.map(part => ({ type: 'output_text', text: part.text, annotations: [] })) });
     } else if (step.type === 'function_call') {
-      const tool = p.parsed.registry.get(step.name);
-      check(tool?.kind === 'function');
-      items.push({ type: 'function_call', call_id: step.id, name: tool.name,
-        ...(tool.namespace ? { namespace: tool.namespace } : {}), arguments: JSON.stringify(step.arguments) });
+      items.push(encodeResponsesToolCall({ id: step.id, name: step.name, argsJson: JSON.stringify(step.arguments) }, p.parsed.registry));
     }
   }
   check(items.length);
@@ -165,10 +174,11 @@ export const prepareGeminiReplay = (p: Preflight, context: GeminiReplayContext) 
     const expected = visible(result, p);
     check(canonical(p.input.slice(i + 1, i + 1 + expected.length).map(metadata)) === canonical(expected.map(metadata)));
     steps.push(...result.steps); i += expected.length;
-    const pending = new Set(result.steps.filter(step => step.type === 'function_call').map(step => step.id));
+    const pending = new Map(expected.filter(item => item.type === 'function_call' || item.type === 'custom_tool_call')
+      .map(item => [item.call_id, `${item.type}_output`]));
     while (pending.size) {
       const output = p.input[++i];
-      check(output?.type === 'function_call_output' && pending.delete(output.call_id));
+      check(output && pending.get(output.call_id) === output.type && pending.delete(output.call_id));
       steps.push({ type: 'function_result', call_id: output.call_id, result: output.output });
     }
   }
@@ -204,7 +214,8 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
   const frame = (type: string, fields: Item): string => `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: sequence++, ...fields })}\n\n`;
   let frames = frame('response.created', { response: { ...response, status: 'in_progress', output: [] } });
   for (const [output_index, item] of output.entries()) {
-    frames += frame('response.output_item.added', { output_index, item: item.type === 'function_call' ? { ...item, status: 'in_progress', arguments: '' }
+    const field = item.type === 'function_call' ? 'arguments' : item.type === 'custom_tool_call' ? 'input' : undefined;
+    frames += frame('response.output_item.added', { output_index, item: field ? { ...item, status: 'in_progress', [field]: '' }
       : item.type === 'message' ? { ...item, status: 'in_progress', content: [] } : item });
     if (item.type === 'message') for (const [content_index, part] of item.content.entries()) {
       const position = { item_id: item.id, output_index, content_index };
@@ -213,9 +224,10 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
       frames += frame('response.output_text.done', { ...position, text: part.text });
       frames += frame('response.content_part.done', { ...position, part });
     }
-    if (item.type === 'function_call') {
-      frames += frame('response.function_call_arguments.delta', { item_id: item.id, output_index, delta: item.arguments });
-      frames += frame('response.function_call_arguments.done', { item_id: item.id, output_index, arguments: item.arguments });
+    if (field) {
+      const prefix = item.type === 'custom_tool_call' ? 'response.custom_tool_call_input' : 'response.function_call_arguments';
+      frames += frame(`${prefix}.delta`, { item_id: item.id, output_index, delta: item[field] });
+      frames += frame(`${prefix}.done`, { item_id: item.id, output_index, [field]: item[field] });
     }
     frames += frame('response.output_item.done', { output_index, item });
   }
