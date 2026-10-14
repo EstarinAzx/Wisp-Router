@@ -236,7 +236,7 @@ const emptyReport = (reason: Reason, receipt = RECEIPT): ArgonAcceptanceReport =
   outcome: 'refused', reason, logicalSequenceId: SEQUENCE, attempts: 0, reservedInput: 0, reservedOutput: 0, toolExecutions: 0, observedUsage: [], receiptPath: receipt,
 });
 type Environment = { home: string; fetch: typeof globalThis.fetch; now: () => number; currentSource: () => void;
-  claim: () => ArgonReceipt; signal?: AbortSignal; synthetic: boolean };
+  claim: () => ArgonReceipt; signal?: AbortSignal; fixtureCredential?: string };
 const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAcceptanceReport> => {
   const report = emptyReport('request-refused', path.join(env.home, 'acceptance', RECEIPT_NAME));
   let receipt: ArgonReceipt | undefined, guardReason: Reason | undefined;
@@ -292,7 +292,7 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
         credentials: (context: GeminiReplayContext) => {
           current(); check(context === retained, 'credential-changed');
           try { apiKey = home.geminiCredentials(context); } catch { fail('credential-changed'); }
-          if (env.synthetic) check(apiKey === 'SYNTHETIC_ARGON_A3_DO_NOT_USE', 'synthetic-only');
+          if (env.fixtureCredential !== undefined) check(apiKey === env.fixtureCredential, 'synthetic-only');
           return apiKey;
         },
         assertCurrent: (context: GeminiReplayContext) => { check(context === retained, 'credential-changed'); current(); },
@@ -409,7 +409,7 @@ export const runArgonAcceptance = async (grantBytes: Uint8Array, signal?: AbortS
   try {
     const signed = decodeSigned(grantBytes, APPROVAL_AUTHORITY);
     const expected = liveBinding(signed.binding), grant = verifyArgonGrant(grantBytes, APPROVAL_AUTHORITY, expected);
-    return await run(grant, { home: HOME, signal, synthetic: false, now: () => performance.now(), fetch: globalThis.fetch,
+    return await run(grant, { home: HOME, signal, now: () => performance.now(), fetch: globalThis.fetch,
       claim: () => claimArgonReceipt(grant), currentSource: () => {
         check(canonical(liveBinding(grant.binding)) === canonical(grant.binding), 'source-changed');
         assertFiles(grant.binding, SOURCE, OUTPUT + '/operator.mjs', BUN);
@@ -426,7 +426,7 @@ export const runSyntheticArgonAcceptance = async (grantBytes: Uint8Array, fixtur
       && typeof fixture.root === 'string' && path.isAbsolute(fixture.root)
       && samePath(path.dirname(fixture.root), os.tmpdir()) && path.basename(fixture.root).startsWith('wisp-argon-a3-'), 'synthetic-only');
     const grant = verifyArgonGrant(grantBytes, fixture.publicKey, fixture.expected);
-    return await run(grant, { home: fixture.root, signal: fixture.signal, synthetic: true, fetch: fixture.fetch, now: fixture.now ?? (() => performance.now()),
+    return await run(grant, { home: fixture.root, signal: fixture.signal, fixtureCredential: fixture.apiKey, fetch: fixture.fetch, now: fixture.now ?? (() => performance.now()),
       claim: () => openReceipt(grant, fixture.root),
       currentSource: () => assertFiles(grant.binding, path.join(fixture.root, 'source'), path.join(fixture.root, 'operator.mjs'), path.join(fixture.root, 'runtime')) });
   } catch (e) { return emptyReport(reasonOf(e)); }
