@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
-import { CodexAuth, WispHome, type QuotaProvider } from '@wisp/core';
+import { AnthropicAuth, CodexAuth, WispHome, type QuotaProvider } from '@wisp/core';
 import type { QuotaCommandDeps } from '../src/quotaCli';
 
 // Deferred import makes the missing command an individual RED assertion, not a test discovery error.
@@ -162,6 +162,36 @@ test('missing Wisp sign-in skips credential resolution and does not import nativ
   expect((await runQuota(['refresh'], deps)).exitCode).toBe(1);
   expect(calls).toEqual([]);
   expect(existsSync(join(dir, 'quota.json'))).toBe(false);
+});
+
+test.each(['anthropic', 'codex'] as const)('%s quota renewal preserves concurrent sign-out, replacement and removal', async provider => {
+  const originalFetch = globalThis.fetch;
+  const expired = `e30.${Buffer.from(JSON.stringify({ exp: 1 })).toString('base64url')}.fixture`;
+  const manager = provider === 'codex'
+    ? new CodexAuth({ read: () => home.readAuth().codex, write: c => { home.writeAuth({ codex: c }); } }, async () => false, () => {})
+    : new AnthropicAuth({ read: () => home.readAuth().anthropic, write: c => { home.writeAuth({ anthropic: c }); } }, async () => false, () => {});
+  deps.current = async () => (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current()) as Promise<{ accessToken: string; accountId?: string } | undefined>;
+  try {
+    for (const change of ['signout', 'replacement', 'removal']) {
+      home.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, accountId: 'fixture-original' } });
+      let expected = '', renewals = 0;
+      globalThis.fetch = (async (url: unknown) => {
+        expect(String(url)).toBe(provider === 'codex' ? 'https://auth.openai.com/oauth/token' : 'https://platform.claude.com/v1/oauth/token');
+        renewals++;
+        if (change === 'signout') manager.signOut();
+        else home.writeAuth({ [provider]: change === 'removal' ? undefined : { accessToken: 'fixture-new-login', accountId: 'fixture-new-account' } });
+        expected = readFileSync(join(dir, 'auth.json'), 'utf8');
+        return Response.json({ access_token: 'fixture-renewed-old-login', refresh_token: 'fixture-rotated', expires_in: 3600 });
+      }) as typeof fetch;
+      const result = await runQuota(['refresh', provider], deps);
+      expect(renewals).toBe(1);
+      expect(readFileSync(join(dir, 'auth.json'), 'utf8')).toBe(expected);
+      expect(result.exitCode).toBe(1);
+      expect(calls).toEqual([]);
+      expect(home.readQuota().providers[provider]).toEqual({ nextAllowedAt: now + 300000 });
+      now += 300000;
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('the real Codex manager can disable native import even if its store becomes absent', async () => {

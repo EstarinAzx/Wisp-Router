@@ -195,6 +195,7 @@ export class CodexAuth {
     const fresh = this.store.read() ?? creds;
     if (!shouldRefreshCodexToken({ accessToken: fresh.accessToken, idToken: fresh.idToken }, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: CodexCreds;
     try {
       const res = await fetch(CODEX_TOKEN_URL, {
@@ -215,6 +216,8 @@ export class CodexAuth {
       this.log(`[codex] token refresh error: ${String(err)}`);
       return fresh;
     }
+    // A sign-out, replacement or another renewal during the await owns the newer store state.
+    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Codex sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side (the old refresh token
     // may be consumed), so a failed auth.json write must not discard the new bundle — keep using it in
     // memory and let a later write retry.

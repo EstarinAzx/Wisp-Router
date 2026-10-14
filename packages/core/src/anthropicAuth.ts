@@ -191,6 +191,7 @@ export class AnthropicAuth {
     const fresh = this.store.read() ?? creds;
     if (!shouldRefreshAnthropicToken(fresh, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: AnthropicCreds;
     try {
       const res = await fetch(ANTHROPIC_TOKEN_URL, {
@@ -211,6 +212,8 @@ export class AnthropicAuth {
       this.log(`[anthropic] token refresh error: ${String(err)}`);
       return fresh;
     }
+    // A sign-out, replacement or another renewal during the await owns the newer store state.
+    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Anthropic sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
     try { this.store.write(next); } catch (err) { this.log(`[anthropic] token persist error: ${String(err)}`); }
