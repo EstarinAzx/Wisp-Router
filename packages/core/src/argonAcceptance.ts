@@ -19,7 +19,7 @@ const HOST = 'b08757ee-de2b-4092-8d00-987f914d1226', TASK = '1702a7c7-a431-43c2-
 const POLICY = 'prepend-leading-developer-v1';
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const SOURCE = 'C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-2-2-8-argon-quota';
-const OUTPUT = SOURCE + '/out/release-228/argon-bounded-operator-fixes';
+const OUTPUT = SOURCE + '/out/release-228/argon-bounded-close-fixes';
 const BUN = 'C:/Users/S.D/.traycer/epics/' + TASK + '/scratch/bun-1.4.2/bun.exe';
 // Enrollment is a separate authenticated user action. No flag, file or environment variable supplies this key.
 const APPROVAL_AUTHORITY: KeyObject | null = null;
@@ -193,7 +193,9 @@ const openReceipt = (grant: VerifiedArgonGrant, home: string): ArgonReceipt => {
     close: (outcome, reason, checkCompletion) => {
       check(!closed && !broken, 'receipt-write-failed');
       check(outcome !== 'completed' || (attempts === 3 && !pending && reason === 'completed'), 'receipt-order');
-      const terminal = { type: 'close', outcome, reason, attempts, reservedInput: attempts * LIMITS.input, reservedOutput: attempts * LIMITS.output };
+      // The receipt cannot record acceptance of checks that run after its descriptor closes.
+      const terminal = { type: 'close', outcome: outcome === 'completed' ? 'completion-candidate' : outcome, reason,
+        attempts, reservedInput: attempts * LIMITS.input, reservedOutput: attempts * LIMITS.output };
       try {
         append(terminal);
         // A synchronous flush can cross the deadline. The final chained record supersedes the candidate.
@@ -229,7 +231,7 @@ const liveBinding = (signed: ArgonBinding): ArgonBinding => {
     const executable = { bundleSha256: sha(fs.readFileSync(OUTPUT + '/operator.mjs')), runtimeSha256: sha(fs.readFileSync(BUN)) };
     const seal = JSON.parse(fs.readFileSync(OUTPUT + '/operator-build.json', 'utf8'));
     check(canonical(seal.sourceManifest) === canonical(sourceManifest) && canonical(seal.executable) === canonical(executable)
-      && canonical(seal.command) === canonical(['build','packages/core/tools/runArgonAcceptance.ts','--target=bun','--format=esm','--outfile=out/release-228/argon-bounded-operator-fixes/operator.mjs']), 'source-changed');
+      && canonical(seal.command) === canonical(['build','packages/core/tools/runArgonAcceptance.ts','--target=bun','--format=esm','--outfile=out/release-228/argon-bounded-close-fixes/operator.mjs']), 'source-changed');
     return { ...signed, sourceManifest, executable, payload: payloadBinding(signed.sessionId) };
   } catch { return fail('source-changed'); }
 };
@@ -246,6 +248,7 @@ type Environment = { home: string; fetch: typeof globalThis.fetch; now: () => nu
 const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAcceptanceReport> => {
   const report = emptyReport('request-refused', path.join(env.home, 'acceptance', RECEIPT_NAME));
   let receipt: ArgonReceipt | undefined, guardReason: Reason | undefined, terminalAttempted = false;
+  let checkCompletion: (() => void) | undefined;
   const body = initialBody(), headers = ['session-id', grant.binding.sessionId];
   const expectedInput: Record<string, any>[] = [{ type: 'user_input', content: [{ type: 'text', text: body.input[1].content }] }];
   let retained: GeminiReplayContext | undefined, previousResult: string | null = null;
@@ -404,10 +407,13 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
         if (index === 2) {
           current(); terminalAttempted = true;
           receipt.close('completed', 'completed', current);
-          report.outcome = 'completed'; report.reason = 'completed';
+          checkCompletion = current;
         }
       } finally { clearTimeout(timer); env.signal?.removeEventListener('abort', abort); }
     }
+    // Accept only after close and cleanup; a failed final guard must never reopen the receipt.
+    check(checkCompletion, 'delivery-invalid'); checkCompletion();
+    report.outcome = 'completed'; report.reason = 'completed';
   } catch (e) {
     report.reason = guardReason ?? reasonOf(e);
     report.outcome = report.reason === 'receipt-write-failed' ? 'uncertain' : receipt ? 'stopped' : 'refused';

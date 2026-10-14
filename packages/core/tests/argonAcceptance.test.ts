@@ -138,6 +138,66 @@ test.each(['expiry', 'abort', 'failed-correction'])('terminal flush %s cannot le
 });
 
 
+test.each([
+  ['on-time', 'completed', 'completed'],
+  ['expiry', 'stopped', 'deadline-exhausted'],
+  ['abort', 'stopped', 'aborted'],
+  ['close-error', 'uncertain', 'receipt-write-failed'],
+  ['correction-close-error', 'uncertain', 'receipt-write-failed'],
+  ['cleanup-expiry', 'stopped', 'deadline-exhausted'],
+  ['cleanup-abort', 'stopped', 'aborted'],
+])('terminal close %s preserves spending and checks the final report decision', async (mode, outcome, reason) => {
+  const api = await operator(), f = setup(), controller = new AbortController();
+  const open = fs.openSync, close = fs.closeSync, flush = fs.fsyncSync;
+  const add = controller.signal.addEventListener.bind(controller.signal), remove = controller.signal.removeEventListener.bind(controller.signal);
+  let time = 0, receiptFd: number | undefined, receiptCloses = 0, receiptOpens = 0, active = 0, flushes = 0;
+  f.fixture.now = () => time; f.fixture.signal = controller.signal;
+  vi.stubGlobal('fetch', () => { journal(f.root, 'escaped-fetch'); throw Error('global fetch forbidden'); });
+  vi.spyOn(controller.signal, 'addEventListener').mockImplementation((...args: any[]) => { if (args[0] === 'abort') active++; return (add as any)(...args); });
+  vi.spyOn(controller.signal, 'removeEventListener').mockImplementation((...args: any[]) => {
+    if (args[0] === 'abort') active--;
+    const value = (remove as any)(...args);
+    if (receiptCloses && mode === 'cleanup-expiry') time = 180001;
+    if (receiptCloses && mode === 'cleanup-abort') controller.abort();
+    return value;
+  });
+  vi.spyOn(fs, 'openSync').mockImplementation((p: any, ...args: any[]) => {
+    const claim = String(p) === path.join(f.root, 'acceptance', receiptName) && args[0] === 'wx';
+    if (claim) receiptOpens++;
+    const fd = (open as any)(p, ...args);
+    if (claim) receiptFd = fd;
+    return fd;
+  });
+  vi.spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    flush(fd);
+    if (++flushes === 8 && mode === 'correction-close-error') time = 180001;
+  });
+  vi.spyOn(fs, 'closeSync').mockImplementation(fd => {
+    close(fd);
+    if (fd !== receiptFd) return;
+    receiptFd = undefined; receiptCloses++;
+    if (mode === 'expiry') time = 180001;
+    if (mode === 'abort') controller.abort();
+    journal(f.root, 'receipt-close-return', { mode, time, aborted: controller.signal.aborted });
+    if (mode === 'close-error' || mode === 'correction-close-error') throw Error('receipt close failed');
+  });
+  vi.useFakeTimers();
+  try {
+    const report = await api.runSyntheticArgonAcceptance(f.grant, f.fixture);
+    journal(f.root, 'close-boundary-report', { mode, report, receiptCloses, receiptOpens, active, timers: vi.getTimerCount() });
+    expect(receiptCloses).toBe(1); expect(receiptOpens).toBe(1);
+    expect(active).toBe(0); expect(vi.getTimerCount()).toBe(0);
+    expect(report).toMatchObject({ attempts: 3, reservedInput: 24576, reservedOutput: 6144, toolExecutions: 2 });
+    const before = fs.readFileSync(path.join(f.root, 'acceptance', receiptName));
+    f.fixture.signal = undefined;
+    expect((await api.runSyntheticArgonAcceptance(f.grant, f.fixture)).reason).toBe('receipt-exists');
+    expect(fs.readFileSync(path.join(f.root, 'acceptance', receiptName))).toEqual(before);
+    expect(callbacks(f.root)).toHaveLength(3); expect(receiptCloses).toBe(1); expect(receiptOpens).toBe(2);
+    expect(report).toMatchObject({ outcome, reason });
+    expect(frames(f.root).at(-1).entry.outcome).toBe(mode === 'correction-close-error' ? 'stopped' : 'completion-candidate');
+  } finally { vi.useRealTimers(); }
+});
+
 test('public null authority refuses an approved-form test signature before filesystem or network access', async () => {
   const api = await operator(), f = setup();
   const reads = vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw Error('real files forbidden'); });
@@ -199,7 +259,7 @@ test('approved-form fixture flushes reservations before three actual callbacks a
   let previous = '';
   frames(f.root).forEach((frame, i) => { expect(frame.seq).toBe(i); expect(frame.previous).toBe(previous); expect(frame.digest).toBe(sha(JSON.stringify({ seq: i, previous, entry: frame.entry }))); previous = frame.digest; });
   expect(frames(f.root).map(f => f.entry.type)).toEqual(['header','reserve','result','reserve','result','reserve','result','close']);
-  expect(frames(f.root).at(-1).entry.outcome).toBe('completed');
+  expect(frames(f.root).at(-1).entry.outcome).toBe('completion-candidate');
   const bytes = fs.readFileSync(path.join(f.root, 'acceptance', receiptName));
   expect((await api.runSyntheticArgonAcceptance(f.grant, f.fixture)).reason).toBe('receipt-exists');
   expect(callbacks(f.root)).toHaveLength(3); expect(fs.readFileSync(path.join(f.root, 'acceptance', receiptName))).toEqual(bytes);
