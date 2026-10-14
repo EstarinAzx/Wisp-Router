@@ -29,6 +29,7 @@ import type { AddressInfo } from 'net';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
+import { AuthStateChangedError } from './homeStore';
 import {
   CodexCreds, codeVerifier, codeChallenge, oauthState,
   parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn,
@@ -166,7 +167,8 @@ const runCodexOAuth = async (openExternal: (url: string) => PromiseLike<boolean>
 // NEVER been written (truly first use); the {} tombstone means signed out.
 export type CodexCredsStore = {
   read: () => CodexCreds | undefined;
-  write: (creds: CodexCreds) => void;
+  // A supplied snapshot must be compared under the host's auth write lock.
+  write: (creds: CodexCreds, expected?: string) => void;
 };
 
 // Owns the Codex token lifecycle against one auth.json slice. Each face holds a single instance and
@@ -221,7 +223,10 @@ export class CodexAuth {
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side (the old refresh token
     // may be consumed), so a failed auth.json write must not discard the new bundle — keep using it in
     // memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[codex] token persist error: ${String(err)}`); }
+    try { this.store.write(next, beforeRefresh); } catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[codex] token persist error: ${String(err)}`);
+    }
     return next;
   };
 

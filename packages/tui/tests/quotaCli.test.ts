@@ -168,8 +168,8 @@ test.each(['anthropic', 'codex'] as const)('%s quota renewal preserves concurren
   const originalFetch = globalThis.fetch;
   const expired = `e30.${Buffer.from(JSON.stringify({ exp: 1 })).toString('base64url')}.fixture`;
   const manager = provider === 'codex'
-    ? new CodexAuth({ read: () => home.readAuth().codex, write: c => { home.writeAuth({ codex: c }); } }, async () => false, () => {})
-    : new AnthropicAuth({ read: () => home.readAuth().anthropic, write: c => { home.writeAuth({ anthropic: c }); } }, async () => false, () => {});
+    ? new CodexAuth({ read: () => home.readAuth().codex, write: (c, expected) => { home.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
+    : new AnthropicAuth({ read: () => home.readAuth().anthropic, write: (c, expected) => { home.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
   deps.current = async () => (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current()) as Promise<{ accessToken: string; accountId?: string } | undefined>;
   try {
     for (const change of ['signout', 'replacement', 'removal']) {

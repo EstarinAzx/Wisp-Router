@@ -983,11 +983,11 @@ export const activate = (context: vscode.ExtensionContext): void => {
   home = new WispHome();
   // Codex token lifecycle — creds live in auth.json; browser open via vscode.env.openExternal.
   codexAuth = new CodexAuth(
-    { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+    { read: () => home.readAuth().codex, write: (c, expected) => { home.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Anthropic (Claude.ai) token lifecycle — same injection as Codex.
   anthropicAuth = new AnthropicAuth(
-    { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+    { read: () => home.readAuth().anthropic, write: (c, expected) => { home.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Grok (xAI) token lifecycle — same injection as Codex/Anthropic.
   xaiAuth = new XaiAuth(

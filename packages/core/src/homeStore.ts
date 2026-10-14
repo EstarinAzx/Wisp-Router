@@ -11,7 +11,8 @@
  *
  * Both the extension and the TUI hold a WispHome each; the file is the single source of truth
  * (ADR-0002). Writes are read-merge-write with a tmp+rename swap so a concurrent reader never sees
- * a torn file; logical races (two-process OAuth refresh) are the callers' job via re-read-before-refresh.
+ * a torn file. Auth writes share a guard; renewal callers supply the expected Provider snapshot so
+ * comparison and persistence cannot interleave with another cooperating writer.
  */
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, watch, writeFileSync, type FSWatcher } from 'fs';
@@ -36,6 +37,10 @@ const QUOTA_FILE = 'quota.json';
 
 export class QuotaRefreshBusyError extends Error {
   constructor() { super('Quota refresh is busy.'); }
+}
+
+export class AuthStateChangedError extends Error {
+  constructor() { super('Wisp sign-in changed during token refresh; retry the operation.'); }
 }
 
 // ----------------------------- WispHome ----------------------------- //
@@ -96,10 +101,13 @@ export class WispHome {
   readAuth = (): WispAuth => parseWispAuth(this.readRaw(AUTH_FILE));
   authExists = (): boolean => existsSync(this.path(AUTH_FILE));
   // Secrets file — owner-only (0o600) per ADR-0002.
-  writeAuth = (patch: Partial<WispAuth>): WispAuth => {
+  writeAuth = (patch: Partial<WispAuth>, expected?: { provider: 'codex' | 'anthropic'; snapshot: string }): WispAuth => {
     if (Object.prototype.hasOwnProperty.call(patch, 'geminiApi')) throw new Error('Gemini credential bundle is reserved.');
     return this.withAuthLock(() => {
-      const next = { ...this.authForWrite(), ...patch };
+      const current = this.authForWrite();
+      // The expected Provider bundle and the write share the guard; sibling fields may change freely.
+      if (expected && JSON.stringify(current[expected.provider]) !== expected.snapshot) throw new AuthStateChangedError();
+      const next = { ...current, ...patch };
       this.writeRaw(AUTH_FILE, serializeWispStore(next), 0o600);
       return next;
     });

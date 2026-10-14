@@ -17,6 +17,8 @@ import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { WispHome, wispHomeDir } from '../src/homeStore';
+import { CodexAuth } from '../src/codexAuth';
+import { AnthropicAuth } from '../src/anthropicAuth';
 
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -29,6 +31,63 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 // The sandbox path points at a subdir that does NOT exist yet — creation on demand is part of the contract.
 const home = () => new WispHome(join(dir, '.wisp'));
+
+describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisition', provider => {
+  test.each([false, true])('preserves normal renewal and unrelated writes (disk failure: %s)', async diskFailure => {
+    const h = home();
+    const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
+    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
+    const manager = provider === 'codex'
+      ? new CodexAuth({ read: () => h.readAuth().codex, write: (c, expected?: string) => { h.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
+      : new AnthropicAuth({ read: () => h.readAuth().anthropic, write: (c, expected?: string) => { h.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    vi.stubGlobal('fetch', async () => {
+      home().writeAuth({ bridgeSecret: 'sibling-write' });
+      return Response.json({ access_token: 'fixture-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 });
+    });
+    const rename = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      if (diskFailure && existsSync(String(args[0])) && readFileSync(String(args[0]), 'utf8').includes('fixture-renewed')) throw new Error('synthetic disk failure');
+      return rename(...args);
+    });
+    try {
+      const result = await (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current());
+      expect(result?.accessToken).toBe('fixture-renewed');
+      expect(h.readAuth()[provider]?.accessToken).toBe(diskFailure ? expired : 'fixture-renewed');
+      expect(h.readAuth().bridgeSecret).toBe('sibling-write');
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+      expect(readdirSync(join(dir, '.wisp')).some(file => file.endsWith('.tmp'))).toBe(false);
+    } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
+  });
+
+  test.each(['signout', 'replacement', 'removal'])('preserves a concurrent %s and returns no old-account credentials', async change => {
+    const a = home(), b = home();
+    const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
+    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
+    const manager = provider === 'codex'
+      ? new CodexAuth({ read: () => a.readAuth().codex, write: (c, expected?: string) => { a.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
+      : new AnthropicAuth({ read: () => a.readAuth().anthropic, write: (c, expected?: string) => { a.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    let changed = false, preserved = '';
+    const open = fs.openSync;
+    // The second real store writes after the manager's last read, just before the first gets the lock.
+    const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      if (!changed && String(args[0]).endsWith('auth.lock')) {
+        changed = true;
+        b.writeAuth({ [provider]: change === 'signout' ? {} : change === 'removal' ? undefined : { accessToken: 'fixture-new-account' } });
+        preserved = readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8');
+      }
+      return open(...args);
+    });
+    vi.stubGlobal('fetch', async () => Response.json({ access_token: 'fixture-old-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 }));
+    try {
+      const result = await (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current()).catch(error => error);
+      expect(changed).toBe(true);
+      expect(readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8')).toBe(preserved);
+      expect(result).toBeInstanceOf(Error);
+      expect(String(result)).toMatch(/sign-in changed/);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+    } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
+  });
+});
 
 describe('Gemini credential lifetime', () => {
   test('metadata omits the bearer, survives restart and rotates even for the same key', () => {

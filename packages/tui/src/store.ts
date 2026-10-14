@@ -42,10 +42,10 @@ export const openExternal = (url: string): Promise<boolean> =>
 // Same auth.json slices the extension wires — log is dropped (no output channel in a raw-mode TUI;
 // sign-in failures surface on the wait screen instead).
 export const codexAuth = new CodexAuth(
-  { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+  { read: () => home.readAuth().codex, write: (c, expected) => { home.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } },
   openExternal, () => {});
 export const anthropicAuth = new AnthropicAuth(
-  { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+  { read: () => home.readAuth().anthropic, write: (c, expected) => { home.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } },
   openExternal, () => {});
 
 // Quota is explicitly tied to Wisp sign-in; even a concurrent auth-file removal must not import native login.
