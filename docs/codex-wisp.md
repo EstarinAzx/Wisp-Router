@@ -42,6 +42,23 @@ checks the numeric loopback listener without sending the secret, and starts Code
 child-only Responses provider. It does not start a Bridge or edit either application's
 configuration or authentication. Codex still owns tools, approvals, sandbox policy and sessions.
 
+Before starting the conversational child, the launcher checks the effective native configuration
+through `app-server config/read`, with a four-second deadline. Codex merges provider tables, so
+an override cannot erase inherited fields. If `[model_providers.wisp_local]` retains bearer tokens,
+headers, query parameters, alternate auth helpers or a catalog URL, the launcher refuses to run
+and asks you to remove the conflicting entries. It does not edit the file for you. The inspection
+uses a fresh provider without starting a thread; conversations keep the stable provider identity
+so native resume and session selection still work. An unavailable or failed inspection also stops
+the launch. This is a startup check; it does not lock native configuration against concurrent
+edits. This behavior is verified with actual CLI **0.159.2** and synthetic loopback traffic:
+
+```sh
+bun packages/tui/tests/nativeCodexTransport.check.ts out/codex-transport-new
+```
+
+Use a new output directory on each run. Historical checks pinned to 0.153.4/0.154.0 remain
+historical contracts; they do not establish this current-client behavior.
+
 On Windows, the launcher resolves `codex.exe` or Node plus the installed `codex.js` entry and
 starts it directly without a shell command string. Spaces, quotes, metacharacters and literal
 percent expressions stay arguments. Shell-only Codex shims are unsupported. A missing CLI,

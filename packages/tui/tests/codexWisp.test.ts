@@ -41,9 +41,10 @@ test('child overlay preserves native selection, arguments and parent environment
     const split = value.indexOf('=');
     return [value.slice(0, split), Bun.TOML.parse(`value=${value.slice(split + 1)}`).value];
   }));
+  const provider = config.model_provider as string;
   expect(config).toEqual({
-    model_provider: 'wisp_local',
-    'model_providers.wisp_local': {
+    model_provider: expect.any(String),
+    [`model_providers.${provider}`]: {
       name: 'Wisp local Responses bridge', base_url: 'http://127.0.0.1:12345/v1', wire_api: 'responses',
       env_key: 'WISP_CODEX_BRIDGE_SECRET', requires_openai_auth: false, supports_websockets: false,
     },
@@ -124,6 +125,48 @@ const run = async (entry: string[], args: string[], env: Record<string, string |
   } finally { clearTimeout(timeout); }
 };
 
+// A controlled native config/read boundary; conversation execution stays observable separately.
+const configProbe = (port: number, extra: Record<string, unknown> = {}) => `
+  if (process.argv.includes('app-server')) {
+    const args = process.argv.slice(2);
+    const providers = args.filter(arg => arg.startsWith('model_provider=')).map(arg => JSON.parse(arg.slice('model_provider='.length)));
+    require('readline').createInterface({input:process.stdin}).on('line', line => {
+      const request = JSON.parse(line);
+      if (request.id === 1) console.log(JSON.stringify({id:1,result:{}}));
+      if (request.method === 'config/read') console.log(JSON.stringify({id:request.id,result:{config:{
+        model_provider:providers.at(-1),model_providers:{[providers[0]]:{
+          name:'Wisp local Responses bridge',base_url:'http://127.0.0.1:${port}/v1',wire_api:'responses',
+          env_key:'WISP_CODEX_BRIDGE_SECRET',requires_openai_auth:false,supports_websockets:false,
+          ...${JSON.stringify(extra)}
+        }}
+      }}}));
+    });
+    return;
+  }
+`;
+
+test.each([
+  { experimental_bearer_token: 'synthetic-forbidden' }, { http_headers: { Authorization: 'synthetic-forbidden' } },
+  { env_http_headers: { 'X-Hostile': 'SYNTHETIC_ENV' } }, { query_params: { hostile: 'synthetic-forbidden' } },
+  { auth: { command: 'synthetic-forbidden' } }, { gateway_oauth: { issuer: 'synthetic-forbidden' } },
+  { aws: { profile: 'synthetic-forbidden' } }, { model_catalog_url: 'https://synthetic-forbidden.invalid/models' },
+])('refuses inherited transport fields before starting the conversation: %j', async extra => {
+  const port = await listen((_req, res) => { res.writeHead(401); res.end(); });
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ bridge: { port } }));
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-only' }));
+  const bin = join(home, 'node_modules', '@openai', 'codex', 'bin'); mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'codex.js'), `${configProbe(port, extra)}
+    if (process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); }
+    require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'conversation-started'),'unsafe');
+  `);
+  const result = await run([source], ['exec', 'test'], { PATH: home + delimiter + process.env.PATH });
+  expect(result.code).toBe(1);
+  expect(result.err).toContain('conflicting native provider settings');
+  expect(result.err).not.toContain('synthetic-forbidden');
+  expect(result.err).not.toContain('synthetic-only');
+  expect(existsSync(join(home, 'conversation-started'))).toBe(false);
+});
+
 test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct npm JS with literal argv and preserves stores', async (entry) => {
   const captures: any[] = [];
   const port = await listen((req, res) => { captures.push(req.headers); res.writeHead(401); res.end(); });
@@ -139,6 +182,7 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   const bin = join(home, 'node_modules', '@openai', 'codex', 'bin');
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(bin, 'codex.js'), `
+    ${configProbe(port)}
     const fs = require('fs'); const args = process.argv.slice(2);
     if (args.includes('debug')) {
       console.log(JSON.stringify({models: [
@@ -179,6 +223,35 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   expect(readFileSync(join(home, 'auth.json'), 'utf8')).toBe(auth);
   expect(existsSync(join(home, 'codex-home'))).toBe(false);
 });
+
+test.each(['malformed', 'timeout'])('failed native inspection %s stops its process tree without starting a conversation', async mode => {
+  const port = await listen((_req, res) => { res.writeHead(401); res.end(); });
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ bridge: { port } }));
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-only' }));
+  const bin = join(home, 'node_modules', '@openai', 'codex', 'bin'); mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'codex.js'), `
+    if (process.argv.includes('app-server')) {
+      const descendant = require('child_process').spawn(process.execPath,['-e','setInterval(() => {},1000)'],{stdio:'ignore',windowsHide:true});
+      require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'inspection.pid'),String(descendant.pid));
+      ${mode === 'malformed' ? 'console.log("invalid-json");' : ''}
+      setInterval(() => {},1000); return;
+    }
+    if (process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); }
+    require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'conversation-started'),'unsafe');
+  `);
+  try {
+    const result = await run([source], ['exec', 'test'], { PATH: home + delimiter + process.env.PATH });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('Could not verify native Codex transport');
+    expect(existsSync(join(home, 'conversation-started'))).toBe(false);
+    const pid = Number(readFileSync(join(home, 'inspection.pid'), 'utf8'));
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    if (existsSync(join(home, 'inspection.pid'))) {
+      try { process.kill(Number(readFileSync(join(home, 'inspection.pid'), 'utf8'))); } catch { /* Already stopped. */ }
+    }
+  }
+}, 12_000);
 
 test('missing secret fails clearly without creating a Wisp store', async () => {
   const result = await run([source], [], {});
@@ -239,7 +312,7 @@ test('spawn failure exits cleanly without leaking a credential', async () => {
   writeFileSync(join(home, process.platform === 'win32' ? 'codex.exe' : 'codex'), 'invalid executable');
   const result = await run([source], [], { PATH: home });
   expect(result.code).toBe(1);
-  expect(result.err).toContain('Could not export the Codex catalog');
+  expect(result.err).toContain('Could not verify native Codex transport');
   expect(result.err).not.toContain('synthetic-only');
 });
 
@@ -259,7 +332,7 @@ test('termination handler forwards to the child and preserves signal exit status
   writeFileSync(join(home, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-only' }));
   const bin = join(home, 'node_modules', '@openai', 'codex', 'bin');
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, 'codex.js'), `if(process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); } require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'ready'),String(process.pid)); setInterval(() => {},1000);`);
+  writeFileSync(join(bin, 'codex.js'), `${configProbe(port)} if(process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); } require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'ready'),String(process.pid)); setInterval(() => {},1000);`);
   const result = await run(['--eval', `
     import { existsSync } from 'fs';
     import { join } from 'path';

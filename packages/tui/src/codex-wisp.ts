@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 // Native Codex owns model selection, tools, policy and session storage. This launcher only
 // overlays the local Responses transport; it never writes either application's stores.
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
 import { createConnection } from 'net';
 import { constants } from 'os';
 import { delimiter, join } from 'path';
+import { createInterface } from 'readline';
 import { DEFAULT_BRIDGE_PORT, WispHome } from '@wisp/core';
 import { catalogArguments, readNativeCatalog, readAliasCapabilities, mergeAliasCatalog, writeChildCatalog } from './codexCatalog';
 
@@ -61,26 +63,85 @@ export const validateCodexArgs = (args: readonly string[]): void => {
 
 export const buildCodexLaunch = (
   port: number, secret: string, args: readonly string[], inherited: NodeJS.ProcessEnv = process.env,
-): { args: string[]; env: NodeJS.ProcessEnv } => {
+): { args: string[]; env: NodeJS.ProcessEnv; provider: string; transport: string } => {
   validateCodexArgs(args);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid Wisp Bridge port; use an integer from 1 to 65535.');
   if (!secret.trim()) throw new Error('No Bridge secret found in Wisp home — start the Bridge first: run "wisp serve".');
+  // Keep the conversational identity stable: native resume filters sessions by provider.
+  const provider = 'wisp_local';
+  const transport = `{name="Wisp local Responses bridge",base_url="http://127.0.0.1:${port}/v1",wire_api="responses",env_key="WISP_CODEX_BRIDGE_SECRET",requires_openai_auth=false,supports_websockets=false}`;
   const bypass = (value?: string): string => [value, '127.0.0.1', 'localhost', '::1'].filter(Boolean).join(',');
   const env = { ...inherited };
   if (process.platform === 'win32') {
     for (const key of Object.keys(env)) if (key.toUpperCase() === 'WISP_CODEX_BRIDGE_SECRET') delete env[key];
   }
   return {
+    provider, transport,
     args: [
-      '-c', 'model_provider="wisp_local"',
-      // One replacement table removes inherited headers, query params and alternate credentials.
-      '-c', `model_providers.wisp_local={name="Wisp local Responses bridge",base_url="http://127.0.0.1:${port}/v1",wire_api="responses",env_key="WISP_CODEX_BRIDGE_SECRET",requires_openai_auth=false,supports_websockets=false}`,
+      '-c', `model_provider="${provider}"`,
+      // Codex merges this table. verifyCodexTransport rejects inherited transport extras.
+      '-c', `model_providers.${provider}=${transport}`,
       '-c', 'web_search="disabled"',
       ...args,
     ],
     env: { ...env, WISP_CODEX_BRIDGE_SECRET: secret.trim(), NO_PROXY: bypass(inherited.NO_PROXY), no_proxy: bypass(inherited.no_proxy) },
   };
 };
+
+const verifyCodexTransport = (codex: ReturnType<typeof resolveCodex>, launch: ReturnType<typeof buildCodexLaunch>): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const failure = 'Could not verify native Codex transport. Check that the Codex installation/configuration supports app-server config/read.';
+    const conflict = `codex-wisp found conflicting native provider settings in [model_providers.${launch.provider}]. Remove inherited bearer tokens, headers, query parameters, auth helpers or catalog URLs from that table before retrying. Wisp has not edited your configuration.`;
+    const { config, cwd } = catalogArguments(launch.args);
+    // Inspect through a clean provider so inherited auth helpers/catalog URLs cannot drive
+    // the preflight. It never starts a thread; only the conversational child uses the stable id.
+    const inspection = `wisp_inspect_${randomUUID().replaceAll('-', '')}`;
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(codex.file, [...codex.args, ...config,
+        '-c', `model_provider="${inspection}"`, '-c', `model_providers.${inspection}=${launch.transport}`,
+        'app-server', '--listen', 'stdio://'], {
+        env: launch.env, cwd, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'ignore'],
+      });
+    } catch { reject(new Error(failure)); return; }
+    let complete = false, problem: string | undefined = failure, received = 0;
+    const kill = () => {
+      if (!child.pid) return;
+      if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Already exited. */ } }
+      child.stdin?.destroy(); child.stdout?.destroy();
+    };
+    const timer = setTimeout(() => { problem = `${failure} Inspection timed out.`; kill(); }, 4000);
+    const send = (message: unknown) => child.stdin!.write(JSON.stringify(message) + '\n');
+    child.stdin!.on('error', () => { problem = failure; kill(); });
+    child.stdout!.on('data', data => { received += data.length; if (received > 16 * 1024 * 1024) { problem = failure; kill(); } });
+    const lines = createInterface({ input: child.stdout! });
+    lines.on('line', line => {
+      try {
+        const message = JSON.parse(line);
+        if (message.id === 1 && !message.error) {
+          send({ method: 'initialized', params: {} });
+          send({ id: 2, method: 'config/read', params: { includeLayers: false } });
+        } else if (message.id === 2 && !complete) {
+          const effective = message.result?.config;
+          const selected = effective?.model_providers?.[launch.provider];
+          const expected = TOML.parse(`value=${launch.transport}`).value as Record<string, unknown>;
+          const extras = ['experimental_bearer_token', 'http_headers', 'env_http_headers', 'query_params', 'auth', 'gateway_oauth', 'aws', 'model_catalog_url'];
+          if (!selected || effective.model_provider !== inspection) problem = failure;
+          else if (Object.entries(expected).some(([key, value]) => selected[key] !== value)
+            || extras.some(key => selected[key] != null && (typeof selected[key] !== 'object' || Object.keys(selected[key]).length > 0))) problem = conflict;
+          else problem = undefined;
+          complete = true; child.stdin!.end();
+        } else if (message.error) { problem = failure; kill(); }
+      } catch { problem = failure; kill(); }
+    });
+    child.once('error', () => { clearTimeout(timer); lines.close(); reject(new Error(failure)); });
+    child.once('close', code => {
+      clearTimeout(timer); lines.close();
+      if (code === 0 && complete && !problem) resolve(); else reject(new Error(problem ?? failure));
+    });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'wisp-transport-preflight', version: '1.0' }, capabilities: { experimentalApi: true } } });
+  });
 
 // Any HTTP status, including 401, proves liveness. Bun's node:http can honor environment proxies;
 // a numeric TCP socket cannot. Read only the status line, never follow Location, send no credential.
@@ -126,6 +187,7 @@ export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Prom
     const launch = buildCodexLaunch(port, home.readAuth().bridgeSecret ?? '', args);
     if (!(await probeCodexBridge(port))) throw new Error(`Bridge not reachable at http://127.0.0.1:${port} — start it first: run "wisp serve".`);
     const codex = resolveCodex(launch.env);
+    await verifyCodexTransport(codex, launch);
     const config = home.readConfig();
     const native = await readNativeCatalog(codex, launch.args, launch.env);
     catalog = writeChildCatalog(mergeAliasCatalog(native, config, await readAliasCapabilities(config, home.readAuth())));
