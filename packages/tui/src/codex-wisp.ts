@@ -105,11 +105,14 @@ const verifyCodexTransport = (codex: ReturnType<typeof resolveCodex>, launch: Re
       });
     } catch { reject(new Error(failure)); return; }
     let complete = false, problem: string | undefined = failure, received = 0;
+    const releasePipes = () => { child.stdin?.destroy(); child.stdout?.destroy(); };
     const kill = () => {
-      if (!child.pid) return;
-      if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Already exited. */ } }
-      child.stdin?.destroy(); child.stdout?.destroy();
+      // A recorded exit may precede pipe closure; never target an already exited/reused PID.
+      if (child.pid && child.exitCode === null && child.signalCode === null) {
+        if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        else { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* Already exited. */ } }
+      }
+      releasePipes();
     };
     const timer = setTimeout(() => { problem = `${failure} Inspection timed out.`; kill(); }, 4000);
     const send = (message: unknown) => child.stdin!.write(JSON.stringify(message) + '\n');
@@ -136,6 +139,9 @@ const verifyCodexTransport = (codex: ReturnType<typeof resolveCodex>, launch: Re
       } catch { problem = failure; kill(); }
     });
     child.once('error', () => { clearTimeout(timer); lines.close(); reject(new Error(failure)); });
+    // Bun/Windows can delay stdout EOF after native exit. Once the reply is parsed,
+    // no more output is needed; release the pipes and still require the actual exit code.
+    child.once('exit', () => { if (complete) releasePipes(); });
     child.once('close', code => {
       clearTimeout(timer); lines.close();
       if (code === 0 && complete && !problem) resolve(); else reject(new Error(problem ?? failure));

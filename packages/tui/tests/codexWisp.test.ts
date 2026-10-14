@@ -224,6 +224,54 @@ test.each([[[source]], [[dispatch, 'codex-wisp']]])('source entry %j runs direct
   expect(existsSync(join(home, 'codex-home'))).toBe(false);
 });
 
+test.each([{ code: 0, reply: true }, { code: 7, reply: true }, { code: 0, reply: false }])('exited inspection %j releases a stdout stream that stays open', async ({ code, reply }) => {
+  const port = await listen((_req, res) => { res.writeHead(401); res.end(); });
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ bridge: { port } }));
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ bridgeSecret: 'synthetic-only' }));
+  const bin = join(home, 'node_modules', '@openai', 'codex', 'bin'); mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'codex.js'), `
+    process.exitCode = ${code};
+    ${reply ? '' : "if (process.argv.includes('app-server')) process.exit(0);"}
+    ${configProbe(port)}
+    if (process.argv.includes('debug')) { console.log(JSON.stringify({models:[]})); process.exit(0); }
+    require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'conversation-started'),'safe');
+    process.exitCode = 23;
+  `);
+  // Reproduce the observed Bun/Windows sequence: real config response and process exit,
+  // but no stdout EOF/ChildProcess close until the parent releases its read stream.
+  const preload = join(home, 'hold-stdout.cjs');
+  writeFileSync(preload, `
+    const cp = require('child_process'), { PassThrough } = require('stream');
+    const spawn = cp.spawn, spawnSync = cp.spawnSync; let inspection;
+    cp.spawn = (...args) => {
+      const child = spawn(...args);
+      if (!args[1].includes('app-server')) return child;
+      inspection = child;
+      const held = new PassThrough(), emit = child.emit.bind(child); let exited;
+      child.stdout.pipe(held, {end:false}); child.stdout = held;
+      child.emit = (name, ...values) => name === 'close' ? true : emit(name, ...values);
+      child.once('exit', (code, signal) => { exited = [code, signal]; });
+      held.once('close', () => { if (exited) emit('close', ...exited); });
+      return child;
+    };
+    cp.spawnSync = (...args) => {
+      if (args[0] === 'taskkill.exe' && inspection?.exitCode !== null) {
+        require('fs').writeFileSync(require('path').join(process.env.WISP_HOME,'killed-exited-pid'),'unsafe');
+        return {status:128};
+      }
+      return spawnSync(...args);
+    };
+    require('module').syncBuiltinESMExports();
+  `);
+  const started = performance.now();
+  const result = await run(['--preload', preload, source], ['exec', 'test'], { PATH: home + delimiter + process.env.PATH });
+  expect(result.code, result.err).toBe(reply && code === 0 ? 23 : 1);
+  if (reply) expect(result.err).not.toContain('Inspection timed out');
+  expect(performance.now() - started).toBeLessThan(reply ? 3000 : 6000);
+  expect(existsSync(join(home, 'conversation-started'))).toBe(reply && code === 0);
+  expect(existsSync(join(home, 'killed-exited-pid'))).toBe(false);
+}, 8000);
+
 test.each(['malformed', 'timeout'])('failed native inspection %s stops its process tree without starting a conversation', async mode => {
   const port = await listen((_req, res) => { res.writeHead(401); res.end(); });
   writeFileSync(join(home, 'config.json'), JSON.stringify({ bridge: { port } }));
