@@ -19,7 +19,7 @@ const HOST = 'b08757ee-de2b-4092-8d00-987f914d1226', TASK = '1702a7c7-a431-43c2-
 const POLICY = 'prepend-leading-developer-v1';
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const SOURCE = 'C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/feat-2-2-8-argon-quota';
-const OUTPUT = SOURCE + '/out/release-228/argon-bounded-operator';
+const OUTPUT = SOURCE + '/out/release-228/argon-bounded-operator-fixes';
 const BUN = 'C:/Users/S.D/.traycer/epics/' + TASK + '/scratch/bun-1.4.2/bun.exe';
 // Enrollment is a separate authenticated user action. No flag, file or environment variable supplies this key.
 const APPROVAL_AUTHORITY: KeyObject | null = null;
@@ -158,7 +158,7 @@ export type ArgonReceipt = {
   readonly attempts: number; readonly reservedInput: number; readonly reservedOutput: number;
   reserve: (wire: string, attempt: 1 | 2 | 3, previousResultSha256: string | null) => void;
   result: (evidence: { attempt: 1 | 2 | 3; responseSha256: string; usage: GeminiUsage; status: 'requires_action' | 'completed'; deliveredToLocalSink: true }) => void;
-  close: (outcome: 'completed' | 'stopped' | 'uncertain', reason: Reason) => void;
+  close: (outcome: 'completed' | 'stopped' | 'uncertain', reason: Reason, checkCompletion?: () => void) => void;
 };
 // ponytail: permanent cooperative local-file claim; rollback/deletion and power-loss durability require external reconciliation.
 const openReceipt = (grant: VerifiedArgonGrant, home: string): ArgonReceipt => {
@@ -190,10 +190,16 @@ const openReceipt = (grant: VerifiedArgonGrant, home: string): ArgonReceipt => {
       append({ type: 'result', ...evidence, usageSha256: sha(canonical(evidence.usage)) });
       lastResult = evidence.responseSha256; pending = false;
     },
-    close: (outcome, reason) => {
+    close: (outcome, reason, checkCompletion) => {
       check(!closed && !broken, 'receipt-write-failed');
       check(outcome !== 'completed' || (attempts === 3 && !pending && reason === 'completed'), 'receipt-order');
-      try { append({ type: 'close', outcome, reason, attempts, reservedInput: attempts * LIMITS.input, reservedOutput: attempts * LIMITS.output }); }
+      const terminal = { type: 'close', outcome, reason, attempts, reservedInput: attempts * LIMITS.input, reservedOutput: attempts * LIMITS.output };
+      try {
+        append(terminal);
+        // A synchronous flush can cross the deadline. The final chained record supersedes the candidate.
+        try { checkCompletion?.(); }
+        catch (e) { append({ ...terminal, outcome: 'stopped', reason: reasonOf(e) }); throw e; }
+      }
       finally { closed = true; if (!broken) { try { fs.closeSync(fd); } catch { fail('receipt-write-failed'); } } }
     },
   };
@@ -223,7 +229,7 @@ const liveBinding = (signed: ArgonBinding): ArgonBinding => {
     const executable = { bundleSha256: sha(fs.readFileSync(OUTPUT + '/operator.mjs')), runtimeSha256: sha(fs.readFileSync(BUN)) };
     const seal = JSON.parse(fs.readFileSync(OUTPUT + '/operator-build.json', 'utf8'));
     check(canonical(seal.sourceManifest) === canonical(sourceManifest) && canonical(seal.executable) === canonical(executable)
-      && canonical(seal.command) === canonical(['build','packages/core/tools/runArgonAcceptance.ts','--target=bun','--format=esm','--outfile=out/release-228/argon-bounded-operator/operator.mjs']), 'source-changed');
+      && canonical(seal.command) === canonical(['build','packages/core/tools/runArgonAcceptance.ts','--target=bun','--format=esm','--outfile=out/release-228/argon-bounded-operator-fixes/operator.mjs']), 'source-changed');
     return { ...signed, sourceManifest, executable, payload: payloadBinding(signed.sessionId) };
   } catch { return fail('source-changed'); }
 };
@@ -239,7 +245,7 @@ type Environment = { home: string; fetch: typeof globalThis.fetch; now: () => nu
   claim: () => ArgonReceipt; signal?: AbortSignal; fixtureCredential?: string };
 const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAcceptanceReport> => {
   const report = emptyReport('request-refused', path.join(env.home, 'acceptance', RECEIPT_NAME));
-  let receipt: ArgonReceipt | undefined, guardReason: Reason | undefined;
+  let receipt: ArgonReceipt | undefined, guardReason: Reason | undefined, terminalAttempted = false;
   const body = initialBody(), headers = ['session-id', grant.binding.sessionId];
   const expectedInput: Record<string, any>[] = [{ type: 'user_input', content: [{ type: 'text', text: body.input[1].content }] }];
   let retained: GeminiReplayContext | undefined, previousResult: string | null = null;
@@ -311,7 +317,7 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
         },
       } as unknown as ServerResponse;
       const scopedFetch = (async (url: unknown, init?: RequestInit) => {
-        let received: Response | undefined, handedOff = false;
+        let received: Response | undefined;
         try {
           check(++fetches === 1 && url === ENDPOINT && init?.method === 'POST' && init.redirect === 'manual'
             && init.signal === controller.signal && typeof init.body === 'string' && init.body === expectedWire, 'request-refused');
@@ -334,7 +340,12 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
           pending.then(r => { if (controller.signal.aborted) void r.body?.cancel().catch(() => {}); }, () => {});
           const response = await interrupted(pending);
           received = response;
-          if (!response.ok || response.redirected) { handedOff = true; return response; }
+          if (!response.ok || response.redirected) {
+            // Keep HTTP metadata, but never hand an unbounded cancellation promise to the client.
+            const error = new Response(null, { status: response.status, headers: response.headers });
+            if (response.redirected) Object.defineProperty(error, 'redirected', { value: true });
+            return error;
+          }
           current();
           const reader = response.body?.getReader(); check(reader, 'invalid_response');
           const chunks: Uint8Array[] = []; let size = 0;
@@ -344,7 +355,7 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
               if (part.done) break;
               size += part.value.byteLength; check(size <= LIMITS.responseBytes, 'response-bytes-exceeded'); chunks.push(part.value);
             }
-          } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+          } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
           current();
           const bytes = Buffer.concat(chunks); let raw: any;
           try { raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { fail('invalid_response'); }
@@ -357,8 +368,9 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
           const calls = result.steps.filter(s => s.type === 'function_call');
           if (index === 0) {
             const name = JSON.parse(expectedWire).tools[0].name;
-            check(result.status === 'requires_action' && calls.length === 2 && calls.every(c => c.name === name && Object.keys(c.arguments).join(',') === 'key')
-              && calls.map(c => c.arguments.key).sort().join(',') === 'left,right', 'unexpected-tools');
+            check(result.status === 'requires_action' && calls.length === 2 && calls.every(c => c.name === name && Object.keys(c.arguments).join(',') === 'key'
+              && (c.arguments.key === 'left' || c.arguments.key === 'right'))
+              && calls[0].arguments.key !== calls[1].arguments.key, 'unexpected-tools');
           } else {
             const text = result.steps.flatMap(s => s.type === 'model_output' ? s.content?.map(c => c.text) ?? [] : []).join('');
             check(result.status === 'completed' && calls.length === 0 && text === (index === 1 ? 'TOTAL=31' : 'CHECK=31'), 'unexpected-answer');
@@ -366,7 +378,7 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
           responseSha256 = sha(bytes);
           return new Response(bytes, { status: response.status, headers: response.headers });
         } catch (e) { if (e instanceof Refusal || e instanceof GeminiInteractionError) guardReason = reasonOf(e); throw e; }
-        finally { if (!handedOff) await received?.body?.cancel().catch(() => {}); }
+        finally { void received?.body?.cancel().catch(() => {}); }
       }) as typeof globalThis.fetch;
       try {
         current();
@@ -389,9 +401,13 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
           body.input.push({ role: 'user', content: 'CHECK' });
           expectedInput.push({ type: 'user_input', content: [{ type: 'text', text: 'CHECK' }] });
         }
+        if (index === 2) {
+          current(); terminalAttempted = true;
+          receipt.close('completed', 'completed', current);
+          report.outcome = 'completed'; report.reason = 'completed';
+        }
       } finally { clearTimeout(timer); env.signal?.removeEventListener('abort', abort); }
     }
-    receipt.close('completed', 'completed'); report.outcome = 'completed'; report.reason = 'completed';
   } catch (e) {
     report.reason = guardReason ?? reasonOf(e);
     report.outcome = report.reason === 'receipt-write-failed' ? 'uncertain' : receipt ? 'stopped' : 'refused';
@@ -399,7 +415,7 @@ const run = async (grant: VerifiedArgonGrant, env: Environment): Promise<ArgonAc
       if (e.status !== undefined) report.httpStatus = e.status;
       if (e.retryAfterMs !== undefined) report.retryAfterMs = e.retryAfterMs;
     }
-    if (receipt) try { receipt.close('stopped', report.reason); } catch { report.outcome = 'uncertain'; report.reason = 'receipt-write-failed'; }
+    if (receipt && !terminalAttempted) try { receipt.close('stopped', report.reason); } catch { report.outcome = 'uncertain'; report.reason = 'receipt-write-failed'; }
   }
   if (receipt) { report.attempts = receipt.attempts; report.reservedInput = receipt.reservedInput; report.reservedOutput = receipt.reservedOutput; }
   return report;

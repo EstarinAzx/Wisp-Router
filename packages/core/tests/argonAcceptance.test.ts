@@ -26,6 +26,118 @@ afterEach(() => { observation.afterCredential = undefined; vi.restoreAllMocks();
 const callbacks = (root: string) => events(root).filter(e => e.kind === 'fetch');
 const noClaim = (root: string) => expect(fs.existsSync(path.join(root, 'acceptance', receiptName))).toBe(false);
 
+test.each([
+  ['arrays', [['right'], ['left']]],
+  ['objects', ['right', { value: 'left' }]],
+  ['null', ['right', null]],
+  ['number', ['right', 12]],
+  ['boolean', ['right', true]],
+  ['unknown', ['right', 'secret']],
+  ['duplicate', ['right', 'right']],
+])('invalid tool keys %s stop the whole batch before any lookup', async (_name, keys) => {
+  const api = await operator(), f = setup();
+  vi.stubGlobal('fetch', () => { journal(f.root, 'escaped-fetch'); throw Error('global fetch forbidden'); });
+  f.fixture.fetch = async () => {
+    const attempt = callbacks(f.root).length + 1; journal(f.root, 'fetch', { attempt });
+    const value = responseValue(attempt);
+    if (attempt === 1) { value.steps[1].arguments.key = keys[0]; value.steps[2].arguments.key = keys[1]; }
+    return Response.json(value);
+  };
+  const report = await api.runSyntheticArgonAcceptance(f.grant, f.fixture);
+  journal(f.root, 'report', { report });
+  expect(report).toMatchObject({ outcome: 'stopped', reason: 'unexpected-tools', attempts: 1, toolExecutions: 0 });
+  expect(callbacks(f.root)).toHaveLength(1);
+  expect(frames(f.root).filter(f => f.entry.type === 'result')).toHaveLength(0);
+});
+
+test('left-first tool keys preserve both original IDs and their 12/19 results', async () => {
+  const api = await operator(), f = setup();
+  f.fixture.fetch = async (_url: unknown, init: RequestInit) => {
+    const attempt = callbacks(f.root).length + 1; journal(f.root, 'fetch', { attempt, body: JSON.parse(init.body as string) });
+    const value = responseValue(attempt);
+    if (attempt === 1) value.steps = [value.steps[0], value.steps[2], value.steps[1]];
+    return Response.json(value);
+  };
+  expect(await api.runSyntheticArgonAcceptance(f.grant, f.fixture)).toMatchObject({ outcome: 'completed', attempts: 3, toolExecutions: 2 });
+  expect(callbacks(f.root)[1].body.input.slice(-2)).toEqual([
+    { type: 'function_result', call_id: 'google-left', result: '{"value":12}' },
+    { type: 'function_result', call_id: 'google-right', result: '{"value":19}' },
+  ]);
+});
+
+test.each(['oversize', 'abort', 'expiry', 'source', 'http', 'redirected'])('pending cancellation cannot delay operator termination for %s', async mode => {
+  const api = await operator(), f = setup(), controller = new AbortController();
+  let release!: () => void, cancelled = 0, settled: any, beforeRelease: any, original: Response | undefined, active = 0;
+  const cancellation = new Promise<void>(resolve => { release = resolve; });
+  f.fixture.signal = controller.signal;
+  const add = controller.signal.addEventListener.bind(controller.signal), remove = controller.signal.removeEventListener.bind(controller.signal);
+  vi.spyOn(controller.signal, 'addEventListener').mockImplementation((...args: any[]) => { if (args[0] === 'abort') active++; return (add as any)(...args); });
+  vi.spyOn(controller.signal, 'removeEventListener').mockImplementation((...args: any[]) => { if (args[0] === 'abort') active--; return (remove as any)(...args); });
+  f.fixture.fetch = async () => {
+    journal(f.root, 'fetch');
+    if (mode === 'source') fs.appendFileSync(path.join(f.root, 'source/fixture.txt'), 'changed');
+    original = new Response(new ReadableStream({
+      start(c) { if (mode === 'oversize') c.enqueue(new Uint8Array(32769)); },
+      cancel() { cancelled++; journal(f.root, 'cancel-requested'); return cancellation; },
+    }), { status: mode === 'http' ? 429 : 200, headers: { 'retry-after': '3' } });
+    if (mode === 'redirected') Object.defineProperty(original, 'redirected', { value: true });
+    return original;
+  };
+  vi.useFakeTimers();
+  const pending = api.runSyntheticArgonAcceptance(f.grant, f.fixture).then((r: any) => { settled = r; return r; });
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    if (mode === 'abort') controller.abort();
+    await vi.advanceTimersByTimeAsync(60001);
+    beforeRelease = settled;
+    journal(f.root, 'before-cancel-release', { settled: !!beforeRelease, report: beforeRelease, locked: original?.body?.locked, active, timers: vi.getTimerCount() });
+    expect(beforeRelease, 'termination must not await the underlying cancel promise').toBeDefined();
+    expect(beforeRelease).toMatchObject({ outcome: 'stopped', attempts: 1, toolExecutions: 0 });
+    if (mode === 'http' || mode === 'redirected') expect(beforeRelease).toMatchObject({ reason: 'http', httpStatus: mode === 'http' ? 429 : 200, retryAfterMs: 3000 });
+    expect(cancelled).toBe(1); expect(original!.body!.locked).toBe(false);
+    expect(active).toBe(0); expect(vi.getTimerCount()).toBe(0);
+  } finally { release(); await pending; vi.useRealTimers(); }
+  expect(callbacks(f.root)).toHaveLength(1);
+});
+
+test('a rejected late-response cancellation is handled after deadline termination', async () => {
+  const api = await operator(), f = setup();
+  let deliver!: (response: Response) => void, cancelled = 0;
+  f.fixture.fetch = () => { journal(f.root, 'fetch'); return new Promise<Response>(resolve => { deliver = resolve; }); };
+  vi.useFakeTimers();
+  try {
+    const pending = api.runSyntheticArgonAcceptance(f.grant, f.fixture);
+    await vi.advanceTimersByTimeAsync(60001);
+    expect(await pending).toMatchObject({ outcome: 'stopped', reason: 'deadline-exhausted', attempts: 1 });
+    deliver(new Response(new ReadableStream({ cancel() { cancelled++; return Promise.reject(Error('cancel rejected')); } })));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancelled).toBe(1); expect(vi.getTimerCount()).toBe(0); expect(callbacks(f.root)).toHaveLength(1);
+  } finally { vi.useRealTimers(); }
+});
+
+test.each(['expiry', 'abort', 'failed-correction'])('terminal flush %s cannot leave a completed report or final receipt', async mode => {
+  const api = await operator(), f = setup(), flush = fs.fsyncSync, controller = new AbortController();
+  let time = 0, count = 0;
+  f.fixture.now = () => time; f.fixture.signal = controller.signal;
+  vi.spyOn(fs, 'fsyncSync').mockImplementation(fd => {
+    if (++count === 9 && mode === 'failed-correction') throw Error('terminal correction flush failed');
+    flush(fd);
+    if (count === 8) { if (mode === 'abort') controller.abort(); else time = 180001; }
+  });
+  const report = await api.runSyntheticArgonAcceptance(f.grant, f.fixture);
+  journal(f.root, 'report', { report });
+  const reason = mode === 'abort' ? 'aborted' : 'deadline-exhausted';
+  expect(report).toMatchObject({ outcome: mode === 'failed-correction' ? 'uncertain' : 'stopped',
+    reason: mode === 'failed-correction' ? 'receipt-write-failed' : reason, attempts: 3, reservedInput: 24576, reservedOutput: 6144 });
+  expect(frames(f.root).at(-1).entry).toMatchObject({ type: 'close', outcome: 'stopped', reason });
+  const before = fs.readFileSync(path.join(f.root, 'acceptance', receiptName));
+  f.fixture.signal = undefined;
+  expect((await api.runSyntheticArgonAcceptance(f.grant, f.fixture)).reason).toBe('receipt-exists');
+  expect(fs.readFileSync(path.join(f.root, 'acceptance', receiptName))).toEqual(before);
+  expect(callbacks(f.root)).toHaveLength(3);
+});
+
+
 test('public null authority refuses an approved-form test signature before filesystem or network access', async () => {
   const api = await operator(), f = setup();
   const reads = vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw Error('real files forbidden'); });
