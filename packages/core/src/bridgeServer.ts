@@ -176,6 +176,34 @@ const sendJson = (res: http.ServerResponse, status: number, body: unknown): void
 const sendError = (res: http.ServerResponse, status: number, message: string, type?: string): void =>
   sendJson(res, status, { error: { ...(type ? { type } : {}), message } });
 
+// The caller owns route admission. Keep guarded execution and synchronous delivery together.
+export const executeGeminiResponses = async (body: unknown, rawHeaders: string[], route: RouteMatch,
+  deps: Pick<BridgeDeps, 'gemini' | 'modelMap' | 'effort'>, signal: AbortSignal, res: http.ServerResponse): Promise<void> => {
+  signal.throwIfAborted();
+  const seam = deps.gemini;
+  if (!seam) throw new Error('Gemini host unavailable');
+  const preflight = preflightGeminiResponses(body, rawHeaders, route.provider,
+    route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider), seam.instructionPolicy(), deps.effort());
+  const context = seam.replayContext();
+  if (!context) throw new Error('Gemini key unavailable');
+  const prepared = prepareGeminiReplay(preflight, context);
+  signal.throwIfAborted();
+  const apiKey = await seam.credentials(context);
+  signal.throwIfAborted();
+  await seam.assertCurrent(context);
+  signal.throwIfAborted();
+  const result = await requestGeminiInteraction({ request: prepared.request, apiKey, signal });
+  signal.throwIfAborted();
+  await seam.assertCurrent(context);
+  signal.throwIfAborted();
+  const output = finishGeminiResponses(prepared, result, `resp_${crypto.randomBytes(12).toString('hex')}`);
+  // Whole output is validated before any executable frame; no await separates this check and delivery.
+  if (prepared.parsed.stream) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    res.end(output.frames);
+  } else sendJson(res, 200, output.response);
+};
+
 // #166: pull the FIRST event out of a provider stream before a door commits its 200 SSE head. The provider
 // streams are async generators, so calling one performs NO IO — the upstream request, and any 4xx it throws,
 // happens on the first pull. Writing the head first therefore locked every pre-stream failure into a 200 with
@@ -677,28 +705,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         catch { return sendError(res, 500, 'internal error'); }
         if (route && isGeminiApiProvider(route.provider)) {
           try {
-            controller.signal.throwIfAborted();
-            const seam = deps.gemini;
-            if (!seam) throw new Error('Gemini host unavailable');
-            const preflight = preflightGeminiResponses(body, req.rawHeaders, route.provider,
-              route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider), seam.instructionPolicy(), deps.effort());
-            const context = seam.replayContext();
-            if (!context) throw new Error('Gemini key unavailable');
-            const prepared = prepareGeminiReplay(preflight, context);
-            const apiKey = await seam.credentials(context);
-            controller.signal.throwIfAborted();
-            await seam.assertCurrent(context);
-            controller.signal.throwIfAborted();
-            const result = await requestGeminiInteraction({ request: prepared.request, apiKey, signal: controller.signal });
-            controller.signal.throwIfAborted();
-            await seam.assertCurrent(context);
-            controller.signal.throwIfAborted();
-            const output = finishGeminiResponses(prepared, result, `resp_${crypto.randomBytes(12).toString('hex')}`);
-            // Whole output is buffered/validated before any executable frame; no await separates this check and delivery.
-            if (prepared.parsed.stream) {
-              res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-              res.end(output.frames);
-            } else sendJson(res, 200, output.response);
+            await executeGeminiResponses(body, req.rawHeaders, route, deps, controller.signal, res);
           } catch (error) {
             if (!controller.signal.aborted) sendError(res, error instanceof GeminiInteractionError && error.code !== 'invalid_request' ? (error.status ?? 502) : 400,
               'Gemini Responses refused. Check the session, instruction policy, replay history and current API credentials.', 'gemini_request_refused');
