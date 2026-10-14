@@ -56,7 +56,7 @@ export const preflightGeminiResponses = (value: unknown, rawHeaders: string[], p
     provider.baseUrl === 'https://generativelanguage.googleapis.com/v1beta' && model === 'gemini-4-argon');
   const session = sessionFrom(rawHeaders);
   check(policy === 'strict' || policy === 'prepend-leading-developer-v1');
-  const body = fields(value, ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'safety_identifier']);
+  const body = fields(value, ['model', 'input', 'instructions', 'tools', 'tool_choice', 'parallel_tool_calls', 'reasoning', 'max_output_tokens', 'store', 'stream', 'include', 'prompt_cache_key', 'client_metadata', 'metadata', 'safety_identifier']);
   check(body.instructions === undefined || typeof body.instructions === 'string');
   check(body.parallel_tool_calls !== false && body.reasoning?.context === undefined);
   check(body.reasoning?.effort === undefined || ['low', 'medium', 'high'].includes(body.reasoning.effort));
@@ -113,10 +113,11 @@ export const preflightGeminiResponses = (value: unknown, rawHeaders: string[], p
   };
   validateTools(body.tools ?? []);
   // Reuse the existing tool registry/shape validator only after inspecting the original roles.
-  const parsed = parseResponsesRequest({ ...body, input: input.filter(item => item.type !== 'reasoning') });
+  const { max_output_tokens: maxOutputTokens, ...parserBody } = body;
+  const parsed = parseResponsesRequest({ ...parserBody, input: input.filter(item => item.type !== 'reasoning') });
   const effort = parsed.responses?.effort ?? defaultEffort;
-  buildGeminiInteractionRequest({ model, input: [], tools: parsed.tools, effort });
-  return { body, input, leading, parsed, session, model, effort, policy: policy as GeminiInstructionPolicy,
+  buildGeminiInteractionRequest({ model, input: [], tools: parsed.tools, effort, maxOutputTokens });
+  return { body, input, leading, parsed, session, model, effort, maxOutputTokens, policy: policy as GeminiInstructionPolicy,
     ...(fragments.length ? { systemInstruction: fragments.join('\n\n') } : {}) };
 };
 type Preflight = ReturnType<typeof preflightGeminiResponses>;
@@ -184,6 +185,7 @@ export const prepareGeminiReplay = (p: Preflight, context: GeminiReplayContext) 
   }
   const request: GeminiInteractionArgs = { model: p.model, input: steps, tools: p.parsed.tools,
     ...(p.systemInstruction === undefined ? {} : { systemInstruction: p.systemInstruction }),
+    ...(p.maxOutputTokens === undefined ? {} : { maxOutputTokens: p.maxOutputTokens }),
     effort: p.effort };
   buildGeminiInteractionRequest(request);
   return { ...p, context, request };

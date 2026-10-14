@@ -42,6 +42,61 @@ const run = async (deps: BridgeDeps, action: (port: number) => Promise<void>) =>
 };
 const initial = () => ({ model: 'argon', input: [{ role: 'user', content: 'go' }], tools: [{ type: 'function', name: 'lookup', parameters: { type: 'object' } }], store: false });
 
+test.each([1, 2048, 65536, undefined])('production transport preserves explicit/omitted output cap %s', async cap => {
+  const { deps, calls } = setup(); const sent: any[] = [];
+  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    calls.backend++; sent.push(JSON.parse(init.body as string));
+    return Response.json({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }] });
+  });
+  await run(deps, async port => {
+    const result = await send(port, '/v1/responses', { ...initial(), ...(cap === undefined ? {} : { max_output_tokens: cap }) });
+    expect(result.status).toBe(200); expect(result.body.output[1].content[0].text).toBe('done');
+  });
+  expect(calls).toEqual({ metadata: 1, bearer: 1, backend: 1, generic: 0 });
+  expect(sent[0].generation_config).toEqual({ thinking_level: 'medium', ...(cap === undefined ? {} : { max_output_tokens: cap }) });
+});
+
+test.each([0, -1, 1.5, 65537, null, '2048', '', true, false, {}, []].map(cap => ({ cap })))
+  ('invalid output cap $cap refuses before metadata, credentials or transport', async ({ cap }) => {
+    const { deps, calls } = setup();
+    vi.stubGlobal('fetch', async () => { calls.backend++; throw Error('unexpected backend'); });
+    await run(deps, async port => {
+      expect((await send(port, '/v1/responses', { ...initial(), max_output_tokens: cap })).status).toBe(400);
+    });
+    expect(calls).toEqual({ metadata: 0, bearer: 0, backend: 0, generic: 0 });
+  });
+
+test('explicit caps do not widen generic Responses or signed Desktop admission', async () => {
+  const { deps, calls } = setup();
+  vi.stubGlobal('fetch', async () => { calls.backend++; throw Error('unexpected backend'); });
+  await run(deps, async port => {
+    const result = await send(port, '/codex-desktop/v1/responses', { ...initial(), max_output_tokens: 2048 }, { 'session-id': session, 'x-api-key': 'secret' });
+    expect(result.status).toBe(400); expect(result.body.error.type).toBe('desktop_target_incompatible');
+  });
+  const generic = { id: 'custom', label: 'Custom', baseUrl: 'https://synthetic.invalid/v1', defaultModel: 'fixture', apiKeyEnv: '' };
+  await run({ ...deps, providers: [generic], activeProviderId: () => generic.id, routingMap: () => ({ families: {}, aliases: [] }) }, async port => {
+    const result = await send(port, '/v1/responses', { ...initial(), model: 'custom', max_output_tokens: 2048 });
+    expect(result.status).toBe(400); expect(result.body.error.message).toContain('max_output_tokens');
+  });
+  expect(calls).toEqual({ metadata: 0, bearer: 0, backend: 0, generic: 0 });
+});
+
+test('a capped incomplete result releases no executable batch and is never retried', async () => {
+  const { deps, calls } = setup();
+  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    calls.backend++; const sent = JSON.parse(init.body as string);
+    expect(sent.generation_config.max_output_tokens).toBe(2048);
+    return Response.json({ status: 'incomplete', steps: [{ type: 'function_call', id: 'partial-call', name: sent.tools[0].name, arguments: {} }] });
+  });
+  await run(deps, async port => {
+    const result = await send(port, '/v1/responses', { ...initial(), max_output_tokens: 2048, stream: true });
+    expect(result.status).toBe(502);
+    expect(result.body.error.type).toBe('gemini_request_refused');
+    expect(JSON.stringify(result.body)).not.toMatch(/partial-call|function_call|response\.output/);
+  });
+  expect(calls).toEqual({ metadata: 1, bearer: 1, backend: 1, generic: 0 });
+});
+
 test('Gemini catalog is distinct and never admitted to signed Desktop', () => {
   const p = PROVIDERS.find(p => p.id === 'gemini-api'); expect(p).toBeDefined();
   expect(p?.kind).toBe('gemini-interactions'); expect(p?.keyId).toBeUndefined(); expect(p?.apiKeyEnv).toBe('');

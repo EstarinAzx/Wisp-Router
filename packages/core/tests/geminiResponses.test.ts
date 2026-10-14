@@ -49,8 +49,8 @@ const patchBody = () => ({ ...body(), tools: [{ ...body().tools[0], name: 'apply
 const patchText = '*** Begin Patch\r\n*** Add File: fixture.txt\r\n+quote " slash \\ unicode λ\r\n*** End Patch';
 const patchResults = [{ type: 'custom_tool_call_output', call_id: 'original-patch', output: 'patched' },
   { type: 'function_call_output', call_id: 'original-a', output: 'A' }];
-const firstPatch = (input = patchText) => {
-  const value = patchBody(), p = prepare(value);
+const firstPatch = (input = patchText, maxOutputTokens?: number) => {
+  const value = { ...patchBody(), ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }) }, p = prepare(value);
   const result = { status: 'requires_action', steps: [
     { type: 'thought', signature: 'patch-signature' },
     { type: 'function_call', id: 'original-a', name: p.parsed.tools[0].name, arguments: { q: 'a' } },
@@ -118,13 +118,19 @@ describe('Gemini native custom patch replay', () => {
     expect(() => prepare({ ...value, input })).toThrow();
   });
 
-  test('binds exact grammar, patch strings, instructions and previously returned results', () => {
-    const { value, out } = firstPatch();
-    const continued = { ...value, input: [user, ...out.response.output, ...patchResults] };
+  test('changing caps preserves full function/custom replay and all authenticated bindings', () => {
+    const { value, result, out } = firstPatch(patchText, 1);
+    const continued = { ...value, max_output_tokens: 65536, input: [user, ...out.response.output, ...patchResults] };
     const p = prepare(continued);
+    expect(p.request.maxOutputTokens).toBe(65536);
+    expect(p.request.input).toEqual([{ type: 'user_input', content: [{ type: 'text', text: 'find both' }] }, ...result.steps,
+      { type: 'function_result', call_id: 'original-patch', result: 'patched' }, { type: 'function_result', call_id: 'original-a', result: 'A' }]);
     const out2 = finishGeminiResponses(p, { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }] }, 'resp_after_patch');
-    const later = { ...continued, input: [...continued.input, ...out2.response.output, { role: 'user', content: 'again' }] };
-    expect(prepare(later).request.input.at(-1)).toEqual({ type: 'user_input', content: [{ type: 'text', text: 'again' }] });
+    const later = { ...continued, max_output_tokens: 2048, input: [...continued.input, ...out2.response.output, { role: 'user', content: 'again' }] };
+    const next = prepare(later);
+    expect(next.request.maxOutputTokens).toBe(2048);
+    expect(next.request.input).toEqual([...p.request.input, { type: 'model_output', content: [{ type: 'text', text: 'done' }] },
+      { type: 'user_input', content: [{ type: 'text', text: 'again' }] }]);
     for (const kind of ['grammar', 'patch', 'root', 'result', 'missing', 'tampered', 'interrupted']) {
       const changed = structuredClone(later);
       if (kind === 'grammar') changed.tools[1] = patchTool(patchGrammar.replaceAll('\n', '\r\n'));
@@ -149,6 +155,21 @@ describe('Gemini native custom patch replay', () => {
 });
 
 describe('Gemini Responses replay', () => {
+  test.each([1, 2048, 65536])('forwards explicit output cap %i without changing the caller body', max_output_tokens => {
+    const value = { ...body(), max_output_tokens }, before = structuredClone(value);
+    expect(prepare(value).request.maxOutputTokens).toBe(max_output_tokens);
+    expect(value).toEqual(before);
+  });
+
+  test('omitted output caps stay absent', () => {
+    expect(prepare(body()).request).not.toHaveProperty('maxOutputTokens');
+  });
+
+  test.each([0, -1, 1.5, 65537, null, '2048', '', true, false, {}, [], NaN, Infinity, -Infinity].map(cap => ({ cap })))
+    ('rejects invalid output cap $cap in preflight', ({ cap }) => {
+      expect(() => preflight({ ...body(), max_output_tokens: cap })).toThrow();
+    });
+
   test('preserves complete ordered steps, original IDs, multiple text items and results', () => {
     const { result, out } = first();
     expect(out.response.output.map((i: any) => i.type)).toEqual(['reasoning', 'message', 'function_call', 'message', 'function_call']);
