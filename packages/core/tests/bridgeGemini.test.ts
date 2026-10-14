@@ -199,10 +199,25 @@ const execution = (deps: BridgeDeps, provider: BridgeDeps['providers'][number], 
   expect(bridgeServer.executeGeminiResponses, 'the real custom pipeline must be callable without granting signed admission').toBeTypeOf('function');
   const heads: unknown[] = [], bodies: string[] = [];
   const res = { writeHead: (...args: unknown[]) => { heads.push(args); }, end: (body: string) => { bodies.push(body); } } as unknown as http.ServerResponse;
-  return { heads, bodies, controller, run: (body: unknown = initial()) => bridgeServer.executeGeminiResponses(
-    body, ['session-id', session], { provider, matched: 'alias', pinnedModel: 'gemini-4-argon' }, deps, controller.signal, res) };
+  return { heads, bodies, controller, run: (body: unknown = initial(), transportFetch?: typeof globalThis.fetch) => bridgeServer.executeGeminiResponses(
+    body, ['session-id', session], { provider, matched: 'alias', pinnedModel: 'gemini-4-argon' }, deps, controller.signal, res, transportFetch) };
 };
 const completed = () => Response.json({ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }] });
+
+test('shared execution uses its optional fetch and preserves default fetch delivery', async () => {
+  const { deps, provider } = setup(); const e = execution(deps, provider); const sent: string[] = [];
+  vi.stubGlobal('fetch', async () => { throw Error('default fetch must not run when injected'); });
+  await e.run({ ...initial(), max_output_tokens: 2048 }, (async (_url, init) => {
+    sent.push(init!.body as string); return completed();
+  }) as typeof globalThis.fetch);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0]).generation_config).toEqual({ thinking_level: 'medium', max_output_tokens: 2048 });
+  expect(JSON.parse(e.bodies[0]).output[1].content[0].text).toBe('done');
+  vi.stubGlobal('fetch', async () => completed());
+  await e.run();
+  expect(e.bodies).toHaveLength(2);
+  expect(JSON.parse(e.bodies[1]).output[1].content[0].text).toBe('done');
+});
 
 test.each([false, true])('shared Gemini execution delivers the complete validated response (stream=%s)', async stream => {
   const { deps, provider, calls } = setup(); const e = execution(deps, provider);

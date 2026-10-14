@@ -178,7 +178,8 @@ const sendError = (res: http.ServerResponse, status: number, message: string, ty
 
 // The caller owns route admission. Keep guarded execution and synchronous delivery together.
 export const executeGeminiResponses = async (body: unknown, rawHeaders: string[], route: RouteMatch,
-  deps: Pick<BridgeDeps, 'gemini' | 'modelMap' | 'effort'>, signal: AbortSignal, res: http.ServerResponse): Promise<void> => {
+  deps: Pick<BridgeDeps, 'gemini' | 'modelMap' | 'effort'>, signal: AbortSignal, res: http.ServerResponse,
+  transportFetch?: typeof globalThis.fetch): Promise<void> => {
   signal.throwIfAborted();
   const seam = deps.gemini;
   if (!seam) throw new Error('Gemini host unavailable');
@@ -192,7 +193,7 @@ export const executeGeminiResponses = async (body: unknown, rawHeaders: string[]
   signal.throwIfAborted();
   await seam.assertCurrent(context);
   signal.throwIfAborted();
-  const result = await requestGeminiInteraction({ request: prepared.request, apiKey, signal });
+  const result = await requestGeminiInteraction({ request: prepared.request, apiKey, signal, ...(transportFetch ? { fetch: transportFetch } : {}) });
   signal.throwIfAborted();
   await seam.assertCurrent(context);
   signal.throwIfAborted();
