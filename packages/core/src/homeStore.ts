@@ -22,6 +22,7 @@ import { createHmac, randomBytes } from 'crypto';
 import { isUnusableStore, parseWispAuth, parseWispConfig, planSecretsMigration, serializeWispStore, type GeminiReplayContext, type SecretSlots, type WispAuth, type WispConfig } from './home';
 import { mergeStatus, type WispStatus } from './status';
 import { parseQuotaCache, type QuotaCache } from './quota';
+import { createAntigravityReplayContext, type AntigravityReplayContext } from './antigravity';
 
 // ----------------------------- Paths ----------------------------- //
 
@@ -101,7 +102,7 @@ export class WispHome {
   readAuth = (): WispAuth => parseWispAuth(this.readRaw(AUTH_FILE));
   authExists = (): boolean => existsSync(this.path(AUTH_FILE));
   // Secrets file — owner-only (0o600) per ADR-0002.
-  writeAuth = (patch: Partial<WispAuth>, expected?: { provider: 'codex' | 'anthropic'; snapshot: string }): WispAuth => {
+  writeAuth = (patch: Partial<WispAuth>, expected?: { provider: 'codex' | 'anthropic' | 'antigravity'; snapshot: string }): WispAuth => {
     if (Object.prototype.hasOwnProperty.call(patch, 'geminiApi')) throw new Error('Gemini credential bundle is reserved.');
     return this.withAuthLock(() => {
       const current = this.authForWrite();
@@ -143,6 +144,11 @@ export class WispHome {
       throw new Error('Invalid Gemini credential bundle; repair the auth store.');
     }
     return b;
+  };
+
+  antigravityReplayContext = (): AntigravityReplayContext | undefined => {
+    const auth = this.readAuth();
+    return createAntigravityReplayContext(auth.antigravity, auth.bridgeSecret);
   };
 
   private geminiContext = (b: NonNullable<WispAuth['geminiApi']>): GeminiReplayContext => ({

@@ -81,6 +81,7 @@ export const createTuiBridge = (log: (message: string) => void) => {
     xaiCreds: () => xaiAuth.current(),
     antigravitySignedIn: () => antigravityAuth.isSignedIn(),
     antigravityCreds: () => antigravityAuth.current(),
+    antigravityReplayContext: home.antigravityReplayContext,
     effort: () => home.readConfig().effort ?? DEFAULT_EFFORT,
     activeProviderId: () => activeProvider().id,
     routingMap: () => home.readConfig().routing ?? EMPTY_ROUTING_MAP,

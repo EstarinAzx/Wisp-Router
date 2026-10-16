@@ -64,7 +64,9 @@ export const kimiAuth = new KimiAuth(
   () => {});
 // Antigravity (#188) is a browser flow like the first three — Google OAuth on a fixed loopback port.
 export const antigravityAuth = new AntigravityAuth(
-  { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+  { read: () => home.readAuth().antigravity, write: (c, expected) => {
+    home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected) });
+  } },
   openExternal, () => {});
 
 // ----------------------------- Bearer resolution ----------------------------- //

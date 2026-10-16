@@ -1003,7 +1003,9 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // project before a turn. openExternal is wired anyway because the constructor takes it, and nothing on
   // this face calls signIn().
   antigravityAuth = new AntigravityAuth(
-    { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+    { read: () => home.readAuth().antigravity, write: (c, expected) => {
+      home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected) });
+    } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
@@ -1087,6 +1089,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // refreshed bundle WITH the Cloud Code project bootstrapped for the generateContent stream.
     antigravitySignedIn: () => antigravityAuth.isSignedIn(),
     antigravityCreds: () => antigravityAuth.current(),
+    antigravityReplayContext: home.antigravityReplayContext,
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call

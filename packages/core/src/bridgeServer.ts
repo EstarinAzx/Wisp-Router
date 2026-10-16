@@ -44,13 +44,14 @@ import { codexStream } from './codexClient';
 import { parseResponsesRequest, parseDesktopResponsesRequest, createResponsesEncoder, responsesRejectionDiagnostic } from './bridgeResponses';
 import { isGeminiApiProvider } from './catalog';
 import { preflightGeminiResponses, prepareGeminiReplay, finishGeminiResponses } from './geminiResponses';
+import { ArgonReplayError, preflightAntigravityResponses, prepareAntigravityReplay, finishAntigravityResponses } from './antigravityResponses';
 import { requestGeminiInteraction } from './geminiInteractionsClient';
 import { GeminiInteractionError } from './geminiInteractions';
 import type { GeminiReplayContext } from './home';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
-import { antigravityStream } from './antigravityClient';
-import { hoistAntigravityDesktopInstructions, type AntigravityTurn } from './antigravity';
+import { antigravityStream, antigravityNativeResponse } from './antigravityClient';
+import { createAntigravityReplayContext, hoistAntigravityDesktopInstructions, isAntigravityArgonModel, type AntigravityReplayContext, type AntigravityTurn } from './antigravity';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE, chatCompletionsUsage,
   type ChunkMeta, type BridgeChatRequest, type BridgeStreamEvent,
@@ -72,6 +73,7 @@ import {
 // One default port for every host of this engine (#63: extension + TUI + wisp serve) — a per-face
 // constant would let the faces drift onto different ports while sharing one config store.
 export const DEFAULT_BRIDGE_PORT = 41184;
+const ARGON_RESPONSES_REQUIRED = 'Argon requires the Responses API to preserve its original model state.';
 
 // The seam to extension.ts. Key/client resolution lives there (it reads SecretStorage); this module is handed
 // the catalog plus pure getters so it never touches secrets or config directly.
@@ -116,6 +118,9 @@ export type BridgeDeps = {
   // with the Cloud Code project bootstrapped, so the request path can assume projectId when it is gettable.
   antigravitySignedIn?: () => Promise<boolean>;
   antigravityCreds?: () => Promise<AntigravityCreds | undefined>;
+  antigravityReplayContext?: () => AntigravityReplayContext | undefined;
+  // Explicit server-side ceiling for controlled qualification; ordinary hosts leave it unset.
+  antigravityOutputTokenLimit?: number;
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
@@ -202,6 +207,56 @@ export const executeGeminiResponses = async (body: unknown, rawHeaders: string[]
   if (prepared.parsed.stream) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
     res.end(output.frames);
+  } else sendJson(res, 200, output.response);
+};
+
+export const executeAntigravityResponses = async (body: unknown, rawHeaders: string[], route: RouteMatch,
+  deps: Pick<BridgeDeps, 'modelMap' | 'customBaseUrl' | 'antigravityCreds' | 'antigravityReplayContext' | 'antigravityOutputTokenLimit' | 'accessSecret' | 'desktopAntigravityHoisting' | 'log'>,
+  signal: AbortSignal, res: http.ServerResponse, hoisting = false): Promise<void> => {
+  signal.throwIfAborted();
+  const model = route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider);
+  const baseUrl = resolveBaseUrl(route.provider, deps.customBaseUrl());
+  const preflight = preflightAntigravityResponses(body, rawHeaders, { ...route.provider, baseUrl }, model, hoisting);
+  const ceiling = deps.antigravityOutputTokenLimit;
+  if (ceiling !== undefined && (!Number.isSafeInteger(ceiling) || ceiling <= 0)) throw new ArgonReplayError(503);
+  if (!deps.antigravityReplayContext) throw new ArgonReplayError(401);
+  let context = deps.antigravityReplayContext(), creds: AntigravityCreds | undefined;
+  if (!context) {
+    // A new conversation may repair the normal sign-in bootstrap. Unknown old state never triggers auth I/O.
+    if (preflight.input.some(item => item.type === 'reasoning') || preflight.parsed.turns.some(turn => turn.role === 'assistant' || turn.toolResults.length)) throw new ArgonReplayError(401);
+    creds = await deps.antigravityCreds?.();
+    signal.throwIfAborted();
+    context = deps.antigravityReplayContext();
+    if (!context || !creds) throw new ArgonReplayError(401);
+  }
+  const prepared = prepareAntigravityReplay(preflight, context);
+  if (ceiling !== undefined) prepared.request.maxOutputTokens = Math.min(prepared.request.maxOutputTokens ?? ceiling, ceiling);
+  signal.throwIfAborted();
+  creds ??= await deps.antigravityCreds?.();
+  signal.throwIfAborted();
+  if (!creds) throw new ArgonReplayError(401);
+  const sameIdentity = (current: AntigravityReplayContext | undefined): boolean => !!current && current.key === context.key
+    && current.lifetime === context.lifetime && current.credentialBinding === context.credentialBinding;
+  const current = deps.antigravityReplayContext?.();
+  const resolved = createAntigravityReplayContext(creds, deps.accessSecret());
+  if (!sameIdentity(current) || !sameIdentity(resolved) || current!.snapshot !== resolved!.snapshot) throw new ArgonReplayError(409);
+  let result: unknown;
+  try { result = await antigravityNativeResponse({ ...prepared.request, creds, baseUrl, signal, strictCompletion: true, log: deps.log }); }
+  catch (error) {
+    signal.throwIfAborted();
+    const failure = antigravityFailureOf(error);
+    throw new ArgonReplayError(failure?.status ?? 502, failure?.retryAfterMs);
+  }
+  signal.throwIfAborted();
+  let output: ReturnType<typeof finishAntigravityResponses>;
+  try { output = finishAntigravityResponses(prepared, result, `resp_${crypto.randomBytes(12).toString('hex')}`); }
+  catch { throw new ArgonReplayError(502); }
+  // Access-token renewal may precede dispatch. Any credential change during this generation suppresses delivery.
+  const final = deps.antigravityReplayContext?.();
+  if (!sameIdentity(final) || final!.snapshot !== current!.snapshot || (hoisting && !deps.desktopAntigravityHoisting?.())) throw new ArgonReplayError(409);
+  signal.throwIfAborted();
+  if (prepared.parsed.stream) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' }); res.end(output.frames);
   } else sendJson(res, 200, output.response);
 };
 
@@ -521,6 +576,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // status and retry eligibility are read off the Error, never guessed from its message.
       classify: (err) => antigravityFailureOf(err),
       open: async ({ parsed, provider, model, baseUrl, signal, signedDesktop, desktopAntigravityMessages }) => {
+        if (isAntigravityArgonModel(model)) return { ok: false, status: 400, message: ARGON_RESPONSES_REQUIRED };
         const creds = await deps.antigravityCreds?.();
         if (!creds) return signedOut(provider);
         // The image row is LISTED (it is real, and hiding it would make its absence a mystery) and refused
@@ -738,6 +794,20 @@ export const createBridgeServer = (deps: BridgeDeps) => {
           throw new Error('Unsupported explicit system input in Antigravity instruction-hoisting compatibility');
         }
       }
+      if (route && isAntigravityProvider(route.provider) && isAntigravityArgonModel(desktopModel ?? route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider))) {
+        try { await executeAntigravityResponses(body, req.rawHeaders, route, deps, controller.signal, res, hoisting); }
+        catch (error) {
+          if (!controller.signal.aborted) {
+            if (res.headersSent) res.end();
+            else {
+              if (error instanceof ArgonReplayError && error.retryAfterMs !== undefined) res.setHeader('Retry-After', String(Math.ceil(error.retryAfterMs / 1000)));
+              sendError(res, error instanceof ArgonReplayError ? error.status : 400,
+                'Argon request could not be completed with the current sign-in and conversation state.', 'argon_request_refused');
+            }
+          }
+        }
+        return;
+      }
       parsed = signedDesktop ? parseDesktopResponsesRequest(body) : parseResponsesRequest(body);
       // Cache keys can be shared across conversations. Preserve only the caller's
       // actual, validated session UUID as identity on the Responses adapter paths.
@@ -905,6 +975,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     if (isAntigravityProvider(provider)) {
+      if (isAntigravityArgonModel(modelId)) return { ok: false, status: 400, message: ARGON_RESPONSES_REQUIRED };
       const creds = await deps.antigravityCreds?.();
       if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
       // Refused before anything opens, same reason string as the OpenAI door's record: the image row is

@@ -22,7 +22,7 @@
  * tool history several turns later. antigravity.test.ts pins it.
  */
 
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { isDeepStrictEqual } from 'util';
 import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
@@ -30,6 +30,7 @@ import type { ToolSpec, BridgeUsage, AntigravityThinkingLevel } from './shared';
 import { validTokenCounts } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
 import type { CodexErrorClass } from './codex';
+import type { GeminiReplayContext } from './home';
 
 // ----------------------------- Small JSON helpers ----------------------------- //
 
@@ -1407,4 +1408,17 @@ export const buildAntigravityRequestBody = (args: {
       maxOutputTokens: Math.min(args.maxOutputTokens, antigravityMaxCompletionTokens(args.model) ?? args.maxOutputTokens) };
   }
   return request;
+};
+
+export type AntigravityReplayContext = GeminiReplayContext & { snapshot: string };
+export const createAntigravityReplayContext = (creds: AntigravityCreds | undefined, bridgeSecret: string | undefined): AntigravityReplayContext | undefined => {
+  if (![creds?.accessToken, creds?.refreshToken, creds?.projectId, bridgeSecret].every(value => typeof value === 'string' && value.trim())) return undefined;
+  // Domain separation keeps client-visible Bridge authentication distinct from provider-state encryption.
+  // Access tokens renew normally; a different refresh identity/project/Bridge secret invalidates replay.
+  const domain = 'wisp.antigravity.replay.v1';
+  const key = createHmac('sha256', creds!.refreshToken!).update(JSON.stringify([domain, bridgeSecret, creds!.projectId])).digest();
+  return { key: key.toString('base64url'),
+    lifetime: createHash('sha256').update(JSON.stringify([domain, bridgeSecret])).digest('base64url'),
+    credentialBinding: createHmac('sha256', key).update('credential-binding').digest('base64url'),
+    snapshot: createHmac('sha256', key).update(JSON.stringify(['credential-snapshot-v1', creds!.accessToken, creds!.refreshToken, creds!.projectId, creds!.expiresAt ?? null])).digest('base64url') };
 };

@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AntigravityAuth, fetchAntigravityProject } from '../src/antigravityAuth';
 import type { AntigravityCreds } from '../src/catalog';
+import { AuthStateChangedError } from '../src/homeStore';
 
 const memStore = (initial?: AntigravityCreds) => {
   let creds = initial;
@@ -168,6 +169,47 @@ describe('AntigravityAuth — token lifecycle', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const near = () => Date.now() + 60_000; // inside the 5-minute skew window
+
+  it.each(['refresh', 'project'])('never overwrites a sign-in replaced during %s', async phase => {
+    let stored: AntigravityCreds = { accessToken: 'old', refreshToken: 'old-refresh', expiresAt: phase === 'refresh' ? near() : Date.now() + 3600000,
+      ...(phase === 'refresh' ? { projectId: 'old-project' } : {}) };
+    const replacement = { accessToken: 'replacement', refreshToken: 'replacement-refresh', projectId: 'replacement-project', expiresAt: Date.now() + 3600000 };
+    const store = { read: () => stored, write: (next: AntigravityCreds, expected?: AntigravityCreds) => {
+      if (expected !== undefined && JSON.stringify(stored) !== JSON.stringify(expected)) throw new AuthStateChangedError();
+      stored = next;
+    } };
+    vi.stubGlobal('fetch', async () => {
+      stored = replacement;
+      return Response.json(phase === 'refresh' ? { access_token: 'late-old-access', expires_in: 3600 } : { cloudaicompanionProject: 'late-old-project' });
+    });
+    let failure: unknown;
+    try { await new AntigravityAuth(store, async () => true, () => {}).current(); } catch (error) { failure = error; }
+    expect(stored).toEqual(replacement);
+    expect(failure).toBeInstanceOf(AuthStateChangedError);
+  });
+
+  it('does not resurrect credentials removed before the refresh reread', async () => {
+    let reads = 0;
+    const fetch = vi.fn(async () => Response.json({ access_token: 'late', expires_in: 3600 })); vi.stubGlobal('fetch', fetch);
+    const write = vi.fn();
+    const auth = new AntigravityAuth({ read: () => ++reads === 1 ? { accessToken: 'old', refreshToken: 'old-refresh', expiresAt: near(), projectId: 'p' } : undefined, write }, async () => true, () => {});
+    let failure: unknown; try { await auth.current(); } catch (error) { failure = error; }
+    expect(fetch).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(failure).toBeInstanceOf(AuthStateChangedError);
+  });
+
+  it('can persist a valid rotation with its project after an ordinary first-write failure', async () => {
+    let stored: AntigravityCreds = { accessToken: 'old', refreshToken: 'old-refresh', expiresAt: near() }, writes = 0;
+    const store = { read: () => stored, write: (next: AntigravityCreds, expected?: AntigravityCreds) => {
+      if (++writes === 1) throw Error('EACCES');
+      if (expected !== undefined && JSON.stringify(stored) !== JSON.stringify(expected)) throw new AuthStateChangedError();
+      stored = next;
+    } };
+    vi.stubGlobal('fetch', async (url: string) => Response.json(String(url) === LOAD_URL ? { cloudaicompanionProject: 'p' }
+      : { access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_in: 3600 }));
+    const creds = await new AntigravityAuth(store, async () => true, () => {}).current();
+    expect(creds).toMatchObject({ accessToken: 'rotated-access', refreshToken: 'rotated-refresh', projectId: 'p' });
+    expect(stored).toEqual(creds);
+  });
 
   it('refreshes a near-expiry token, persists it, and keeps the project id', async () => {
     const store = memStore({ accessToken: 'old', refreshToken: '1//rt', expiresAt: near(), projectId: 'p-1' });

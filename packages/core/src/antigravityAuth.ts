@@ -28,6 +28,7 @@
 
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
+import { AuthStateChangedError } from './homeStore';
 import {
   AntigravityCreds, codeVerifier, codeChallenge, oauthState,
   tokensToAntigravityCreds, shouldRefreshAntigravityToken, isAntigravitySignedIn,
@@ -197,7 +198,7 @@ export const fetchAntigravityProject = async (accessToken: string): Promise<stri
 // The antigravity slice of ~/.wisp/auth.json, as the host face exposes it.
 export type AntigravityCredsStore = {
   read: () => AntigravityCreds | undefined;
-  write: (creds: AntigravityCreds) => void;
+  write: (creds: AntigravityCreds, expected?: AntigravityCreds) => void;
 };
 
 // Owns the Antigravity token lifecycle against one auth.json slice. Each face holds a single instance and
@@ -213,11 +214,12 @@ export class AntigravityAuth {
   // processes share auth.json (extension + TUI), so RE-READ before refreshing (#59): if the other process
   // already rotated the token, use its bundle instead of firing our spent refresh token. A failed refresh is
   // non-fatal — keep the existing creds (they may still work; the live call surfaces a 401).
-  private refreshIfNeeded = async (creds: AntigravityCreds): Promise<AntigravityCreds> => {
-    if (!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) return creds;
-    const fresh = this.store.read() ?? creds;
-    if (!shouldRefreshAntigravityToken(fresh, Date.now())) return fresh;
-    if (!fresh.refreshToken) return fresh;
+  private refreshIfNeeded = async (creds: AntigravityCreds): Promise<{ creds: AntigravityCreds; snapshot: AntigravityCreds }> => {
+    if (!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) return { creds, snapshot: creds };
+    const fresh = this.store.read();
+    if (!fresh) throw new AuthStateChangedError();
+    const retained = { creds: fresh, snapshot: fresh };
+    if (!shouldRefreshAntigravityToken(fresh, Date.now()) || !fresh.refreshToken) return retained;
     let next: AntigravityCreds;
     try {
       const res = await fetch(ANTIGRAVITY_TOKEN_URL, {
@@ -231,7 +233,7 @@ export class AntigravityAuth {
         }),
         signal: AbortSignal.timeout(15_000),
       });
-      if (!res.ok) { this.log(`[antigravity] token refresh failed (${res.status})`); return fresh; }
+      if (!res.ok) { this.log(`[antigravity] token refresh failed (${res.status})`); return retained; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
       // Carry the project id over the rebuild — it belongs to the ACCOUNT, not the token, so a refresh must
       // not silently strip it and put every later turn back on the request-build 400.
@@ -241,28 +243,37 @@ export class AntigravityAuth {
         || typeof next.expiresAt !== 'number' || !Number.isFinite(next.expiresAt) || next.expiresAt <= Date.now()
         || (payload.refresh_token !== undefined && (typeof payload.refresh_token !== 'string' || !payload.refresh_token.trim()))) {
         this.log('[antigravity] token refresh returned invalid credentials');
-        return fresh;
+        return retained;
       }
       // Google's refresh response omits refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
       this.log(`[antigravity] token refresh error: ${String(err)}`);
-      return fresh;
+      return retained;
     }
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[antigravity] token persist error: ${String(err)}`); }
-    return next;
+    let snapshot = fresh;
+    try { this.store.write(next, fresh); snapshot = next; }
+    catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[antigravity] token persist error: ${String(err)}`);
+    }
+    return { creds: next, snapshot };
   };
 
   // Bootstrap the project id when the bundle has none (#188: "re-fetch if absent"). Signed-out bundles are
   // skipped — there is no bearer to ask with. A failure leaves the bundle as-is; the next call retries.
-  private withProject = async (creds: AntigravityCreds): Promise<AntigravityCreds> => {
+  private withProject = async (creds: AntigravityCreds, snapshot: AntigravityCreds): Promise<AntigravityCreds> => {
     if (creds.projectId || !creds.accessToken) return creds;
     const projectId = await fetchAntigravityProject(creds.accessToken);
     if (!projectId) return creds;
     const next = { ...creds, projectId };
-    try { this.store.write(next); } catch (err) { this.log(`[antigravity] project persist error: ${String(err)}`); }
+    try { this.store.write(next, snapshot); }
+    catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[antigravity] project persist error: ${String(err)}`);
+    }
     return next;
   };
 
@@ -285,7 +296,9 @@ export class AntigravityAuth {
   // bootstrapped if it is missing. undefined = not signed in.
   current = async (): Promise<AntigravityCreds | undefined> => {
     const creds = this.store.read();
-    return creds ? this.withProject(await this.refreshIfNeeded(creds)) : undefined;
+    if (!creds) return undefined;
+    const current = await this.refreshIfNeeded(creds);
+    return this.withProject(current.creds, current.snapshot);
   };
 
   // Cheap signed-in check for UI/usability — read-only (no refresh or bootstrap round-trip).

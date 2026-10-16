@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { antigravityStream, antigravityRequest } from '../src/antigravityClient';
+import { antigravityStream, antigravityRequest, antigravityNativeResponse } from '../src/antigravityClient';
 import {
   ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST, ANTIGRAVITY_HTTP_USER_AGENT,
   type AntigravityCreds,
@@ -77,6 +77,28 @@ const collect = async (stream: AsyncIterable<any>) => {
 const turn = () => ({ creds: creds(), baseUrl: ANTIGRAVITY_DAILY_HOST, model: 'gemini-3.1-pro-low', messages: [{ role: 'user' as const, content: 'weather in Paris?' }] });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('native Argon response', () => {
+  it('retains generated parts for sealing and sends the explicit cap without redirects', async () => {
+    const native = { response: { candidates: [{ content: { role: 'model', parts: [{ text: 'answer', thoughtSignature: 'opaque' }] } }] } };
+    const calls = stubFetch([Response.json(native)]);
+    expect(await antigravityNativeResponse({ ...turn(), model: 'gemini-4-argon-low', maxOutputTokens: 2048 })).toEqual(native);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.redirect).toBe('error');
+    expect(JSON.parse(String(calls[0].init.body)).request.generationConfig.maxOutputTokens).toBe(2048);
+  });
+  it('never retries or changes hosts after an unsuccessful generation', async () => {
+    const calls = stubFetch([new Response('no capacity available', { status: 503 })]);
+    await expect(antigravityNativeResponse({ ...turn(), model: 'gemini-4-argon-low' })).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+  it('refuses oversized buffered responses and releases the reader', async () => {
+    let cancelled = 0;
+    stubFetch([new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1048577)); }, cancel() { cancelled++; } }))]);
+    await expect(antigravityNativeResponse({ ...turn(), model: 'gemini-4-argon-low' })).rejects.toThrow(/response.*limit/i);
+    expect(cancelled).toBe(1);
+  });
+});
 
 // ----------------------------- The request the client actually sends ----------------------------- //
 

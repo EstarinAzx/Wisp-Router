@@ -12,7 +12,7 @@ const fields = (v: unknown, allowed: string[]): Item => {
   check(Object.keys(v).every(k => allowed.includes(k)));
   return v as Item;
 };
-const canonical = (v: unknown): string => JSON.stringify(v, (_k, x) => x && typeof x === 'object' && !Array.isArray(x)
+export const canonical = (v: unknown): string => JSON.stringify(v, (_k, x) => x && typeof x === 'object' && !Array.isArray(x)
   ? Object.fromEntries(Object.keys(x).sort().map(k => [k, x[k]])) : x);
 const textParts = (v: unknown, type: string): string[] => {
   if (typeof v === 'string') return [v];
@@ -24,7 +24,7 @@ const textParts = (v: unknown, type: string): string[] => {
     return p.text;
   });
 };
-const metadata = (item: Item): Item => {
+export const metadata = (item: Item): Item => {
   check(item.id === undefined || typeof item.id === 'string');
   check(item.status === undefined || item.status === 'completed');
   const { id, status, ...rest } = item;
@@ -34,7 +34,7 @@ const metadata = (item: Item): Item => {
 };
 
 // rawHeaders retains duplicates that the normalized HTTP map would conceal.
-const sessionFrom = (raw: string[]): string => {
+export const sessionFrom = (raw: string[]): string => {
   check(Array.isArray(raw) && raw.length % 2 === 0);
   const aliases = new Map<string, string>();
   for (let i = 0; i < raw.length; i += 2) {
@@ -128,11 +128,31 @@ const scope = (p: Preflight, c: GeminiReplayContext): Buffer => Buffer.from(cano
   version: 1, provider: 'gemini-api', keyOwner: 'gemini-api', model: p.model, session: p.session,
   lifetime: c.lifetime, credentialBinding: c.credentialBinding, policy: p.policy,
 }));
-const replayKey = (context: GeminiReplayContext): Buffer => {
+export const replayKey = (context: GeminiReplayContext): Buffer => {
   check(context && typeof context.key === 'string' && typeof context.lifetime === 'string' && typeof context.credentialBinding === 'string');
   const key = Buffer.from(context.key, 'base64url');
   check(key.length === 32 && key.toString('base64url') === context.key);
   return key;
+};
+// Shared by the API and subscription transports; each supplies its own prefix and authenticated scope.
+export const sealGeminiReplay = (value: unknown, context: GeminiReplayContext, associatedData: Buffer): string => {
+  const plain = Buffer.from(JSON.stringify(value));
+  // ponytail: 64 KiB per model-state packet; qualify a larger client round trip before increasing this limit.
+  check(plain.length <= 65536);
+  const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', replayKey(context), nonce);
+  cipher.setAAD(associatedData);
+  const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([nonce, cipher.getAuthTag(), encrypted]).toString('base64url');
+};
+export const openGeminiReplay = (encoded: string, context: GeminiReplayContext, associatedData: Buffer): unknown => {
+  check(typeof encoded === 'string' && encoded.length <= 90000 && /^[A-Za-z0-9_-]+$/.test(encoded));
+  const bytes = Buffer.from(encoded, 'base64url');
+  check(bytes.length > 28 && bytes.toString('base64url') === encoded);
+  const cipher = createDecipheriv('aes-256-gcm', replayKey(context), bytes.subarray(0, 12));
+  cipher.setAAD(associatedData); cipher.setAuthTag(bytes.subarray(12, 28));
+  const plain = Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]);
+  check(plain.length <= 65536);
+  return JSON.parse(plain.toString('utf8'));
 };
 const visible = (result: GeminiInteractionResult, p: Preflight): Item[] => {
   check(result.steps.length <= 64);
@@ -149,7 +169,7 @@ const visible = (result: GeminiInteractionResult, p: Preflight): Item[] => {
 };
 
 export const prepareGeminiReplay = (p: Preflight, context: GeminiReplayContext) => {
-  const key = replayKey(context);
+  replayKey(context);
   const steps: GeminiStep[] = [];
   for (let i = p.leading; i < p.input.length; i++) {
     const item = p.input[i];
@@ -159,16 +179,9 @@ export const prepareGeminiReplay = (p: Preflight, context: GeminiReplayContext) 
     }
     check(item.type === 'reasoning');
     const encoded = item.encrypted_content.slice(PREFIX.length);
-    check(encoded.length <= 90000 && /^[A-Za-z0-9_-]+$/.test(encoded));
-    const bytes = Buffer.from(encoded, 'base64url');
-    check(bytes.length > 28 && bytes.toString('base64url') === encoded);
     let payload: Item;
     try {
-      const cipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12));
-      cipher.setAAD(scope(p, context)); cipher.setAuthTag(bytes.subarray(12, 28));
-      const plain = Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]);
-      check(plain.length <= 65536);
-      payload = fields(JSON.parse(plain.toString('utf8')), ['v', 'binding', 'result']);
+      payload = fields(openGeminiReplay(encoded, context, scope(p, context)), ['v', 'binding', 'result']);
     } catch { return fail(); }
     check(payload.v === 1 && payload.binding === binding(p, p.input.slice(0, i)));
     const result = parseGeminiInteraction(payload.result);
@@ -196,13 +209,7 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
   const used = new Set(p.request.input.filter(step => step.type === 'function_call').map(step => step.id));
   check(result.steps.every(step => step.type !== 'function_call' || !used.has(step.id)));
   const items = visible(result, p);
-  const plain = Buffer.from(JSON.stringify({ v: 1, binding: binding(p, p.input), result }));
-  // ponytail: qualified local replay limit, not the upstream token limit; refuse instead of truncating.
-  check(plain.length <= 65536);
-  const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', replayKey(p.context), nonce);
-  cipher.setAAD(scope(p, p.context));
-  const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
-  const carrier = { type: 'reasoning', summary: [], encrypted_content: PREFIX + Buffer.concat([nonce, cipher.getAuthTag(), encrypted]).toString('base64url') };
+  const carrier = { type: 'reasoning', summary: [], encrypted_content: PREFIX + sealGeminiReplay({ v: 1, binding: binding(p, p.input), result }, p.context, scope(p, p.context)) };
   const output: Item[] = [carrier, ...items].map((item, index) => ({ ...item, id: `${id}_${index}`, ...(index ? { status: 'completed' } : {}) }));
   const usage = result.usage && {
     ...(result.usage.total_input_tokens === undefined ? {} : { input_tokens: result.usage.total_input_tokens }),
@@ -212,6 +219,11 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
   };
   const response: Item = { id, object: 'response', created_at: Math.floor(Date.now() / 1000), model: p.parsed.model, status: 'completed', output,
     ...(usage && Object.keys(usage).length ? { usage } : {}) };
+  return { response, frames: completedResponseFrames(response) };
+};
+
+export const completedResponseFrames = (response: Item): string => {
+  const output: Item[] = response.output;
   let sequence = 0;
   const frame = (type: string, fields: Item): string => `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: sequence++, ...fields })}\n\n`;
   let frames = frame('response.created', { response: { ...response, status: 'in_progress', output: [] } });
@@ -234,5 +246,5 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
     frames += frame('response.output_item.done', { output_index, item });
   }
   frames += frame('response.completed', { response });
-  return { response, frames };
+  return frames;
 };
