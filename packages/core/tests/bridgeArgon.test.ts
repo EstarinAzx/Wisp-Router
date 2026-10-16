@@ -27,6 +27,7 @@ const setup = () => {
   home.writeAuth({ bridgeSecret: 'secret', antigravity: { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', projectId: 'synthetic-project', expiresAt: Date.now() + 3600000 } });
   const provider = { id: 'antigravity', label: 'Antigravity', kind: 'antigravity-oauth', baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: 'gemini-4-argon-low', apiKeyEnv: '' } as const;
   const calls = { context: 0, credentials: 0, backend: 0, generic: 0 };
+  vi.stubGlobal('fetch', async () => { calls.backend++; throw Error('Unconfigured fixture transport'); });
   const deps: BridgeDeps = {
     providers: [provider], activeProviderId: () => provider.id, modelMap: () => ({}), customBaseUrl: () => '',
     keyFor: async () => { calls.generic++; throw Error('API key forbidden'); }, clientFor: async () => { calls.generic++; throw Error('Generic client forbidden'); },
@@ -55,6 +56,7 @@ const native = (parts: any[]) => ({ response: { modelVersion: 'gemini-4-argon', 
 
 test.each(['/v1/responses', '/codex-desktop/v1/responses'])('real HTTP %s preserves original state through two turns without API credentials', async endpoint => {
   const f = setup(), sent: any[] = []; let firstParts: any[];
+  delete f.deps.desktopAntigravityTargets; // Exercise the release admission policy, including signed HTTP.
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     f.calls.backend++; expect(String(url)).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent');
     expect(init.redirect).toBe('error'); const wire = JSON.parse(String(init.body)); sent.push(wire);
@@ -135,8 +137,9 @@ test.each(['refreshToken', 'accessToken'])('a %s change during generation suppre
   });
   expect(f.calls.backend).toBe(1);
 });
-test('public signed admission still refuses unqualified Argon before provider work', async () => {
+test('public signed admission still requires explicit instruction-hoisting consent before provider work', async () => {
   const f = setup(); delete f.deps.desktopAntigravityTargets;
+  f.deps.desktopAntigravityHoisting = () => false;
   await run(f.deps, async port => { expect((await post(port, '/codex-desktop/v1/responses', initial())).status).toBe(400); });
   expect(f.calls).toEqual({ context: 0, credentials: 0, backend: 0, generic: 0 });
 });
