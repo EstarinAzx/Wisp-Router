@@ -6,6 +6,16 @@ import { delimiter, join, resolve } from 'path';
 
 import * as launcher from '../src/codex-wisp';
 import { catalogArguments, mergeAliasCatalog, parseNativeCatalog, readAliasCapabilities, readNativeCatalog, writeChildCatalog } from '../src/codexCatalog';
+test('Argon subscription rows advertise only their exact fixed tier without discovery I/O', async () => {
+  const aliases = ['low', 'medium', 'high', 'unknown'].map(tier => ({ name: `argon-${tier}`, target: { providerId: 'antigravity', model: `gemini-4-argon-${tier}` } }));
+  const config = { routing: { families: {}, aliases } };
+  const capabilities = await readAliasCapabilities(config, {});
+  const rows = mergeAliasCatalog({ models: [] }, config, capabilities).models;
+  for (const [index, tier] of ['low', 'medium', 'high'].entries()) {
+    expect(rows[index]).toMatchObject({ default_reasoning_level: tier, supported_reasoning_levels: [{ effort: tier, description: `${tier} reasoning` }], input_modalities: ['text'] });
+  }
+  expect(rows[3]).toMatchObject({ default_reasoning_level: null, supported_reasoning_levels: [] });
+});
 const root = resolve(import.meta.dir, '../../..');
 const source = join(root, 'packages/tui/src/codex-wisp.ts');
 const dispatch = join(root, 'packages/tui/src/index.tsx');

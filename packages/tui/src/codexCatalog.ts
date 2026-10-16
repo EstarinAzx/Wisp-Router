@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
-  anthropicThinkingEffort, xaiReasoning, antigravityAcceptsThinkingLevel, desktopTargetIssue,
+  anthropicThinkingEffort, xaiReasoning, antigravityAcceptsThinkingLevel, isAntigravityArgonModel, desktopTargetIssue,
   type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
 
@@ -172,6 +172,11 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
     if (p.kind === 'codex') {
       const info = codex?.models.find(m => m.id === target.model);
       return info ? { contextInput: info.contextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
+    }
+    // Argon exposes separate subscription SKUs; a caller cannot change one SKU's tier in place.
+    if (p.kind === 'antigravity-oauth' && isAntigravityArgonModel(target.model)) {
+      const tier = target.model.slice(target.model.lastIndexOf('-') + 1);
+      return { efforts: [tier], defaultEffort: tier, vision: false };
     }
     // Tiered rows accept these distinct request levels without public catalog metadata.
     if (p.kind === 'antigravity-oauth') return antigravityAcceptsThinkingLevel(target.model)
