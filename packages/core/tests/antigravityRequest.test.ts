@@ -544,6 +544,18 @@ describe('buildAntigravityPayload', () => {
 describe('buildAntigravityRequestBody', () => {
   const turn = () => ({ model: 'gemini-3-flash', messages: [{ role: 'user' as const, content: 'hello there' }], requestId: 'agent-1' });
 
+  it.each(['low', 'medium', 'high'])('preserves an explicit output limit for Argon %s after family processing', level => {
+    const body = buildAntigravityRequestBody({ ...turn(), model: `gemini-4-argon-${level}`, maxOutputTokens: 2048 });
+    expect(body.request.generationConfig).toEqual({ maxOutputTokens: 2048 });
+    expect(body.model).toBe(`gemini-4-argon-${level}`);
+  });
+
+  it('rejects invalid explicit output limits instead of silently sending an unbounded request', () => {
+    for (const maxOutputTokens of [0, -1, 1.5, NaN, Infinity, '2048' as any]) {
+      expect(() => buildAntigravityRequestBody({ ...turn(), maxOutputTokens })).toThrow(/output token limit/i);
+    }
+  });
+
   it('round-trips parallel Responses results in call order without changing their IDs or mutating history', () => {
     const parsed = parseResponsesRequest({ model: 'alias', tools: [{ type: 'function', name: 'read', parameters: {} }], input: [
       { role: 'user', content: 'read both files' },

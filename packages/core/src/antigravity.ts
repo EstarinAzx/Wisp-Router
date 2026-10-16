@@ -1355,8 +1355,12 @@ export const buildAntigravityRequestBody = (args: {
   sessionId?: string;
   fallbackSessionId?: string;
   thinkingLevel?: AntigravityThinkingLevel;
+  maxOutputTokens?: number;
   preserveSystemText?: boolean;
 }): Json => {
+  if (args.maxOutputTokens !== undefined && (!Number.isSafeInteger(args.maxOutputTokens) || args.maxOutputTokens <= 0)) {
+    throw new Error('Invalid Antigravity output token limit');
+  }
   const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools, preserveSystemText: args.preserveSystemText });
   // The stable id must WIN over the fallback — it is upstream cache behaviour, not a nonce, so resolving
   // it here (rather than passing the random value straight into the envelope, whose opts.sessionId is
@@ -1372,5 +1376,11 @@ export const buildAntigravityRequestBody = (args: {
   envelope = normalizeAntigravityFunctionResponses(envelope);
   // Last, deliberately: see applyAntigravityThinkingLevel — appending after every other stage is what keeps
   // their behaviour byte-identical on the rows this does not touch.
-  return applyAntigravityThinkingLevel(sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
+  const request = applyAntigravityThinkingLevel(sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
+  // An explicit caller limit must survive the legacy family defaults. Omitted limits stay unchanged.
+  if (args.maxOutputTokens !== undefined) {
+    request.request.generationConfig = { ...request.request.generationConfig,
+      maxOutputTokens: Math.min(args.maxOutputTokens, antigravityMaxCompletionTokens(args.model) ?? args.maxOutputTokens) };
+  }
+  return request;
 };

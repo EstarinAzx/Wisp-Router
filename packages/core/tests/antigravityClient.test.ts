@@ -81,6 +81,14 @@ afterEach(() => vi.unstubAllGlobals());
 // ----------------------------- The request the client actually sends ----------------------------- //
 
 describe('antigravityStream — the outbound request', () => {
+  it('delivers an explicit output limit to the Argon wire without changing its fixed tier', async () => {
+    const calls = stubFetch([sseResponse(TEXT_SSE)]);
+    await collect(antigravityStream({ ...turn(), model: 'gemini-4-argon-low', maxOutputTokens: 2048 }));
+    const body = JSON.parse(String(calls[0].init.body));
+    expect(body.model).toBe('gemini-4-argon-low');
+    expect(body.request.generationConfig.maxOutputTokens).toBe(2048);
+  });
+
   it('refuses incomplete parallel history locally on the strict Responses path', async () => {
     const calls = stubFetch([sseResponse(TEXT_SSE)]);
     await expect(collect(antigravityStream({ ...turn(), strictCompletion: true, messages: [

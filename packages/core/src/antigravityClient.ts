@@ -51,6 +51,7 @@ type AntigravityRequestArgs = {
   // Already folded to this wire's three stops by the caller. Absent = send no thinkingConfig at all,
   // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   log?: (message: string) => void;
 };
@@ -94,6 +95,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     requestId: antigravityRequestId(crypto.randomUUID()),
     fallbackSessionId: antigravityFallbackSessionId(randomHex()),
     thinkingLevel: args.thinkingLevel,
+    maxOutputTokens: args.maxOutputTokens,
     preserveSystemText: args.preserveSystemText,
   });
   if (args.strictCompletion) {
