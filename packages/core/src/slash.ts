@@ -29,7 +29,6 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'bridge', args: '[off]', description: 'Show the Bridge (starts it if stopped) — /bridge off is the only stop' },
   { name: 'gpt-desktop', args: '<on|off>', description: 'Toggle Desktop routing; on applies Antigravity developer notes globally' },
   { name: 'antigravity-compat', args: '[on|off|status]', description: 'Inspect or change Claude client fallback for Antigravity (default off)' },
-  { name: 'gemini-instructions', args: '[strict|prepend-leading-developer-v1|status]', description: 'Inspect or explicitly change Gemini instruction compatibility (default strict)' },
   { name: 'quota', args: '[refresh [anthropic|codex]]', description: 'Show cached account usage; refresh only on request' },
   { name: 'show-log', description: "Show the Bridge's log (collects while the Bridge runs, even closed)" },
   { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },

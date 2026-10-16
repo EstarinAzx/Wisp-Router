@@ -108,7 +108,6 @@ export const PROVIDERS: Provider[] = [
   // gemini-3.1-pro-low, NOT the `recommended: true` gemini-3.1-pro-high — that row is listed and 400s on
   // every request shape tried (#186). The catalog is advisory: being listed does not make a row servable.
   { id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth' },
-  { id: 'gemini-api', label: 'Gemini API', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-4-argon', apiKeyEnv: '', kind: 'gemini-interactions' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },

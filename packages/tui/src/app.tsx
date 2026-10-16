@@ -57,7 +57,6 @@ import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
 import { antigravityCompatResult } from './antigravityCompat';
-import { geminiInstructionsResult } from './geminiInstructions';
 import { runQuota } from './quotaCli';
 import pkg from '../package.json';
 
@@ -396,12 +395,6 @@ export const App = () => {
         const result = antigravityCompatResult(target.args);
         setStatus('');
         setMode({ kind: 'info', title: 'Antigravity compatibility', lines: result.lines });
-        return;
-      }
-      case 'gemini-instructions': {
-        const result = geminiInstructionsResult(target.args);
-        setStatus('');
-        setMode({ kind: 'info', title: 'Gemini instructions', lines: result.lines });
         return;
       }
       case 'quota': {

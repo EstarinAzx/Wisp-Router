@@ -98,9 +98,10 @@ test('a capped incomplete result releases no executable batch and is never retri
   expect(calls).toEqual({ metadata: 1, bearer: 1, backend: 1, generic: 0 });
 });
 
-test('Gemini catalog is distinct and never admitted to signed Desktop', () => {
-  const p = PROVIDERS.find(p => p.id === 'gemini-api'); expect(p).toBeDefined();
-  expect(p?.kind).toBe('gemini-interactions'); expect(p?.keyId).toBeUndefined(); expect(p?.apiKeyEnv).toBe('');
+test('the unselected Gemini API research adapter is absent from the public catalog and signed Desktop', () => {
+  expect(PROVIDERS.some(p => p.id === 'gemini-api' || p.kind === 'gemini-interactions')).toBe(false);
+  const p = setup().provider;
+  expect(p.kind).toBe('gemini-interactions'); expect('keyId' in p).toBe(false); expect(p.apiKeyEnv).toBe('');
   expect(desktopTargetIssue(p!, 'gemini-4-argon', true)).toMatch(/not.*qualified|unavailable/i);
 });
 

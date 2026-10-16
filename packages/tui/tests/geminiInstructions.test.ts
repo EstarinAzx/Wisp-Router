@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { WispHome, PROVIDERS, effortOptionsFor } from '@wisp/core';
+import { WispHome, effortOptionsFor, type Provider } from '@wisp/core';
 import { geminiInstructionsResult } from '../src/geminiInstructions';
 import { fetchModelList } from '../src/modelFetch';
 import { bearerFor } from '../src/store';
@@ -26,7 +26,7 @@ test('Gemini status is read-only, strict by default, and independent of Antigrav
 });
 
 test('Gemini fixed models and effort are local, while generic bearer resolution refuses', async () => {
-  const p = PROVIDERS.find(p => p.id === 'gemini-api')!;
+  const p: Provider = { id: 'gemini-api', label: 'Research fixture', kind: 'gemini-interactions', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-4-argon', apiKeyEnv: '' };
   const original = globalThis.fetch;
   globalThis.fetch = (() => { throw Error('network forbidden'); }) as typeof fetch;
   try {
@@ -42,9 +42,8 @@ test('VS Code chat does not list or resolve credentials for Gemini', () => {
     let provider, keys = 0;
     mock.module('vscode', () => ({ lm: { registerLanguageModelChatProvider: (_id, p) => { provider = p; return {dispose(){}}; } } }));
     globalThis.fetch = async () => Response.json({});
-    const { PROVIDERS } = await import('@wisp/core');
     const { registerWispChatProvider } = await import('../../vscode/src/chatProvider');
-    registerWispChatProvider({providers: PROVIDERS.filter(p => p.id === 'gemini-api'), modelMap: () => ({}), customBaseUrl: () => '',
+    registerWispChatProvider({providers: [{id:'gemini-api',label:'Research fixture',kind:'gemini-interactions',baseUrl:'https://generativelanguage.googleapis.com/v1beta',defaultModel:'gemini-4-argon',apiKeyEnv:''}], modelMap: () => ({}), customBaseUrl: () => '',
       keyFor: async () => { keys++; throw Error('generic key'); }, clientFor: async () => { throw Error('generic client'); }, effort: () => 'medium', log(){} });
     assert.deepEqual(await provider.provideLanguageModelChatInformation(), []);
     await assert.rejects(provider.provideLanguageModelChatResponse({id:'gemini-api'}, [], {}, {}, {}), /Gemini/);

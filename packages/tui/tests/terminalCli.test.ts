@@ -113,7 +113,7 @@ test.each([[40, 24], [100, 32]])('TUI compatibility guidance and errors remain r
   expect(result.code).toBe(0);
 });
 
-test('Gemini key entry captures a lifetime and refuses a stale save in the real App', () => {
+test('the release does not offer the cancelled Gemini API enrollment in the real App', () => {
   const result = run(['--eval', `
     import assert from 'node:assert/strict';
     import { createElement, act } from 'react';
@@ -126,23 +126,11 @@ test('Gemini key entry captures a lifetime and refuses a stale save in the real 
     const type = async text => { await act(async () => ui.mockInput.typeText(text)); };
     try {
       await ui.renderOnce(); await type('/key gemini-api'); await key('RETURN');
-      await type('first-key'); await key('RETURN');
-      const first = home.geminiReplayContext(); assert(first);
-      assert.equal(home.geminiCredentials(first), 'first-key');
-      assert.equal(home.readAuth().keys?.['gemini-api'], undefined);
-      await type('/key gemini-api'); await key('RETURN'); await type('stale-key');
-      home.saveGeminiApiKey('replacement', first.lifetime);
-      await key('RETURN');
-      assert.equal(home.geminiCredentials(home.geminiReplayContext()), 'replacement');
-      assert(ui.captureCharFrame().includes('changed'), ui.captureCharFrame());
-      await type('/gemini-instructions status'); await key('RETURN');
-      assert(ui.captureCharFrame().includes('strict'), ui.captureCharFrame());
-      await key('ESCAPE');
-      await type('/gemini-instructions prepend-leading-developer-v1'); await key('RETURN');
-      assert.equal(home.readConfig().bridge.geminiApiInstructions, 'prepend-leading-developer-v1');
-      let frames = ui.captureCharFrame();
-      for (let i = 0; i < 30; i++) { await key('ARROW_DOWN'); frames += ui.captureCharFrame(); }
-      assert(frames.replace(/[│╭╮╰╯─█▀▄]/g, ' ').replace(/\\s+/g, ' ').includes('not preserved'), frames);
+      assert(ui.captureCharFrame().includes('Unknown'), ui.captureCharFrame());
+      assert.equal(home.geminiReplayContext(), undefined);
+      const { PROVIDERS, SLASH_COMMANDS } = await import('@wisp/core');
+      assert(!PROVIDERS.some(p => p.id === 'gemini-api'));
+      assert(!SLASH_COMMANDS.some(c => c.name === 'gemini-instructions'));
     } finally { await act(async () => ui.renderer.destroy()); }
   `], join(root, 'packages/tui'));
   expect(result.err).toBe(''); expect(result.code).toBe(0);

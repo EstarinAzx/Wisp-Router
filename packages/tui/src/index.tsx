@@ -27,11 +27,6 @@ if (process.argv[2] === '--version') {
 } else if (process.argv[2] === 'antigravity-compat') {
   const { runAntigravityCompat } = await import('./antigravityCompat');
   process.exitCode = runAntigravityCompat(process.argv.slice(3));
-} else if (process.argv[2] === 'gemini-instructions') {
-  const { geminiInstructionsResult } = await import('./geminiInstructions');
-  const result = geminiInstructionsResult(process.argv.slice(3));
-  console.log(result.lines.join('\n'));
-  process.exitCode = result.exitCode;
 } else if (process.argv[2] === 'quota') {
   const { runQuota } = await import('./quotaCli');
   const result = await runQuota(process.argv.slice(3));
