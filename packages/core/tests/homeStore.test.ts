@@ -10,11 +10,20 @@
  *   - WispConfig / WispAuth (from ./home): what the store reads and writes.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import * as fs from 'fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { WispHome, wispHomeDir } from '../src/homeStore';
+import { CodexAuth } from '../src/codexAuth';
+import { AnthropicAuth } from '../src/anthropicAuth';
+
+vi.mock('fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual };
+});
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wisp-home-')); });
@@ -22,6 +31,164 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 // The sandbox path points at a subdir that does NOT exist yet — creation on demand is part of the contract.
 const home = () => new WispHome(join(dir, '.wisp'));
+
+describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisition', provider => {
+  test.each([false, true])('preserves normal renewal and unrelated writes (disk failure: %s)', async diskFailure => {
+    const h = home();
+    const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
+    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
+    const manager = provider === 'codex'
+      ? new CodexAuth({ read: () => h.readAuth().codex, write: (c, expected?: string) => { h.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
+      : new AnthropicAuth({ read: () => h.readAuth().anthropic, write: (c, expected?: string) => { h.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    vi.stubGlobal('fetch', async () => {
+      home().writeAuth({ bridgeSecret: 'sibling-write' });
+      return Response.json({ access_token: 'fixture-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 });
+    });
+    const rename = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      if (diskFailure && existsSync(String(args[0])) && readFileSync(String(args[0]), 'utf8').includes('fixture-renewed')) throw new Error('synthetic disk failure');
+      return rename(...args);
+    });
+    try {
+      const result = await (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current());
+      expect(result?.accessToken).toBe('fixture-renewed');
+      expect(h.readAuth()[provider]?.accessToken).toBe(diskFailure ? expired : 'fixture-renewed');
+      expect(h.readAuth().bridgeSecret).toBe('sibling-write');
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+      expect(readdirSync(join(dir, '.wisp')).some(file => file.endsWith('.tmp'))).toBe(false);
+    } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
+  });
+
+  test.each(['signout', 'replacement', 'removal'])('preserves a concurrent %s and returns no old-account credentials', async change => {
+    const a = home(), b = home();
+    const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
+    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
+    const manager = provider === 'codex'
+      ? new CodexAuth({ read: () => a.readAuth().codex, write: (c, expected?: string) => { a.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
+      : new AnthropicAuth({ read: () => a.readAuth().anthropic, write: (c, expected?: string) => { a.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    let changed = false, preserved = '';
+    const open = fs.openSync;
+    // The second real store writes after the manager's last read, just before the first gets the lock.
+    const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      if (!changed && String(args[0]).endsWith('auth.lock')) {
+        changed = true;
+        b.writeAuth({ [provider]: change === 'signout' ? {} : change === 'removal' ? undefined : { accessToken: 'fixture-new-account' } });
+        preserved = readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8');
+      }
+      return open(...args);
+    });
+    vi.stubGlobal('fetch', async () => Response.json({ access_token: 'fixture-old-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 }));
+    try {
+      const result = await (manager instanceof CodexAuth ? manager.current({ importNative: false }) : manager.current()).catch(error => error);
+      expect(changed).toBe(true);
+      expect(readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8')).toBe(preserved);
+      expect(result).toBeInstanceOf(Error);
+      expect(String(result)).toMatch(/sign-in changed/);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+    } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
+  });
+});
+
+describe('Gemini credential lifetime', () => {
+  test('metadata omits the bearer, survives restart and rotates even for the same key', () => {
+    const h = home();
+    expect(h.geminiReplayContext()).toBeUndefined();
+    h.writeAuth({ keys: { other: 'kept' }, bridgeSecret: 'bridge' });
+    h.saveGeminiApiKey('synthetic-key', null);
+    const first = h.geminiReplayContext()!;
+    expect(Object.keys(first).sort()).toEqual(['credentialBinding', 'key', 'lifetime']);
+    expect(first.lifetime).toMatch(/^[\w-]{22}$/);
+    expect(first.key).toMatch(/^[\w-]{43}$/);
+    expect(home().geminiReplayContext()).toEqual(first);
+    expect(h.geminiCredentials(first)).toBe('synthetic-key');
+    h.saveGeminiApiKey('synthetic-key', first.lifetime);
+    const second = h.geminiReplayContext()!;
+    expect(second).not.toEqual(first);
+    expect(() => h.geminiCredentials(first)).toThrow();
+    expect(() => h.saveGeminiApiKey('stale', first.lifetime)).toThrow();
+    expect(() => h.removeGeminiApiKey(first.lifetime)).toThrow();
+    h.removeGeminiApiKey(second.lifetime);
+    expect(h.geminiReplayContext()).toBeUndefined();
+    h.saveGeminiApiKey('synthetic-key', null);
+    expect(() => h.assertGeminiCurrent(second)).toThrow();
+    expect(h.readAuth().keys).toEqual({ other: 'kept' });
+    expect(h.readAuth().bridgeSecret).toBe('bridge');
+  });
+
+  test('an unrelated writer cannot restore an old credential lifetime at rename', () => {
+    const a = home(), b = home();
+    a.saveGeminiApiKey('old-key', null);
+    const first = a.geminiReplayContext()!;
+    const rename = fs.renameSync;
+    let guarded = false;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(to).endsWith('auth.json')) {
+        try { b.saveGeminiApiKey('new-key', first.lifetime); }
+        catch { guarded = true; }
+      }
+      rename(from, to);
+    });
+    try { a.writeAuth({ bridgeSecret: 'sibling' }); } finally { spy.mockRestore(); }
+    expect(guarded).toBe(true);
+    b.saveGeminiApiKey('new-key', first.lifetime);
+    a.writeAuth({ keys: { sibling: 'kept' } });
+    expect(() => a.assertGeminiCurrent(first)).toThrow();
+    expect(a.geminiCredentials(a.geminiReplayContext()!)).toBe('new-key');
+    expect(a.readAuth().bridgeSecret).toBe('sibling');
+  });
+
+  test('generic snapshots cannot write the reserved bundle; migration reads under the guard', () => {
+    const h = home();
+    h.saveGeminiApiKey('old', null);
+    const stale = h.readAuth();
+    h.saveGeminiApiKey('new', h.geminiReplayContext()!.lifetime);
+    expect(() => h.writeAuth(stale)).toThrow(/reserved/i);
+    h.migrateSecrets({ keys: { migrated: 'key' }, bridgeSecret: 'bridge' });
+    expect(h.geminiCredentials(h.geminiReplayContext()!)).toBe('new');
+    expect(h.readAuth().keys).toEqual({ migrated: 'key' });
+    expect(h.readAuth().bridgeSecret).toBe('bridge');
+  });
+
+  test('missing credentials never use environment or generic keys', () => {
+    const h = home();
+    vi.stubEnv('GEMINI_API_KEY', 'environment');
+    try {
+      h.writeAuth({ keys: { 'gemini-api': 'borrowed' } });
+      expect(h.geminiReplayContext()).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  test('corrupt and partial records refuse without changing bytes', () => {
+    const h = home();
+    h.writeAuth({});
+    const file = join(dir, '.wisp', 'auth.json');
+    for (const raw of ['{broken', '{"geminiApi":null}', '{"geminiApi":{}}', '{"geminiApi":{"version":1,"apiKey":"secret"}}']) {
+      writeFileSync(file, raw);
+      expect(() => h.geminiReplayContext()).toThrow();
+      expect(() => h.saveGeminiApiKey('new', null)).toThrow();
+      expect(readFileSync(file, 'utf8')).toBe(raw);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+    }
+  });
+
+  test('busy and failed writes preserve the store and release only their own guard', () => {
+    const h = home();
+    h.saveGeminiApiKey('old', null);
+    const context = h.geminiReplayContext()!;
+    const lock = join(dir, '.wisp', 'auth.lock');
+    writeFileSync(lock, 'orphan');
+    expect(() => h.geminiReplayContext()).toThrow(/busy/i);
+    expect(() => h.writeAuth({ bridgeSecret: 'no' })).toThrow(/busy/i);
+    expect(() => h.migrateSecrets({ keys: { no: 'no' } })).toThrow(/busy/i);
+    expect(readFileSync(lock, 'utf8')).toBe('orphan');
+    unlinkSync(lock);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('disk full'); });
+    try { expect(() => h.saveGeminiApiKey('new', context.lifetime)).toThrow('disk full'); }
+    finally { spy.mockRestore(); }
+    expect(h.geminiReplayContext()).toEqual(context);
+    expect(readdirSync(join(dir, '.wisp')).filter(n => n.endsWith('.tmp') || n.endsWith('.lock'))).toEqual([]);
+  });
+});
 
 // ----------------------------- wispHomeDir ----------------------------- //
 
@@ -249,5 +416,123 @@ describe('watch', () => {
     } finally {
       watcher.dispose();
     }
+  });
+});
+
+describe('quota storage', () => {
+  test('auth revision follows replacement/removal without containing credential data', () => {
+    const h = home();
+    expect(h.quotaAuthRevision()).toBeUndefined();
+    h.writeAuth({ codex: { accessToken: 'PRIVATE_TOKEN', accountId: 'PRIVATE_ACCOUNT' } });
+    const first = h.quotaAuthRevision();
+    expect(first).toMatch(/^v1:\d+:\d+:\d+:\d+:\d+$/);
+    expect(h.quotaAuthRevision()).toBe(first);
+    h.writeAuth({ codex: { accessToken: 'PRIVATE_TOKEN', accountId: 'PRIVATE_ACCOUNT' } });
+    expect(h.quotaAuthRevision()).not.toBe(first);
+    unlinkSync(join(dir, '.wisp', 'auth.json'));
+    expect(h.quotaAuthRevision()).toBeUndefined();
+  });
+
+  test('quota is recoverable, sanitized, atomic and owner-only without changing config/status', () => {
+    const h = home();
+    expect(h.readQuota()).toEqual({ schema: 1, providers: {} });
+    h.writeConfig({ provider: 'groq' });
+    h.writeStatus({ updatedAt: 123, providerId: 'groq', model: 'test' });
+    const config = readFileSync(join(dir, '.wisp', 'config.json'), 'utf8');
+    const status = readFileSync(join(dir, '.wisp', 'status.json'), 'utf8');
+    writeFileSync(join(dir, '.wisp', 'quota.json'), '{broken');
+    expect(h.readQuota()).toEqual({ schema: 1, providers: {} });
+    h.writeQuota({ schema: 1, providers: { codex: { nextAllowedAt: 1300000 } }, token: 'PRIVATE' } as any);
+    expect(h.readQuota()).toEqual({ schema: 1, providers: { codex: { nextAllowedAt: 1300000 } } });
+    expect(readFileSync(join(dir, '.wisp', 'quota.json'), 'utf8')).not.toContain('PRIVATE');
+    expect(readFileSync(join(dir, '.wisp', 'config.json'), 'utf8')).toBe(config);
+    expect(readFileSync(join(dir, '.wisp', 'status.json'), 'utf8')).toBe(status);
+    expect(readdirSync(join(dir, '.wisp')).some(file => file.endsWith('.tmp'))).toBe(false);
+    if (process.platform !== 'win32') expect(statSync(join(dir, '.wisp', 'quota.json')).mode & 0o777).toBe(0o600);
+  });
+
+  test('quota writes do not wake the configuration watcher', async () => {
+    const h = home();
+    let changes = 0;
+    const watcher = h.watch(() => { changes++; });
+    try {
+      h.writeQuota({ schema: 1, providers: {} });
+      await new Promise(resolve => setTimeout(resolve, 250));
+      expect(changes).toBe(0);
+    } finally { watcher.dispose(); }
+  });
+
+  test('the exclusive lock is busy for live or unknown owners regardless of age, and releases on failure', async () => {
+    const h = home();
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    await expect(h.withQuotaRefreshLock(async () => {
+      expect(existsSync(lock)).toBe(true);
+      if (process.platform !== 'win32') expect(statSync(lock).mode & 0o777).toBe(0o600);
+      await expect(home().withQuotaRefreshLock(async () => 'duplicate')).rejects.toThrow(/busy/i);
+      throw new Error('action failure');
+    })).rejects.toThrow('action failure');
+    expect(existsSync(lock)).toBe(false);
+    for (const owner of ['', '{broken', '{}', '{"pid":0}', JSON.stringify({ pid: process.pid })]) {
+      writeFileSync(lock, owner);
+      utimesSync(lock, 0, 0);
+      await expect(h.withQuotaRefreshLock(async () => 'duplicate')).rejects.toThrow(/busy/i);
+      expect(readFileSync(lock, 'utf8')).toBe(owner);
+      unlinkSync(lock);
+    }
+  });
+
+  test('a provably exited owner can be reclaimed, but an unknown recovery owner cannot', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    expect(child.status).toBe(0);
+    writeFileSync(lock, JSON.stringify({ pid: Number(child.stdout) }));
+    writeFileSync(`${lock}.reclaim`, '');
+    await expect(h.withQuotaRefreshLock(async () => 'unsafe')).rejects.toThrow(/busy/i);
+    unlinkSync(`${lock}.reclaim`);
+    expect(await h.withQuotaRefreshLock(async () => 'recovered')).toBe('recovered');
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${lock}.reclaim`)).toBe(false);
+  });
+
+  test('recovery cleanup failure still releases the newly acquired main lock', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' });
+    expect(child.status).toBe(0);
+    writeFileSync(lock, JSON.stringify({ pid: Number(child.stdout) }));
+    const unlink = fs.unlinkSync;
+    // Only the OS cleanup error is injected; acquisition, PID probing and main-lock cleanup stay real.
+    const remove = vi.spyOn(fs, 'unlinkSync').mockImplementation(path => {
+      if (path === `${lock}.reclaim`) throw new Error('recovery cleanup failed');
+      unlink(path);
+    });
+    try {
+      await expect(h.withQuotaRefreshLock(async () => { throw new Error('must not run'); }))
+        .rejects.toThrow('recovery cleanup failed');
+      expect(existsSync(lock)).toBe(false);
+    } finally { remove.mockRestore(); }
+  });
+
+  test('recovery fences new acquisitions when the observed owner exits and removes its lock', async () => {
+    const h = home();
+    h.writeConfig({});
+    const lock = join(dir, '.wisp', 'quota-refresh.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 999999 }));
+    let contender: Promise<unknown> | undefined;
+    const probe = vi.spyOn(process, 'kill').mockImplementation(() => {
+      unlinkSync(lock); // The observed owner finished between the read and the PID probe.
+      contender = home().withQuotaRefreshLock(async () => 'stole the gap').catch(error => error);
+      throw Object.assign(new Error('owner exited'), { code: 'ESRCH' });
+    });
+    try {
+      const result = await h.withQuotaRefreshLock(async () => 'recovered').catch(error => error);
+      expect(await contender).toBeInstanceOf(Error);
+      expect(String(await contender)).toMatch(/busy/i);
+      expect(result).toBe('recovered');
+      expect(existsSync(lock)).toBe(false);
+    } finally { probe.mockRestore(); await contender; }
   });
 });

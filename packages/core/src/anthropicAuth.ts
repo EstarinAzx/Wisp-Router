@@ -25,6 +25,7 @@
 
 import { createServer } from 'http';
 import type { AddressInfo } from 'net';
+import { AuthStateChangedError } from './homeStore';
 import {
   AnthropicCreds, AnthropicAccount, codeVerifier, codeChallenge, oauthState,
   tokensToAnthropicCreds, shouldRefreshAnthropicToken, isAnthropicSignedIn,
@@ -169,7 +170,8 @@ export const fetchAnthropicBootstrap = async (accessToken: string): Promise<Anth
 // The anthropic slice of ~/.wisp/auth.json, as the host face exposes it.
 export type AnthropicCredsStore = {
   read: () => AnthropicCreds | undefined;
-  write: (creds: AnthropicCreds) => void;
+  // A supplied snapshot must be compared under the host's auth write lock.
+  write: (creds: AnthropicCreds, expected?: string) => void;
 };
 
 // Owns the Anthropic token lifecycle against one auth.json slice. Each face holds a single instance
@@ -191,6 +193,7 @@ export class AnthropicAuth {
     const fresh = this.store.read() ?? creds;
     if (!shouldRefreshAnthropicToken(fresh, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: AnthropicCreds;
     try {
       const res = await fetch(ANTHROPIC_TOKEN_URL, {
@@ -211,9 +214,14 @@ export class AnthropicAuth {
       this.log(`[anthropic] token refresh error: ${String(err)}`);
       return fresh;
     }
+    // A sign-out, replacement or another renewal during the await owns the newer store state.
+    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Anthropic sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[anthropic] token persist error: ${String(err)}`); }
+    try { this.store.write(next, beforeRefresh); } catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[anthropic] token persist error: ${String(err)}`);
+    }
     return next;
   };
 

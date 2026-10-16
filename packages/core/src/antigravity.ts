@@ -22,13 +22,15 @@
  * tool history several turns later. antigravity.test.ts pins it.
  */
 
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
+import { isDeepStrictEqual } from 'util';
 import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
 import type { ToolSpec, BridgeUsage, AntigravityThinkingLevel } from './shared';
 import { validTokenCounts } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
 import type { CodexErrorClass } from './codex';
+import type { GeminiReplayContext } from './home';
 
 // ----------------------------- Small JSON helpers ----------------------------- //
 
@@ -97,10 +99,10 @@ export const parseAntigravityProject = (body: unknown): string | undefined =>
 // The literal userAgent FIELD the envelope carries (not the HTTP header). The upstream keys behaviour off it.
 export const ANTIGRAVITY_USER_AGENT_FIELD = 'antigravity';
 
-// The HTTP User-Agent header — a DIFFERENT thing from the envelope field above, and pinned: #186 confirmed
-// the upstream accepts client version 2.2.1, and the version is what gates the request. Shared by the
-// sign-in bootstrap (#188) and the turn paths (#189) so one edit moves both.
-export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.2.1 darwin/arm64';
+// The HTTP User-Agent is separate from the envelope field. Use the native Hub grammar, including its
+// aidev_client parameters: discovery depends on the parsed client identity. This Hub version/build
+// returned the subscription Argon catalog; bootstrap, discovery and generation share the same pin.
+export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.17.0 (aidev_client; os_type=darwin; arch=arm64; cl=986210228)';
 
 // Request-id formats, as pure functions of an injected uuid/clock — #189 owns the minting, this layer owns
 // the shape. (These are envelope metadata, NOT tool ids; the binding rule is untouched.)
@@ -172,6 +174,7 @@ export const buildAntigravityEnvelope = (modelName: string, payload: unknown, op
 // ----------------------------- The model-family fork table ----------------------------- //
 
 export const isAntigravityClaudeModel = (model: string): boolean => model.includes('claude');
+export const isAntigravityArgonModel = (model: string): boolean => /^gemini-4-argon-(low|medium|high)$/.test(model);
 
 // Which of the two schema cleaners a model gets. Claude and the gemini-3 pro family take the stricter one
 // (it inserts the placeholder Claude's VALIDATED mode requires); everything else takes the Gemini cleaner.
@@ -1192,6 +1195,8 @@ export const antigravityShouldTryNextHost = (status: number, body: string): bool
 export type AntigravityTurn = {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  // Original generated parts, recovered from authenticated replay state; never rebuilt from visible text.
+  nativeParts?: Json[];
   images?: { mimeType: string; dataBase64: string }[];
   // #191: the Anthropic door normalizes `document` blocks into their own channel; this wire has none — a
   // PDF is an inlineData part like an image, told apart only by mimeType. Separate field, one wire shape.
@@ -1287,6 +1292,22 @@ export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; too
     }
 
     if (message.role === 'assistant') {
+      if (message.nativeParts !== undefined) {
+        const original = message.nativeParts;
+        if (!Array.isArray(original) || !original.length || original.some(part => !isObj(part))) {
+          throw new Error('Invalid Antigravity model state');
+        }
+        const calls = original.filter(part => part.functionCall !== undefined).map(part => ({
+          id: part.functionCall?.id, name: part.functionCall?.name, args: part.functionCall?.args ?? {},
+        }));
+        const visible = (message.toolCalls ?? []).map(call => ({ id: call.id, name: call.name, args: parseToolArgs(call.argsJson) }));
+        const text = original.filter(part => !part.thought && typeof part.text === 'string').map(part => part.text).join('');
+        if (text !== message.content || !isDeepStrictEqual(calls, visible) || calls.some(call => typeof call.id !== 'string' || !call.id)) {
+          throw new Error('Antigravity model state conflicts with visible history');
+        }
+        contents.push({ role: 'model', parts: clone(original) });
+        continue;
+      }
       const parts: Json[] = [];
       if (message.content) parts.push({ text: message.content });
       for (const call of message.toolCalls ?? []) {
@@ -1355,8 +1376,16 @@ export const buildAntigravityRequestBody = (args: {
   sessionId?: string;
   fallbackSessionId?: string;
   thinkingLevel?: AntigravityThinkingLevel;
+  maxOutputTokens?: number;
   preserveSystemText?: boolean;
 }): Json => {
+  if (args.maxOutputTokens !== undefined && (!Number.isSafeInteger(args.maxOutputTokens) || args.maxOutputTokens <= 0)) {
+    throw new Error('Invalid Antigravity output token limit');
+  }
+  const argon = isAntigravityArgonModel(args.model);
+  if (argon && args.messages.some(message => message.role === 'assistant' && !message.nativeParts)) {
+    throw new Error('Original Argon model state is required for continuation');
+  }
   const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools, preserveSystemText: args.preserveSystemText });
   // The stable id must WIN over the fallback — it is upstream cache behaviour, not a nonce, so resolving
   // it here (rather than passing the random value straight into the envelope, whose opts.sessionId is
@@ -1372,5 +1401,24 @@ export const buildAntigravityRequestBody = (args: {
   envelope = normalizeAntigravityFunctionResponses(envelope);
   // Last, deliberately: see applyAntigravityThinkingLevel — appending after every other stage is what keeps
   // their behaviour byte-identical on the rows this does not touch.
-  return applyAntigravityThinkingLevel(sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
+  const request = applyAntigravityThinkingLevel(argon ? envelope : sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
+  // An explicit caller limit must survive the legacy family defaults. Omitted limits stay unchanged.
+  if (args.maxOutputTokens !== undefined) {
+    request.request.generationConfig = { ...request.request.generationConfig,
+      maxOutputTokens: Math.min(args.maxOutputTokens, antigravityMaxCompletionTokens(args.model) ?? args.maxOutputTokens) };
+  }
+  return request;
+};
+
+export type AntigravityReplayContext = GeminiReplayContext & { snapshot: string };
+export const createAntigravityReplayContext = (creds: AntigravityCreds | undefined, bridgeSecret: string | undefined): AntigravityReplayContext | undefined => {
+  if (![creds?.accessToken, creds?.refreshToken, creds?.projectId, bridgeSecret].every(value => typeof value === 'string' && value.trim())) return undefined;
+  // Domain separation keeps client-visible Bridge authentication distinct from provider-state encryption.
+  // Access tokens renew normally; a different refresh identity/project/Bridge secret invalidates replay.
+  const domain = 'wisp.antigravity.replay.v1';
+  const key = createHmac('sha256', creds!.refreshToken!).update(JSON.stringify([domain, bridgeSecret, creds!.projectId])).digest();
+  return { key: key.toString('base64url'),
+    lifetime: createHash('sha256').update(JSON.stringify([domain, bridgeSecret])).digest('base64url'),
+    credentialBinding: createHmac('sha256', key).update('credential-binding').digest('base64url'),
+    snapshot: createHmac('sha256', key).update(JSON.stringify(['credential-snapshot-v1', creds!.accessToken, creds!.refreshToken, creds!.projectId, creds!.expiresAt ?? null])).digest('base64url') };
 };

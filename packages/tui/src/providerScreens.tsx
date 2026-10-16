@@ -21,7 +21,7 @@
  */
 
 import {
-  PROVIDERS, resolveKeyId, resolveModel,
+  PROVIDERS, resolveKeyId, resolveModel, isGeminiApiProvider,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isCodexSignedIn, isAnthropicSignedIn,
   isXaiSignedIn, anthropicAccountLabel, DEFAULT_EFFORT,
   isKimiProvider, isKimiSignedIn,
@@ -56,7 +56,11 @@ const oauthStatus = (p: Provider): string =>
   : isAntigravityProvider(p) ? (isAntigravitySignedIn(home.readAuth().antigravity) ? 'signed in' : 'signed out')
   : '';
 
-export const saveKey = (p: Provider, key: string): void => {
+export const saveKey = (p: Provider, key: string, expectedLifetime?: string | null): void => {
+  if (isGeminiApiProvider(p)) {
+    if (expectedLifetime === undefined) throw new Error('Reopen Gemini key setup before saving.');
+    home.saveGeminiApiKey(key, expectedLifetime); return;
+  }
   // Merge is shallow — spread the existing keys map or this write would drop sibling keys.
   // ponytail: read-then-write, not atomic — a cross-process merge-fn in WispHome if it ever bites.
   home.writeAuth({ keys: { ...home.readAuth().keys, [resolveKeyId(p)]: key } });
@@ -64,14 +68,21 @@ export const saveKey = (p: Provider, key: string): void => {
 
 // The row's key as stored in auth.json — env fallbacks deliberately excluded: this feeds the
 // menu's Remove row, and only a stored key can be removed (#106).
-const storedKey = (p: Provider): string | undefined => home.readAuth().keys?.[resolveKeyId(p)];
+const storedKey = (p: Provider): string | undefined => {
+  if (!isGeminiApiProvider(p)) return home.readAuth().keys?.[resolveKeyId(p)];
+  try { return home.geminiReplayContext()?.lifetime; } catch { return undefined; }
+};
 
 // List-row key status, mirroring oauthStatus: stored beats env (a stored key is what actually
 // gets sent when both exist); '' keeps unconfigured rows clean.
 const keyStatus = (p: Provider): string =>
   storedKey(p) ? 'key set' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env key' : '';
 
-const removeKey = (p: Provider): void => {
+const removeKey = (p: Provider, expectedLifetime?: string): void => {
+  if (isGeminiApiProvider(p)) {
+    if (!expectedLifetime) throw new Error('Reopen Gemini key setup before removing.');
+    home.removeGeminiApiKey(expectedLifetime); return;
+  }
   const keys = { ...home.readAuth().keys };
   delete keys[resolveKeyId(p)];
   home.writeAuth({ keys });
@@ -145,7 +156,9 @@ export const ProviderMenuScreen = ({ provider, onDone, onSetKey, onSignIn, onSig
   onSetKey: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
-}) => (
+}) => {
+  const expectedLifetime = isGeminiApiProvider(provider) ? storedKey(provider) : undefined;
+  return (
   <box {...PANEL} title={provider.label} marginTop={1} flexDirection="column">
     <select
       focused
@@ -163,14 +176,18 @@ export const ProviderMenuScreen = ({ provider, onDone, onSetKey, onSignIn, onSig
             onDone(`Active Provider → ${provider.label} — tip: name it in /routing for a clean /model list.`);
             return;
           case 'set-key': onSetKey(); return;
-          case 'remove-key': removeKey(provider); onDone(`Stored key removed for ${provider.label}.`); return;
+          case 'remove-key':
+            try { removeKey(provider, expectedLifetime); onDone(`Stored key removed for ${provider.label}.`); }
+            catch (error) { onDone(String(error)); }
+            return;
           case 'signin': onSignIn(); return;
           case 'signout': onSignOut(); return;
         }
       }}
     />
   </box>
-);
+  );
+};
 
 // /key with no argument — pick which keyed row gets the masked entry.
 export const KeyPickScreen = ({ onPick }: { onPick: (p: Provider) => void }) => (
@@ -193,7 +210,8 @@ export const KeyPickScreen = ({ onPick }: { onPick: (p: Provider) => void }) => 
 
 // Masked key entry — the shell's global keyboard handler feeds `secret`; only bullets render.
 export const KeyEntryScreen = ({ provider, secret }: { provider: Provider; secret: string }) => (
-  <box {...PANEL} title={`API key — ${provider.label}`} marginTop={1}>
+  <box {...PANEL} title={`API key — ${provider.label}`} marginTop={1} flexDirection="column">
+    {isGeminiApiProvider(provider) && <text>Separate Gemini API credentials and billing. Saving starts a new credential lifetime.</text>}
     <text wrapMode="none">{secret ? '•'.repeat(secret.length) : ''}<span fg={DIM}>{secret ? '' : 'Paste or type, Enter to save, Esc to cancel'}</span></text>
   </box>
 );

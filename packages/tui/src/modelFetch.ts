@@ -16,6 +16,7 @@ import {
   isCodexProvider, codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions, effortOptionsFor, resolveModel, type Provider,
 } from '@wisp/core';
 import { home, bearerFor, antigravityAuth, codexAuth } from './store';
+import { isGeminiApiProvider } from '@wisp/core';
 
 // ----------------------------- Fetch (throwing) ----------------------------- //
 
@@ -24,6 +25,7 @@ import { home, bearerFor, antigravityAuth, codexAuth } from './store';
 // empty answer). Failures THROW with the backend's own words — `wisp models` prints them
 // verbatim; the TUI face below swallows into the pickers' free-text fallback.
 export const fetchModelList = async (p: Provider, refresh = false): Promise<string[] | undefined> => {
+  if (isGeminiApiProvider(p)) return ['gemini-4-argon'];
   if (isCodexProvider(p)) {
     const result = await codexCatalog.get({ creds: await codexAuth.current(), baseUrl: resolveBaseUrl(p, ''), refresh });
     if (result.source === 'unavailable') throw new Error(result.error);

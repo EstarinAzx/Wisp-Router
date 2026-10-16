@@ -65,6 +65,175 @@ test('antigravity-compat explicitly toggles only the client fallback setting', (
   expect(existsSync(join(home, 'auth.json'))).toBe(false);
 });
 
+test.each([[40, 24], [100, 32]])('TUI compatibility guidance and errors remain reachable at %sx%s', (width, height) => {
+  const config = { future: 'keep', bridge: { port: 4242, aliasOnlyModels: false } };
+  writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    import { readFileSync, readdirSync, writeFileSync } from 'fs';
+    import { join } from 'path';
+    globalThis.fetch = async () => { throw new Error('No networking in compatibility checks'); };
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: ${width}, height: ${height} });
+    const frame = () => ui.captureCharFrame().replace(/[│╭╮╰╯─█]/g, ' ').replace(/\\s+/g, ' ');
+    const file = join(process.env.WISP_HOME, 'config.json');
+    const before = readFileSync(file, 'utf8');
+    const key = async (name) => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const command = async (text) => { await act(async () => ui.mockInput.typeText(text)); await key('RETURN'); };
+    try {
+      await ui.renderOnce();
+      await command('/antigravity-compat');
+      assert(frame().includes('Antigravity client fallback: off'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), before);
+      await key('ESCAPE');
+      assert(!ui.captureCharFrame().includes('Cancelled.'));
+      await command('/antigravity-compat on');
+      assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { ...JSON.parse(before), bridge: { ...JSON.parse(before).bridge, antigravityClientFallback: true } });
+      let frames = frame();
+      for (let i = 0; i < 30; i++) { await key('ARROW_DOWN'); frames += frame(); }
+      for (const copy of ['some feature-specific', 'reminders may be omitted.', 'Start a new Claude', 'behavior is unchanged.', 'Esc closes']) assert(frames.includes(copy), copy + '\\n' + frames);
+      await key('ESCAPE');
+      const enabled = readFileSync(file, 'utf8');
+      await command('/antigravity-compat on off');
+      assert(ui.captureCharFrame().includes('Usage:'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), enabled);
+      await key('ESCAPE');
+      writeFileSync(file, '{broken json');
+      await command('/antigravity-compat off');
+      assert(ui.captureCharFrame().includes('Could not update'), ui.captureCharFrame());
+      assert.equal(readFileSync(file, 'utf8'), '{broken json');
+      await key('ESCAPE');
+      assert(!ui.captureCharFrame().includes('Cancelled.'));
+      assert.deepEqual(readdirSync(process.env.WISP_HOME), ['config.json']);
+    } finally { await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe('');
+  expect(result.code).toBe(0);
+});
+
+test('the release does not offer the cancelled Gemini API enrollment in the real App', () => {
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    globalThis.fetch = async () => { throw Error('network forbidden'); };
+    const { home } = await import('./src/store');
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: 40, height: 24 });
+    const key = async name => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const type = async text => { await act(async () => ui.mockInput.typeText(text)); };
+    try {
+      await ui.renderOnce(); await type('/key gemini-api'); await key('RETURN');
+      assert(ui.captureCharFrame().includes('Unknown'), ui.captureCharFrame());
+      assert.equal(home.geminiReplayContext(), undefined);
+      const { PROVIDERS, SLASH_COMMANDS } = await import('@wisp/core');
+      assert(!PROVIDERS.some(p => p.id === 'gemini-api'));
+      assert(!SLASH_COMMANDS.some(c => c.name === 'gemini-instructions'));
+    } finally { await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe(''); expect(result.code).toBe(0);
+});
+
+test('actual quota CLI and Node Slot agree on the same real auth-file revision before any turn', () => {
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ codex: { accessToken: 'fixture-token', accountId: 'fixture-account' } }));
+  writeFileSync(join(home, 'config.json'), JSON.stringify({ routing: { families: { sonnet: { providerId: 'codex', model: 'fixture' } } } }));
+  const before = readFileSync(join(home, 'config.json'), 'utf8');
+  const invoke = (fail: boolean) => run(['--eval', `
+    import assert from 'node:assert/strict';
+    let calls = 0;
+    const realNow = Date.now();
+    Date.now = () => realNow + ${fail ? 300001 : 0};
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'https://chatgpt.com/backend-api/wham/usage');
+      assert.equal(init.redirect, 'manual');
+      calls++;
+      return ${fail ? "new Response('PRIVATE upstream error', { status: 429 })" : "Response.json({ rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18000, reset_at: 2000000000 }, secondary_window: null } })"};
+    };
+    process.argv = [process.execPath, 'wisp', 'quota', 'refresh', 'codex'];
+    await import('./packages/tui/src/index.tsx');
+    assert.equal(calls, 1);
+  `], root, 3000);
+  const success = invoke(false);
+  expect(success.err).toBe('');
+  expect(success.code).toBe(0);
+  expect(success.out).toContain('42%');
+  const reading = JSON.parse(readFileSync(join(home, 'quota.json'), 'utf8')).providers.codex.reading;
+  const failed = invoke(true);
+  expect(failed.code).toBe(1);
+  expect(failed.out).toContain('42%');
+  expect(failed.out + failed.err).not.toContain('PRIVATE');
+  expect(JSON.parse(readFileSync(join(home, 'quota.json'), 'utf8')).providers.codex.reading).toEqual(reading);
+  const slot = Bun.spawnSync(['node', join(root, 'plugins/slot/statusline/wisp-statusline.js')], {
+    env: { ...process.env, WISP_HOME: home, ANTHROPIC_BASE_URL: 'http://127.0.0.1:41184' },
+    stdin: new TextEncoder().encode(JSON.stringify({ model: { id: 'claude-sonnet-fixture' } })), timeout: 3000,
+  });
+  expect(slot.exitCode).toBe(0);
+  expect(slot.stdout.toString()).toContain('42%');
+  expect(slot.stdout.toString()).toContain('just now');
+  expect(slot.stdout.toString()).not.toContain('ctx');
+  expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe(before);
+  expect(existsSync(join(home, 'status.json'))).toBe(false);
+});
+
+test.each([[40, 24], [100, 32]])('TUI quota is explicit, scrollable and cancellable at %sx%s', (width, height) => {
+  const result = run(['--eval', `
+    import assert from 'node:assert/strict';
+    import { createElement, act } from 'react';
+    import { testRender } from '@opentui/react/test-utils';
+    import { readFileSync, existsSync } from 'fs';
+    import { join } from 'path';
+    const { home } = await import('./src/store');
+    home.writeAuth({ codex: { accessToken: 'fixture-token', accountId: 'fixture-account' } });
+    home.writeQuota({ schema: 1, providers: { codex: { nextAllowedAt: 0,
+      reading: { updatedAt: Date.now(), authRevision: home.quotaAuthRevision(), meters: [{ label: '5h', percent: 42, resetAt: 2000000000 }] } } } });
+    let calls = 0, aborted = false, finish;
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, 'https://chatgpt.com/backend-api/wham/usage');
+      calls++;
+      return await new Promise(resolve => {
+        finish = () => resolve(Response.json({ rate_limit: { primary_window: { used_percent: 99, limit_window_seconds: 18000 } } }));
+        init.signal.addEventListener('abort', () => { aborted = true; finish(); }, { once: true });
+      });
+    };
+    const { App } = await import('./src/app');
+    const ui = await testRender(createElement(App), { width: ${width}, height: ${height} });
+    const frame = () => ui.captureCharFrame().replace(/[│╭╮╰╯─█]/g, ' ').replace(/\\s+/g, ' ');
+    const key = async name => { await act(async () => ui.mockInput.pressKeys([name], name === 'ESCAPE' ? 50 : 0)); await ui.renderOnce(); };
+    const command = async text => { await act(async () => ui.mockInput.typeText(text)); await key('RETURN'); };
+    try {
+      await ui.renderOnce();
+      await command('/quota');
+      let frames = frame();
+      for (let i = 0; i < 25; i++) { await key('ARROW_DOWN'); frames += frame(); }
+      assert(frames.includes('42%') && frames.includes('2033-05-18'), frames);
+      assert.equal(calls, 0);
+      await key('ESCAPE');
+      await command('/quota refresh codex');
+      assert.equal(calls, 1);
+      assert(frame().includes('Esc cancels'), frame());
+      await key('ESCAPE');
+      assert(aborted, 'Escape must abort the request');
+      await act(async () => { await new Promise(r => setTimeout(r, 20)); }); await ui.renderOnce();
+      assert(!frame().includes('99%') && !frame().includes('Esc cancels'), frame());
+      assert.equal(home.readQuota().providers.codex.reading.meters[0].percent, 42);
+      assert(home.readQuota().providers.codex.nextAllowedAt > Date.now());
+      assert(!existsSync(join(process.env.WISP_HOME, 'quota-refresh.lock')));
+      await command('/quota refresh codex');
+      assert.equal(calls, 1);
+      assert(frame().includes('refresh available'), frame());
+      await key('ESCAPE');
+      await command('/quota invalid');
+      assert(frame().includes('Usage:'), frame());
+      assert.equal(calls, 1);
+      assert(!existsSync(join(process.env.WISP_HOME, 'status.json')));
+    } finally { finish?.(); await act(async () => ui.renderer.destroy()); }
+  `], join(root, 'packages/tui'));
+  expect(result.err).toBe('');
+  expect(result.code).toBe(0);
+});
+
 test('Codex CLI writes preserve aliases, snapshots and unknown fields, without requiring discovery', () => {
   const config = { future: 'keep', routing: { families: {}, aliases: [
     { name: 'codex', target: { providerId: 'custom', model: 'legacy' } },

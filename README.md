@@ -85,6 +85,8 @@ Wisp now brings your configured models into the signed-in Desktop model picker. 
 
 **This integration is experimental.** Grok and the Antigravity `gemini-3.8-flash-tiered` target have passed limited Desktop checks. Other targets and Traycer GUI integration remain unverified. Each external model's tools and capabilities depend on its provider and Wisp's adapter.
 
+The [2.2.8 candidate](docs/releases/v2.2.8.md) adds Argon Low, Medium and High through the existing Antigravity subscription, with original tool IDs and encrypted conversation state. All three tiers passed live HTTP tool continuation; native signed-client replay and restart checks also passed. No Gemini API key is required. Interactive Desktop picker observation remains a separate open acceptance item.
+
 Native models keep their capabilities and ChatGPT sign-in. Voice uses your existing ChatGPT sign-in and speech service, while the selected Wisp model handles the text and tool turns.
 
 <details>
@@ -136,6 +138,22 @@ Use either `/bridge` in the TUI or `wisp serve` to host the Bridge. You only nee
 For Claude Code routed to Antigravity, **`wisp antigravity-compat on`** opts into client fallback for positioned system messages. This can keep later reminders from changing the global instruction prefix: fixed top-level system instructions stay in place, while Claude rebuilds reminders as user context; some feature-specific reminders may be omitted. Cache benefit depends on the workload. Clients without this recovery support receive an explicit error.
 
 The option defaults to off. Use **`wisp antigravity-compat status`** to inspect it or **`wisp antigravity-compat off`** to disable it, then start a new Claude conversation (the client remembers fallback until `/clear` or `/compact`). Both Bridge hosts read `bridge.antigravityClientFallback` in `~/.wisp/config.json` live. It applies only to Messages requests routed to Antigravity; Desktop and Responses keep their existing behavior.
+
+In the TUI, **`/antigravity-compat`** (or **`/antigravity-compat status`**) opens the current setting and guidance without changing it. Add **`on`** or **`off`** to change the same shared setting. Use **↑/↓** to scroll the explanation and **Esc** to return to the palette.
+
+### Account quota
+
+Use **`wisp quota`** or **`/quota`** in the TUI to view cached Claude/Codex usage, reset times and reading age. Viewing it does not contact a Provider. To update it explicitly:
+
+```sh
+wisp quota refresh              # signed-in supported Providers, one at a time
+wisp quota refresh anthropic    # Claude only
+wisp quota refresh codex        # Codex only
+```
+
+The TUI accepts the same arguments after **`/quota`**. **↑/↓** scrolls; **Esc** cancels a pending request or closes the result. Refreshes require a Wisp sign-in, allow at most one usage request per Provider every five minutes, and respect longer server retry deadlines. Failed or cancelled requests retain the last valid reading and its age.
+
+The Slot statusline uses the newest complete reading from a refresh or a model turn, including before your first turn. It never refreshes automatically. Quota refresh does not change routing, models, context usage or the conversation timestamp. Readings expire after 24 hours; changes to stored credentials invalidate older readings. After upgrading, legacy quota snapshots without an account binding stay unavailable until an explicit refresh or a new metered turn from the upgraded Bridge.
 
 ### VS Code extension
 

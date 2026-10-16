@@ -36,6 +36,7 @@ import { codexStream } from '@wisp/core';
 import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
+import { isGeminiApiProvider } from '@wisp/core';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -116,7 +117,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     const keyedPairs = await Promise.all(
       // The OAuth rows (Codex, Anthropic) are usable when "signed in" (no API key); every other row is
       // "has a key".
-      deps.providers.map(async (p) => [p.id,
+      deps.providers.filter(p => !isGeminiApiProvider(p)).map(async (p) => [p.id,
         isCodexProvider(p) ? await deps.codexSignedIn()
           : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
             : isXaiProvider(p) ? await deps.xaiSignedIn()
@@ -141,7 +142,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
-    return buildChatModelInfos(deps.providers, {
+    return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed,
       modelMap: deps.modelMap(),
       customBaseUrl: deps.customBaseUrl(),
@@ -158,6 +159,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
   provideLanguageModelChatResponse: async (model, messages, options, progress, token) => {
     const provider = deps.providers.find((p) => p.id === model.id);
     if (!provider) return;
+    if (isGeminiApiProvider(provider)) throw new Error('Gemini API is not qualified for VS Code chat.');
     const modelId = resolveModel(deps.modelMap(), provider);
 
     const controller = new AbortController();

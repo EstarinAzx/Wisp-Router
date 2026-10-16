@@ -29,7 +29,7 @@ export type Mode =
   // returns into the /providers flow instead of the palette (#106).
   | { kind: 'provider-menu'; provider: Provider }
   | { kind: 'key-pick' }
-  | { kind: 'key-entry'; provider: Provider; origin?: 'menu' }
+  | { kind: 'key-entry'; provider: Provider; origin?: 'menu'; expectedLifetime?: string | null }
   | { kind: 'model-loading'; provider: Provider }
   | { kind: 'model-pick'; provider: Provider; options: string[] }
   | { kind: 'model-free'; provider: Provider }
@@ -43,6 +43,7 @@ export type Mode =
   // and can write auth.json — a side effect that must not live in JSX).
   | { kind: 'bridge'; address: string; secret: string }
   | { kind: 'help' }
+  | { kind: 'info'; title: string; lines: string[]; abort?: AbortController }
   // Payload-less: the Log Screen reads the shell-owned ring buffer live (#122).
   | { kind: 'log' }
   // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new

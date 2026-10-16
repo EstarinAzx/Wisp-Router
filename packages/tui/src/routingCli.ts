@@ -20,6 +20,7 @@ import { codexRoutingRows, loadCodexRoutingCatalog } from './codexRouting';
 
 // Match the Bridge's usable-Provider rule so this command warns without inventing a stricter policy.
 const hasCredentials = async (provider: Provider): Promise<boolean> => {
+  if (provider.kind === 'gemini-interactions') return !!home.geminiReplayContext();
   if (isCodexProvider(provider)) return codexAuth.isSignedIn();
   if (isAnthropicProvider(provider)) return anthropicAuth.isSignedIn();
   if (isXaiProvider(provider)) return xaiAuth.isSignedIn();

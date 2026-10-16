@@ -3,6 +3,11 @@
 import { describe, it, expect } from 'vitest';
 import { parseSlash, suggestSlash, completeSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
 
+it('completes quota without running it and preserves explicit refresh arguments', () => {
+  expect(completeSlash('/quo', 0)).toBe('/quota ');
+  expect(parseSlash('/quota refresh codex')).toEqual({ command: 'quota', args: ['refresh', 'codex'] });
+});
+
 // A fixed list so filter tests never churn when the real palette grows.
 const cmds: SlashCommandDef[] = [
   { name: 'providers', description: 'pick provider' },
@@ -69,6 +74,10 @@ describe('suggestSlash — palette filter', () => {
 });
 
 describe('SLASH_COMMANDS — the real palette', () => {
+  it('completes compatibility into its optional argument position', () => {
+    expect(completeSlash('/antigravity-c', 0)).toBe('/antigravity-compat ');
+    expect(SLASH_COMMANDS.find((c) => c.name === 'antigravity-compat')?.args).toBe('[on|off|status]');
+  });
   it('completes the Desktop toggle into its on/off argument position', () => {
     expect(completeSlash('/gpt-d', 0)).toBe('/gpt-desktop ');
   });

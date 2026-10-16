@@ -26,6 +26,20 @@ import type { RingLog } from './logBuffer';
 // Model-swap lines from bridgeServer's resolveRoute log — colour only these in /show-log.
 export const isRouteLogLine = (line: string): boolean => line.startsWith('[bridge] route ');
 
+// Shared command output: hand-wrap before scrolling so narrow terminals retain every line.
+export const InfoScreen = ({ title, lines, cols, maxRows, pending }: { title: string; lines: string[]; cols: number; maxRows: number; pending?: boolean }) => {
+  // Panel padding takes two columns; leave one more for the native scrollbar.
+  const wrapped = lines.flatMap((line, i) => [...(i ? [''] : []), ...wrapWords(line, Math.max(cols - 3, 1))]);
+  return (
+    <box {...PANEL} title={title} marginTop={1} padding={1} flexDirection="column">
+      <scrollbox focused scrollY height={Math.min(wrapped.length, Math.max(maxRows, 1))}>
+        {wrapped.map((line, i) => <text key={i} wrapMode="none" height={1} flexShrink={0}>{line}</text>)}
+      </scrollbox>
+      <text wrapMode="none" fg={DIM} marginTop={1}>↑/↓ scroll · Esc {pending ? 'cancels' : 'closes'}</text>
+    </box>
+  );
+};
+
 // ----------------------------------------- /bridge ----------------------------------------- //
 
 // The Bridge info panel — connection facts for the session's own listener.

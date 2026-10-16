@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { codexCatalog } from '../src/codexModels';
-import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '../src/codexDesktop';
+import { readDesktopNativeModels, readDesktopAntigravityHoisting, desktopTargetIssue } from '../src/codexDesktop';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,6 +36,17 @@ const antigravityFixture = async (run: (port: number, wire: any[], reads: () => 
   });
 
 describe('signed Antigravity hoisting admission', () => {
+  it('admits the three qualified subscription SKUs only with explicit hoisting and the original provider identity', () => {
+    const provider = { id: 'antigravity', label: 'Antigravity', kind: 'antigravity-oauth' as const, baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: '', apiKeyEnv: '' };
+    for (const tier of ['low', 'medium', 'high']) {
+      const model = `gemini-4-argon-${tier}`;
+      expect(desktopTargetIssue(provider, model, true)).toBeUndefined();
+      expect(desktopTargetIssue(provider, model, false)).toBeDefined();
+      expect(desktopTargetIssue({ ...provider, id: 'other-account' }, model, true)).toBeDefined();
+    }
+    expect(desktopTargetIssue(provider, 'gemini-4-argon', true)).toBeDefined();
+    expect(desktopTargetIssue(provider, 'gemini-4-argon-max', true)).toBeDefined();
+  });
   it('admits the qualified target through release policy only after explicit hoisting', async () => antigravityFixture(async (port, wire, reads, deps) => {
     delete deps.desktopAntigravityTargets;
     deps.desktopAntigravityHoisting = () => false;

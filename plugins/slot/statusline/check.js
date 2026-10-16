@@ -26,6 +26,9 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wisp-statusline-check-'));
 const now = Date.now();
 
 const write = (file, body) => fs.writeFileSync(path.join(home, file), JSON.stringify(body));
+write('auth.json', {});
+const authStat = fs.statSync(path.join(home, 'auth.json'), { bigint: true });
+const authRevision = `v1:${authStat.dev}:${authStat.ino}:${authStat.size}:${authStat.mtimeNs}:${authStat.ctimeNs}`;
 
 write('config.json', {
   routing: {
@@ -45,7 +48,8 @@ const plain = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
 const render = (model, status) => {
   const file = path.join(home, 'status.json');
-  if (status) write('status.json', status);
+  if (status) write('status.json', { authRevision, ...status, providers: Object.fromEntries(
+    Object.entries(status.providers || {}).map(([id, entry]) => [id, { authRevision, ...entry }])) });
   else if (fs.existsSync(file)) fs.unlinkSync(file);
   return plain(execFileSync(process.execPath, [script], {
     input: JSON.stringify({ model }),
@@ -183,7 +187,41 @@ ok('remembered expired meter drops the percent', !out.includes('91%'), out);
 // Regression pin (passes pre-fix): a meter with NO resetAt is never expired — the rule needs a number.
 ok('remembered meter without resetAt keeps its percent', /7d 36%/.test(out), out);
 
+// Explicit cache is usable before any turn, with the same stat revision used by core.
+const refreshed = { updatedAt: now - 60_000, authRevision, meters: [{ label: '5h', percent: 42 }] };
+const cache = (reading = refreshed) => write('quota.json', { schema: 1, providers: { codex: { reading, nextAllowedAt: now + 300000 } } });
+cache();
+out = render({ id: 'claude-wisp-sol[1m]' }, null);
+ok('cache before a turn', out.includes('42%') && out.includes('1m ago') && !out.includes('ctx '), out);
+out = render({ id: 'sol' }, { ...codexTurn, updatedAt: now - 31 * 60_000 });
+ok('quota freshness never refreshes context', out.includes('42%') && !out.includes('ctx ') && !out.includes('61%'), out);
+for (const offset of [-1, 0, 1]) {
+  out = render({ id: 'sol' }, { ...codexTurn, updatedAt: refreshed.updatedAt + offset, meters: [{ label: '7d', percent: 71 }] });
+  ok('newest whole reading; headers win ties ' + offset,
+    offset < 0 ? out.includes('42%') && !out.includes('71%') : out.includes('71%') && !out.includes('42%'), out);
+}
+out = render({ id: 'grok' }, null);
+ok('cached other Provider is remembered', /codex {2}5h 42% {2}1m ago/.test(out), out);
+for (const reading of [
+  { ...refreshed, authRevision: undefined }, { ...refreshed, authRevision: 'v1:1:2:3:4:5' },
+  { ...refreshed, updatedAt: now + 100000 }, { ...refreshed, updatedAt: now - 86400001 },
+  { ...refreshed, meters: [{ label: '5h', percent: 42 }, { label: '7d', percent: 101 }] },
+]) {
+  cache(reading);
+  out = render({ id: 'sol' }, null);
+  ok('invalid whole cache is unavailable', !out.includes('%'), out);
+}
+cache();
+out = render({ id: 'sol' }, { ...codexTurn, authRevision: undefined, providers: { anthropic: { ...codexTurn.providers.anthropic, authRevision: undefined } } });
+ok('legacy unbound headers cannot replace the cache or leak remembered meters', out.includes('42%') && !out.includes('22%') && !out.includes('36%'), out);
+write('auth.json', { changed: true });
+out = render({ id: 'sol' }, codexTurn);
+ok('account change invalidates active, remembered and refreshed meters', !out.includes('22%') && !out.includes('36%') && !out.includes('42%'), out);
+fs.unlinkSync(path.join(home, 'auth.json'));
+out = render({ id: 'sol' }, codexTurn);
+ok('missing revision cannot attribute any quota', !/[●○]/.test(out) && !out.includes('36%'), out);
+
 fs.rmSync(home, { recursive: true, force: true });
 
 if (failures) { console.error(`\n${failures} failing check(s)`); process.exit(1); }
-console.log('wisp-statusline: 30/30 checks passed');
+console.log('wisp-statusline: all checks passed');

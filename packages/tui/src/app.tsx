@@ -28,14 +28,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@opentui/react';
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
-  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
-  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
+  PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel, fetchAccountQuota,
+  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider, isGeminiApiProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias, withCodexModelRoute,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
 import { fetchEffortOptions } from './modelFetch';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth, quotaCurrent } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow, RoutingSection } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
@@ -52,10 +52,12 @@ import {
 } from './routingScreens';
 import { PaletteScreen } from './paletteScreen';
 import { TestScreen, streamTestReply } from './testScreen';
-import { BridgeScreen, HelpScreen, LogScreen } from './infoScreens';
+import { BridgeScreen, HelpScreen, InfoScreen, LogScreen } from './infoScreens';
 import { createRingLog } from './logBuffer';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
+import { antigravityCompatResult } from './antigravityCompat';
+import { runQuota } from './quotaCli';
 import pkg from '../package.json';
 
 // ----------------------------------------- Store ----------------------------------------- //
@@ -98,9 +100,15 @@ export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  useEffect(() => () => { if (mode.kind === 'info') mode.abort?.abort(); }, [mode]);
   const [line, setLine] = useState('');       // live palette input, drives suggestions
   const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
+  const startKeyEntry = (provider: Provider, origin?: 'menu') => {
+    try { setMode({ kind: 'key-entry', provider, origin,
+      ...(isGeminiApiProvider(provider) ? { expectedLifetime: home.geminiReplayContext()?.lifetime ?? null } : {}) }); }
+    catch (error) { setMode({ kind: 'info', title: 'Gemini credentials', lines: [String(error)] }); }
+  };
   const [status, setStatusRaw] = useState('');
   const inputRef = useRef<InputRenderable>(null);
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
@@ -117,7 +125,7 @@ export const App = () => {
   const renderer = useRenderer();
   // Live text columns for the hand-wrap helpers: terminal minus the outer padding (2+2) and the
   // PANEL border (1+1). Floored so a pathological width can't produce empty wraps.
-  const { width: termWidth } = useTerminalDimensions();
+  const { width: termWidth, height: termHeight } = useTerminalDimensions();
   const panelCols = Math.max(termWidth - 6, 20);
   // Palette suggestion rows sit outside any PANEL — only the outer padding (2+2) eats width.
   const paletteCols = Math.max(termWidth - 4, 20);
@@ -332,7 +340,7 @@ export const App = () => {
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
         if (target.args[1]) setStatus('Never paste keys in the palette — enter it masked below.');
-        setMode(p ? { kind: 'key-entry', provider: p } : { kind: 'key-pick' });
+        if (p) startKeyEntry(p); else setMode({ kind: 'key-pick' });
         return;
       }
       case 'model': {
@@ -381,6 +389,22 @@ export const App = () => {
         if (!route) { setStatus(`Unknown provider or alias: ${name}`); return; }
         // An Alias Target's pinned model beats the Provider's remembered model — same rule as the Bridge.
         startTest(route.provider, route.pinnedModel ?? resolveModel(cfg.models ?? {}, route.provider));
+        return;
+      }
+      case 'antigravity-compat': {
+        const result = antigravityCompatResult(target.args);
+        setStatus('');
+        setMode({ kind: 'info', title: 'Antigravity compatibility', lines: result.lines });
+        return;
+      }
+      case 'quota': {
+        const abort = new AbortController();
+        const loading: Mode = { kind: 'info', title: 'Account quota', lines: ['Reading quota…'], abort };
+        setStatus('');
+        setMode(loading);
+        void runQuota(target.args, { home, current: quotaCurrent, now: Date.now, fetch: fetchAccountQuota, signal: abort.signal })
+          .then(result => setMode(current => current === loading && !abort.signal.aborted
+            ? { kind: 'info', title: 'Account quota', lines: result.lines } : current));
         return;
       }
       case 'gpt-desktop': {
@@ -511,6 +535,7 @@ export const App = () => {
       // get a real cancel (it would otherwise keep polling for 15 min and sign the user in after the fact).
       if (mode.kind === 'signin-wait') { signinSeq.current++; signinAbort.current?.abort(); }
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
+      if (mode.kind === 'info') mode.abort?.abort();
       // Routing steps back one level per Esc (#79): sub-screen → its section → overview → palette.
       // The provider-menu chain does the same (#106): entry/wait → menu → list → palette.
       mode.kind === 'input' ? exitTui()
@@ -522,7 +547,7 @@ export const App = () => {
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
         : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
-        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' ? backToInput() // info screens just close — nothing to cancel
+        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' || mode.kind === 'info' ? backToInput() // info screens just close — nothing to cancel
         : backToInput('Cancelled.');
       return;
     }
@@ -532,8 +557,8 @@ export const App = () => {
       const done = mode.origin === 'menu' ? backToProviders : backToInput;
       const value = secret.trim();
       if (!value) { done('Empty — key unchanged.'); return; }
-      saveKey(mode.provider, value);
-      done(`Key saved for ${mode.provider.label}.`);
+      try { saveKey(mode.provider, value, mode.expectedLifetime); done(`Key saved for ${mode.provider.label}.`); }
+      catch (error) { done(String(error)); }
       return;
     }
     if (key.name === 'backspace') { setSecret((s) => s.slice(0, -1)); return; }
@@ -580,14 +605,14 @@ export const App = () => {
         <ProviderMenuScreen
           provider={mode.provider}
           onDone={backToProviders}
-          onSetKey={() => setMode({ kind: 'key-entry', provider: mode.provider, origin: 'menu' })}
+          onSetKey={() => startKeyEntry(mode.provider, 'menu')}
           onSignIn={() => startSignIn(mode.provider, () => backToProviders(`Signed in — ${mode.provider.label} is ready.`), 'menu')}
           onSignOut={() => doSignOut(mode.provider, 'menu')}
         />
       )}
 
       {mode.kind === 'key-pick' && (
-        <KeyPickScreen onPick={(p) => setMode({ kind: 'key-entry', provider: p })} />
+        <KeyPickScreen onPick={(p) => startKeyEntry(p)} />
       )}
 
       {mode.kind === 'key-entry' && <KeyEntryScreen provider={mode.provider} secret={secret} />}
@@ -617,6 +642,9 @@ export const App = () => {
       {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} cols={panelCols} />}
 
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
+
+      {/* Reserve 18 rows for splash, caption, outer padding, panel frame/padding and close hint. */}
+      {mode.kind === 'info' && <InfoScreen title={mode.title} lines={mode.lines} cols={panelCols} maxRows={termHeight - 18} pending={!!mode.abort} />}
 
       {mode.kind === 'routing' && (
         <RoutingScreen cols={panelCols} onPick={(section) => setMode({ kind: 'routing-section', section })} />
