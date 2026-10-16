@@ -97,10 +97,10 @@ export const parseAntigravityProject = (body: unknown): string | undefined =>
 // The literal userAgent FIELD the envelope carries (not the HTTP header). The upstream keys behaviour off it.
 export const ANTIGRAVITY_USER_AGENT_FIELD = 'antigravity';
 
-// The HTTP User-Agent header — a DIFFERENT thing from the envelope field above, and pinned: #186 confirmed
-// the upstream accepts client version 2.2.1, and the version is what gates the request. Shared by the
-// sign-in bootstrap (#188) and the turn paths (#189) so one edit moves both.
-export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.2.1 darwin/arm64';
+// The HTTP User-Agent is separate from the envelope field. Use the native Hub grammar, including its
+// aidev_client parameters: discovery depends on the parsed client identity. This Hub version/build
+// returned the subscription Argon catalog; bootstrap, discovery and generation share the same pin.
+export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.17.0 (aidev_client; os_type=darwin; arch=arm64; cl=986210228)';
 
 // Request-id formats, as pure functions of an injected uuid/clock — #189 owns the minting, this layer owns
 // the shape. (These are envelope metadata, NOT tool ids; the binding rule is untouched.)

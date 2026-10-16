@@ -176,10 +176,9 @@ describe('antigravityRequestHeaders', () => {
     });
   });
 
-  // The version is what the upstream gates on (#186 verified 2.2.1) and there is no background poller
-  // refreshing it — so it must stay a visible constant, not a value assembled at the call site.
-  it('claims a versioned client', () => {
-    expect(ANTIGRAVITY_HTTP_USER_AGENT).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ /);
+  // A version alone is insufficient: the native client wraps its identity parameters in parentheses.
+  it('uses the versioned Hub client grammar for discovery and generation', () => {
+    expect(ANTIGRAVITY_HTTP_USER_AGENT).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=[a-z]+; arch=[a-z0-9]+; cl=\d+\)$/);
   });
 });
 

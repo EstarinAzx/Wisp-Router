@@ -150,7 +150,8 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
 export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: string): Promise<string[]> => {
   const token = creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
-  const body = JSON.stringify(creds.projectId ? { project: creds.projectId } : {});
+  // Match the account-scoped Hub catalog request; generation still carries the project.
+  const body = '{}';
   const headers = antigravityRequestHeaders(token);
   const hosts = antigravityHostChain(baseUrl);
 

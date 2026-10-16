@@ -37,7 +37,7 @@ describe('fetchAntigravityProject', () => {
     expect(sentUrl).toBe(LOAD_URL);
     expect(sentInit.method).toBe('POST');
     expect(sentInit.headers['Authorization']).toBe('Bearer ya29.tok');
-    expect(sentInit.headers['User-Agent']).toBe('antigravity/hub/2.2.1 darwin/arm64');
+    expect(sentInit.headers['User-Agent']).toBe('antigravity/hub/2.17.0 (aidev_client; os_type=darwin; arch=arm64; cl=986210228)');
     expect(JSON.parse(sentInit.body)).toEqual({ metadata: { ideType: 'ANTIGRAVITY' } });
   });
 
