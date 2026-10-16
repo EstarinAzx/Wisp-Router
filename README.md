@@ -85,6 +85,8 @@ Wisp now brings your configured models into the signed-in Desktop model picker. 
 
 **This integration is experimental.** Grok and the Antigravity `gemini-3.8-flash-tiered` target have passed limited Desktop checks. Other targets and Traycer GUI integration remain unverified. Each external model's tools and capabilities depend on its provider and Wisp's adapter.
 
+The [2.2.8 candidate](docs/releases/v2.2.8.md) adds Argon Low, Medium and High through the existing Antigravity subscription, with original tool IDs and encrypted conversation state. All three tiers passed live HTTP tool continuation; native signed-client replay and restart checks also passed. No Gemini API key is required. Interactive Desktop picker observation remains a separate open acceptance item.
+
 Native models keep their capabilities and ChatGPT sign-in. Voice uses your existing ChatGPT sign-in and speech service, while the selected Wisp model handles the text and tool turns.
 
 <details>

@@ -6,6 +6,14 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.8] - Unreleased
+
+- Add subscription-backed Argon Low, Medium and High on the Responses route, preserving original tool IDs and encrypted model state through continuation. Signed Desktop requires explicit instruction-hoisting opt-in; each Argon SKU advertises its fixed tier.
+- Add `/quota` and `wisp quota [refresh [anthropic|codex]]`, with account-bound cached readings, explicit refresh and a shared five-minute cooldown. Slot 1.7.5 reads the cache without network calls.
+- Expose Antigravity compatibility status and consequences in the TUI; keep the Claude fallback off by default.
+- Preserve saved credentials on malformed refreshes or concurrent sign-in changes. Remove the abandoned separate Gemini API enrollment from public menus and commands.
+- Pair with companion 1.14.5. See [candidate evidence and limits](../../docs/releases/v2.2.8.md); interactive Desktop picker acceptance remains open.
+
 ## [2.2.7] - 2026-10-14
 
 ### Fixed
