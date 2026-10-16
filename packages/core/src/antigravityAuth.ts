@@ -236,6 +236,13 @@ export class AntigravityAuth {
       // Carry the project id over the rebuild — it belongs to the ACCOUNT, not the token, so a refresh must
       // not silently strip it and put every later turn back on the request-build 400.
       next = { ...(fresh.projectId ? { projectId: fresh.projectId } : {}), ...tokensToAntigravityCreds(payload, Date.now()) };
+      // A malformed 200 must not erase the working bundle or its refresh deadline.
+      if (typeof next.accessToken !== 'string' || !next.accessToken.trim()
+        || typeof next.expiresAt !== 'number' || !Number.isFinite(next.expiresAt) || next.expiresAt <= Date.now()
+        || (payload.refresh_token !== undefined && (typeof payload.refresh_token !== 'string' || !payload.refresh_token.trim()))) {
+        this.log('[antigravity] token refresh returned invalid credentials');
+        return fresh;
+      }
       // Google's refresh response omits refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {

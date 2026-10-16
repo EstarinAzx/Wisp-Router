@@ -221,6 +221,30 @@ describe('AntigravityAuth — token lifecycle', () => {
     expect(await auth.current()).toMatchObject({ accessToken: 'old' });
   });
 
+  it.each([
+    ['missing token', {}],
+    ['missing expiry', { access_token: 'fresh' }],
+    ['non-string token', { access_token: 7, expires_in: 3599 }],
+    ['blank token', { access_token: '   ', expires_in: 3599 }],
+    ['string expiry', { access_token: 'fresh', expires_in: '3599' }],
+    ['zero expiry', { access_token: 'fresh', expires_in: 0 }],
+    ['negative expiry', { access_token: 'fresh', expires_in: -1 }],
+    ['overflowing expiry', { access_token: 'fresh', expires_in: 1e308 }],
+    ['invalid refresh token', { access_token: 'fresh', expires_in: 3599, refresh_token: 7 }],
+    ['blank refresh token', { access_token: 'fresh', expires_in: 3599, refresh_token: '   ' }],
+  ])('preserves the existing bundle on an HTTP 200 refresh with %s', async (_label, payload) => {
+    const original = { accessToken: 'old', refreshToken: '1//rt', expiresAt: near(), projectId: 'p-1' };
+    const store = memStore(original);
+    const write = vi.spyOn(store, 'write');
+    const fetch = vi.fn(async () => Response.json(payload));
+    vi.stubGlobal('fetch', fetch);
+
+    expect(await new AntigravityAuth(store, async () => true, () => {}).current()).toEqual(original);
+    expect(store.read()).toEqual(original);
+    expect(write).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   // The rotation already happened SERVER-side, so the old refresh token is spent. Dropping the new bundle
   // because auth.json could not be written strands the session on a token that no longer refreshes.
   it('keeps a rotation the server already performed when the store write throws', async () => {
