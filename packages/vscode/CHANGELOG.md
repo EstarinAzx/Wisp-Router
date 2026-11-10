@@ -4,12 +4,12 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.14.5] - Unreleased
+## [1.14.5] - 2026-11-11
 
 - Bundle the Argon subscription Responses adapter and exact-SKU signed Desktop admission, with encrypted state replay, original tool IDs and explicit instruction-hoisting consent.
 - Preserve Antigravity sign-in during malformed refreshes and concurrent account changes; share account-bound quota state with terminal 2.2.8 and Slot 1.7.5.
 - Remove the cancelled Gemini API provider from public selection. Argon is not newly enabled for VS Code native chat or Inquire; use the qualified Bridge route.
-- Actual extension-host activation passed. See [candidate verification and remaining Desktop UI gate](../../docs/releases/v2.2.8.md).
+- Actual extension-host activation and the separate Desktop picker acceptance passed. See [release verification and limits](../../docs/releases/v2.2.8.md).
 
 ## [1.14.4] - 2026-10-14
 
