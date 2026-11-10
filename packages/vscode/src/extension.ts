@@ -40,7 +40,7 @@ import { codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions } fro
 import { codexInquire } from '@wisp/core';
 import { anthropicInquire } from '@wisp/core';
 import { xaiRequest } from '@wisp/core';
-import { WispHome, planSecretsMigration, seedConfigFromVsCode, effectiveAliasOnly } from '@wisp/core';
+import { WispHome, seedConfigFromVsCode, effectiveAliasOnly, isGeminiApiProvider } from '@wisp/core';
 
 // ----------------------------- Constants ----------------------------- //
 
@@ -166,6 +166,7 @@ const aliasOnlyModels = (): boolean => effectiveAliasOnly(home.readConfig());
 // plaintext settings. Takes the Provider explicitly so the chat surface can resolve any catalog row, not
 // only the Active one. Still async — callers predate the sync store and the seam stays put.
 const keyForProvider = async (p: Provider): Promise<string> => {
+  if (isGeminiApiProvider(p)) throw new Error('Gemini API credentials are only available through the qualified Responses adapter.');
   // Kimi (#170) signs in with OAuth but talks the ordinary OpenAI-chat wire, so its BEARER is the access
   // token rather than a stored key. Resolving it at this one seam is what carries Kimi through the chat
   // picker, Inquire and the Bridge with no new branch in any of them.
@@ -239,12 +240,14 @@ const exitInFlight = () => { inFlight = Math.max(0, inFlight - 1); renderStatus(
 // Key writes land in auth.json under the Provider's (possibly borrowed) key id. The explicit postState
 // keeps the panel instant; the ~/.wisp watcher covers other windows and external (TUI) edits.
 const storeApiKey = async (value: string): Promise<void> => {
+  if (isGeminiApiProvider(activeProvider())) throw new Error('Use Wisp: Set API Key or terminal /key gemini-api for Gemini credentials.');
   home.writeAuth({ keys: { ...home.readAuth().keys, [resolveKeyId(activeProvider())]: value.trim() } });
   cachedClient = undefined;
   void panel?.postState();
 };
 
 const clearApiKey = async (): Promise<void> => {
+  if (isGeminiApiProvider(activeProvider())) throw new Error('Remove Gemini credentials from wisp /providers.');
   const { [resolveKeyId(activeProvider())]: _dropped, ...rest } = home.readAuth().keys ?? {};
   home.writeAuth({ keys: rest });
   cachedClient = undefined;
@@ -255,6 +258,7 @@ const clearApiKey = async (): Promise<void> => {
 // as served (bare, e.g. "minimax-m3") — the /go chat endpoint rejects a provider-prefixed id,
 // so the selectable ids must match the served form to be usable.
 const fetchModelIds = async (): Promise<string[]> => {
+  if (isGeminiApiProvider(activeProvider())) return ['gemini-4-argon'];
   if (isCodexProvider(activeProvider())) {
     const result = await loadCodexModels(true);
     if (result.error) throw new Error(result.error);
@@ -296,6 +300,7 @@ const loadCodexModels = async (refresh = false) => codexCatalog.get({
 const providerModelIds = async (id: string, refresh = false): Promise<string[]> => {
   const p = PROVIDERS.find((r) => r.id === id);
   if (!p) return [];
+  if (isGeminiApiProvider(p)) return ['gemini-4-argon'];
   try {
     if (isAntigravityProvider(p)) return await antigravityModelIds(p);
     if (isCodexProvider(p)) return codexModelIds((await loadCodexModels(refresh)).models);
@@ -401,7 +406,7 @@ const setBaseUrl = async (url: string): Promise<void> => {
 // keySource keeps the UI honest when the key comes from the env var (Clear can't remove that).
 const getState = async (): Promise<PanelState> => {
   const p = activeProvider();
-  const stored = home.readAuth().keys?.[resolveKeyId(p)]?.trim();
+  const stored = isGeminiApiProvider(p) ? !!home.geminiReplayContext() : home.readAuth().keys?.[resolveKeyId(p)]?.trim();
   const keySource = stored ? 'stored' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env' : 'none';
   // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
   const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
@@ -437,7 +442,7 @@ const getState = async (): Promise<PanelState> => {
     // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
     account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
     // Codex and Antigravity use their own discovery calls; the other OAuth kinds use models.dev.
-    modelOptions: isCodexProvider(p) ? codexModelIds(codexModels) : isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
+    modelOptions: isGeminiApiProvider(p) ? ['gemini-4-argon'] : isCodexProvider(p) ? codexModelIds(codexModels) : isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
     effort: isCodexProvider(p) ? codexModelEffort(codexInfo, activeEffort()) : isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,
@@ -546,8 +551,7 @@ const migrateToWispHome = async (): Promise<void> => {
   if (anthropicRaw !== undefined) foundSlots.push(ANTHROPIC_SECRET_SLOT);
   if (bridgeSecretSlot !== undefined) foundSlots.push(BRIDGE_SECRET_SLOT);
 
-  const next = planSecretsMigration({ auth: home.readAuth(), slots: { keys, codexRaw, anthropicRaw, bridgeSecret: bridgeSecretSlot } });
-  if (next) home.writeAuth(next); // throws → slots stay put, retried next launch
+  home.migrateSecrets({ keys, codexRaw, anthropicRaw, bridgeSecret: bridgeSecretSlot }); // throws → slots stay put
   for (const slot of foundSlots) await secrets.delete(slot);
 };
 
@@ -646,8 +650,11 @@ const editCodeLensProvider: vscode.CodeLensProvider = {
 
 // Prompt for the API key and store it in the OS keychain.
 const setApiKey = async (): Promise<void> => {
+  const provider = activeProvider();
+  const gemini = isGeminiApiProvider(provider);
+  const expectedLifetime = gemini ? home.geminiReplayContext()?.lifetime ?? null : null;
   const value = await vscode.window.showInputBox({
-    prompt: 'API key (from https://opencode.ai/auth)',
+    prompt: gemini ? 'Gemini API key. Separate API credentials and billing; saving invalidates existing Gemini conversations.' : 'API key (from https://opencode.ai/auth)',
     password: true,
     ignoreFocusOut: true,
   });
@@ -657,7 +664,8 @@ const setApiKey = async (): Promise<void> => {
     vscode.window.showWarningMessage('Empty input — API key unchanged.');
     return;
   }
-  await storeApiKey(value);
+  if (gemini) { home.saveGeminiApiKey(value.trim(), expectedLifetime); void panel?.postState(); }
+  else await storeApiKey(value);
   vscode.window.showInformationMessage('Wisp: API key saved.');
 };
 
@@ -796,7 +804,7 @@ const copyBridgeAddress = async (): Promise<void> => {
 
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
-  if (!(await resolveApiKey())) {
+  if (!isGeminiApiProvider(activeProvider()) && !(await resolveApiKey())) {
     vscode.window.showWarningMessage(missingCredentialMessage());
     return;
   }
@@ -819,6 +827,7 @@ const listModels = async (): Promise<void> => {
 // Editing via blocks — not a span or whole-file re-emit — keeps untouched code byte-for-byte intact,
 // so the diff shows only the real changes. No longer routes through the inline-completion provider.
 const inquire = async (): Promise<void> => {
+  if (isGeminiApiProvider(activeProvider())) { vscode.window.showWarningMessage('Gemini API is not qualified for Inquire. Use the custom Responses route.'); return; }
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
 
@@ -974,11 +983,11 @@ export const activate = (context: vscode.ExtensionContext): void => {
   home = new WispHome();
   // Codex token lifecycle — creds live in auth.json; browser open via vscode.env.openExternal.
   codexAuth = new CodexAuth(
-    { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+    { read: () => home.readAuth().codex, write: (c, expected) => { home.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Anthropic (Claude.ai) token lifecycle — same injection as Codex.
   anthropicAuth = new AnthropicAuth(
-    { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+    { read: () => home.readAuth().anthropic, write: (c, expected) => { home.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Grok (xAI) token lifecycle — same injection as Codex/Anthropic.
   xaiAuth = new XaiAuth(
@@ -994,7 +1003,9 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // project before a turn. openExternal is wired anyway because the constructor takes it, and nothing on
   // this face calls signIn().
   antigravityAuth = new AntigravityAuth(
-    { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+    { read: () => home.readAuth().antigravity, write: (c, expected) => {
+      home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected) });
+    } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
@@ -1052,6 +1063,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
   // The Bridge listener — the outward mirror of the LM Chat Provider. Reuses the same key/client resolvers
   // and model memory; keyed Providers only this slice (Codex #39 / Anthropic #40 later). OFF until toggled.
   bridge = createBridgeServer({
+    gemini: { replayContext: home.geminiReplayContext, credentials: home.geminiCredentials, assertCurrent: home.assertGeminiCurrent,
+      instructionPolicy: () => home.readConfig().bridge?.geminiApiInstructions ?? 'strict' },
     antigravityClientFallback: () => home.readConfig().bridge?.antigravityClientFallback === true,
     desktopNativeModels: readDesktopNativeModels,
     desktopAntigravityHoisting: readDesktopAntigravityHoisting,
@@ -1076,6 +1089,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // refreshed bundle WITH the Cloud Code project bootstrapped for the generateContent stream.
     antigravitySignedIn: () => antigravityAuth.isSignedIn(),
     antigravityCreds: () => antigravityAuth.current(),
+    antigravityReplayContext: home.antigravityReplayContext,
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call
@@ -1086,6 +1100,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     log: (m) => output.appendLine(m),
     // #171: the statusline snapshot — same store, same file, whichever face hosts the Bridge.
     recordStatus: (status) => home.writeStatus(status),
+    authRevision: () => home.quotaAuthRevision(),
   });
 
   context.subscriptions.push(

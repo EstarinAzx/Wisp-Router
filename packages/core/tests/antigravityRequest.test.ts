@@ -176,10 +176,9 @@ describe('antigravityRequestHeaders', () => {
     });
   });
 
-  // The version is what the upstream gates on (#186 verified 2.2.1) and there is no background poller
-  // refreshing it — so it must stay a visible constant, not a value assembled at the call site.
-  it('claims a versioned client', () => {
-    expect(ANTIGRAVITY_HTTP_USER_AGENT).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ /);
+  // A version alone is insufficient: the native client wraps its identity parameters in parentheses.
+  it('uses the versioned Hub client grammar for discovery and generation', () => {
+    expect(ANTIGRAVITY_HTTP_USER_AGENT).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=[a-z]+; arch=[a-z0-9]+; cl=\d+\)$/);
   });
 });
 
@@ -544,6 +543,44 @@ describe('buildAntigravityPayload', () => {
 
 describe('buildAntigravityRequestBody', () => {
   const turn = () => ({ model: 'gemini-3-flash', messages: [{ role: 'user' as const, content: 'hello there' }], requestId: 'agent-1' });
+
+  it('preserves the complete original Argon model parts, signatures and parallel IDs', () => {
+    const nativeParts = [{ thought: true, text: 'synthetic reasoning', thoughtSignature: 'thought-state' },
+      { functionCall: { id: 'native-a', name: 'read', args: { label: 'LEFT' } }, thoughtSignature: 'first-state' },
+      { functionCall: { id: 'native-b', name: 'read', args: { label: 'RIGHT' } }, thoughtSignature: 'second-state', futureState: { opaque: 'preserve' } }];
+    const messages: AntigravityTurn[] = [
+      { role: 'user', content: 'Read both.' },
+      { role: 'assistant', content: '', nativeParts, toolCalls: [
+        { id: 'native-a', name: 'read', argsJson: '{"label":"LEFT"}' },
+        { id: 'native-b', name: 'read', argsJson: '{"label":"RIGHT"}' },
+      ] },
+      { role: 'user', content: '', toolResults: [{ callId: 'native-b', content: '25' }, { callId: 'native-a', content: '17' }] },
+    ];
+    const original = structuredClone(messages);
+    const body = buildAntigravityRequestBody({ ...turn(), model: 'gemini-4-argon-low', messages });
+    expect(body.request.contents[1].parts).toEqual(nativeParts);
+    expect(body.request.contents[2].parts.map((p: any) => p.functionResponse.id)).toEqual(['native-a', 'native-b']);
+    expect(messages).toEqual(original);
+  });
+
+  it('refuses missing or conflicting Argon model state instead of substituting a signature', () => {
+    const assistant: AntigravityTurn = { role: 'assistant', content: '', toolCalls: [{ id: 'a', name: 'read', argsJson: '{"label":"LEFT"}' }] };
+    const build = (message: AntigravityTurn) => buildAntigravityRequestBody({ ...turn(), model: 'gemini-4-argon-low', messages: [message] });
+    expect(() => build(assistant)).toThrow(/original Argon model state/i);
+    expect(() => build({ ...assistant, nativeParts: [{ functionCall: { id: 'a', name: 'read', args: { label: 'RIGHT' } }, thoughtSignature: 'state' }] })).toThrow(/model state.*visible/i);
+  });
+
+  it.each(['low', 'medium', 'high'])('preserves an explicit output limit for Argon %s after family processing', level => {
+    const body = buildAntigravityRequestBody({ ...turn(), model: `gemini-4-argon-${level}`, maxOutputTokens: 2048 });
+    expect(body.request.generationConfig).toEqual({ maxOutputTokens: 2048 });
+    expect(body.model).toBe(`gemini-4-argon-${level}`);
+  });
+
+  it('rejects invalid explicit output limits instead of silently sending an unbounded request', () => {
+    for (const maxOutputTokens of [0, -1, 1.5, NaN, Infinity, '2048' as any]) {
+      expect(() => buildAntigravityRequestBody({ ...turn(), maxOutputTokens })).toThrow(/output token limit/i);
+    }
+  });
 
   it('round-trips parallel Responses results in call order without changing their IDs or mutating history', () => {
     const parsed = parseResponsesRequest({ model: 'alias', tools: [{ type: 'function', name: 'read', parameters: {} }], input: [

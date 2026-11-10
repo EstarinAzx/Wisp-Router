@@ -36,6 +36,7 @@ export type QuotaMeter = { label: string; percent: number; resetAt?: number };
 // Only the meters survive: context fill belongs to the live conversation, so another Provider's old
 // context percentage would describe a window this session is not spending.
 export type WispProviderQuota = {
+  authRevision?: string; // captured before credential lookup; unbound legacy meters are unavailable
   updatedAt: number;      // epoch MS — the reader shows the age, because a remembered meter is a past one
   model: string;
   meters: QuotaMeter[];
@@ -44,6 +45,7 @@ export type WispProviderQuota = {
 // The snapshot written after a bridged turn. contextTokens/contextWindow/contextPercent travel together —
 // all three or none — so a reader can show the raw counts or the percentage without recomputing either.
 export type WispStatus = {
+  authRevision?: string;
   updatedAt: number;      // epoch MS — the reader ages the snapshot out rather than showing a stale turn
   providerId: string;
   model: string;          // the RESOLVED Target model, which is what the statusline names
@@ -153,6 +155,7 @@ export const contextWindowFor = (provider: Provider, model: string): number | un
 // ----------------------------- The snapshot ----------------------------- //
 
 export type BuildStatusArgs = {
+  authRevision?: string;
   contextWindow?: number;      // resolved Codex catalogue metadata for this turn
   now: number;                 // injected clock — this module stays pure
   provider: Provider;
@@ -164,7 +167,7 @@ export type BuildStatusArgs = {
 // Assemble the snapshot. Every optional field is spread in only when it has a real value, so a Provider
 // that reported no usage / no headers degrades to a SHORTER snapshot — the reader then renders a shorter
 // badge. Nothing is synthesized to keep the shape uniform.
-export const buildStatus = ({ now, provider, model, usage, meters, contextWindow }: BuildStatusArgs): WispStatus => {
+export const buildStatus = ({ now, provider, model, usage, meters, contextWindow, authRevision }: BuildStatusArgs): WispStatus => {
   const tokens = usage ? contextTokens(usage) : undefined;
   const window = contextWindow ?? contextWindowFor(provider, model);
   const percent = tokens === undefined ? undefined : contextPercent(tokens, window);
@@ -172,6 +175,7 @@ export const buildStatus = ({ now, provider, model, usage, meters, contextWindow
     updatedAt: now,
     providerId: provider.id,
     model,
+    ...(authRevision !== undefined ? { authRevision } : {}),
     ...(tokens !== undefined ? { contextTokens: tokens } : {}),
     ...(tokens !== undefined && window !== undefined ? { contextWindow: window } : {}),
     ...(percent !== undefined ? { contextPercent: percent } : {}),
@@ -199,7 +203,8 @@ export const mergeStatus = (prev: WispStatus | undefined, next: WispStatus): Wis
 
   // The previously active Provider becomes a remembered one — this is the only place entries are born.
   if (prev?.meters?.length && prev.providerId) {
-    ledger[prev.providerId] = { updatedAt: prev.updatedAt, model: prev.model, meters: prev.meters };
+    ledger[prev.providerId] = { updatedAt: prev.updatedAt, model: prev.model, meters: prev.meters,
+      ...(prev.authRevision !== undefined ? { authRevision: prev.authRevision } : {}) };
   }
 
   // Only evict the incoming Provider from the ledger when it actually brought meters to supersede the

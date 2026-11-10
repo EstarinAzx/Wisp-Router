@@ -22,7 +22,7 @@ import { validateCodexRoutes } from './routing';
 
 // ----------------------------- Types ----------------------------- //
 
-export type WispBridgeSettings = { port?: number; aliasPickerShowsModel?: boolean; aliasOnlyModels?: boolean; antigravityClientFallback?: boolean };
+export type WispBridgeSettings = { port?: number; aliasPickerShowsModel?: boolean; aliasOnlyModels?: boolean; antigravityClientFallback?: boolean; geminiApiInstructions?: GeminiInstructionPolicy };
 
 export type WispConfig = {
   provider?: string;
@@ -35,6 +35,8 @@ export type WispConfig = {
 };
 
 export type WispAuth = {
+  // Reserved: only WispHome's guarded Gemini operations may mutate this whole bundle.
+  geminiApi?: { version: 1; lifetime: string; replayKey: string; apiKey: string };
   keys?: Record<string, string>;
   codex?: CodexCreds;
   anthropic?: AnthropicCreds;
@@ -43,6 +45,9 @@ export type WispAuth = {
   antigravity?: AntigravityCreds;
   bridgeSecret?: string;
 };
+
+export type GeminiReplayContext = { lifetime: string; key: string; credentialBinding: string };
+export type GeminiInstructionPolicy = 'strict' | 'prepend-leading-developer-v1';
 
 // ----------------------------- effectiveAliasOnly ----------------------------- //
 

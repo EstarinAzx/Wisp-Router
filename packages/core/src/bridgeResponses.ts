@@ -206,11 +206,11 @@ export const parseResponsesRequest = (value: unknown): BridgeResponsesRequest =>
     responses: { ...(promptCacheKey === undefined ? {} : { promptCacheKey }), parallelToolCalls: body.parallel_tool_calls, effort: reasoning.effort, context: reasoning.context, verbosity: text.verbosity } };
 };
 
-const outputCall = (call: AssembledToolCall, registry: Map<string, Tool>, id: string): RecordValue => {
+export const encodeResponsesToolCall = (call: AssembledToolCall, registry: BridgeResponsesRequest['registry']): RecordValue => {
   const tool = registry.get(call.name); if (!tool) throw new Error(`Unknown upstream tool: ${call.name}`);
   nonempty(call.id, 'upstream call_id');
   const args = jsonArgs(call.argsJson);
-  const common = { id, call_id: call.id, status: 'completed', ...(tool.namespace ? { namespace: tool.namespace } : {}) };
+  const common = { call_id: call.id, ...(tool.namespace ? { namespace: tool.namespace } : {}) };
   if (tool.kind === 'custom') {
     if (Object.keys(args).length !== 1 || typeof args.input !== 'string') throw new Error('Custom tool arguments must contain exactly one string input');
     return { ...common, type: 'custom_tool_call', name: tool.name, input: args.input };
@@ -255,7 +255,7 @@ export const createResponsesEncoder = (parsed: BridgeResponsesRequest, id: strin
       if (parsed.responses?.parallelToolCalls === false && calls.length > 1) throw new Error('Provider returned multiple tools with parallel_tool_calls=false');
       if (new Set(calls.map(c => c.id)).size !== calls.length) throw new Error('Duplicate upstream call_id');
       // Validate every call before exposing any executable item, even when parallel calls are allowed.
-      const items = incomplete ? [] : calls.map((call, i) => outputCall(call, parsed.registry, `${id}_call_${i}`));
+      const items: RecordValue[] = incomplete ? [] : calls.map((call, i) => ({ ...encodeResponsesToolCall(call, parsed.registry), id: `${id}_call_${i}`, status: 'completed' }));
       let frames = '';
       if (textStarted) {
         const item = textItem(incomplete ? 'incomplete' : 'completed'); output.push(item);

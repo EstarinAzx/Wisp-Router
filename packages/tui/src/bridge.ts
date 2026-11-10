@@ -63,6 +63,8 @@ const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
 export const createTuiBridge = (log: (message: string) => void) => {
   let loggingStarted = false;
   return createBridgeServer({
+    gemini: { replayContext: home.geminiReplayContext, credentials: home.geminiCredentials, assertCurrent: home.assertGeminiCurrent,
+      instructionPolicy: () => home.readConfig().bridge?.geminiApiInstructions ?? 'strict' },
     antigravityClientFallback: () => home.readConfig().bridge?.antigravityClientFallback === true,
     desktopNativeModels: readDesktopNativeModels,
     desktopAntigravityHoisting: readDesktopAntigravityHoisting,
@@ -79,6 +81,7 @@ export const createTuiBridge = (log: (message: string) => void) => {
     xaiCreds: () => xaiAuth.current(),
     antigravitySignedIn: () => antigravityAuth.isSignedIn(),
     antigravityCreds: () => antigravityAuth.current(),
+    antigravityReplayContext: home.antigravityReplayContext,
     effort: () => home.readConfig().effort ?? DEFAULT_EFFORT,
     activeProviderId: () => activeProvider().id,
     routingMap: () => home.readConfig().routing ?? EMPTY_ROUTING_MAP,
@@ -96,5 +99,6 @@ export const createTuiBridge = (log: (message: string) => void) => {
     // #171: the statusline snapshot lands in the same store the config does, so the wisp-slot statusline
     // script reads it straight out of ~/.wisp without knowing which face is hosting.
     recordStatus: (status) => home.writeStatus(status),
+    authRevision: () => home.quotaAuthRevision(),
   });
 };

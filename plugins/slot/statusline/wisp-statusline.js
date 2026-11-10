@@ -100,7 +100,7 @@ const ageLabel = (ms) => {
 
 // --------------------------------- Reads --------------------------------- //
 
-// Every read is independently fallible: a missing status.json must cost the readings, never the route row.
+// Every read is independently fallible: a missing status.json costs context, not cached quota or the route.
 const readJson = (file) => {
   try { return JSON.parse(fs.readFileSync(path.join(wispHome, file), 'utf8')); } catch { return undefined; }
 };
@@ -109,7 +109,43 @@ const stdin = (() => { try { return JSON.parse(fs.readFileSync(0, 'utf8')); } ca
 
 const cfg = readJson('config.json') || {};
 const status = readJson('status.json');
+const quota = readJson('quota.json');
+// Exact WispHome.quotaAuthRevision shape, including bigint nanoseconds. No credential contents are read.
+const authRevision = (() => {
+  try {
+    const stat = fs.statSync(path.join(wispHome, 'auth.json'), { bigint: true });
+    return stat.isFile() ? `v1:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` : undefined;
+  } catch { return undefined; }
+})();
 const now = Date.now();
+
+// Mirrors core's selectQuotaReading / parseQuotaCache. A malformed window rejects the WHOLE observation.
+const selectQuotaReading = (provider) => {
+  if (!authRevision || !['anthropic', 'codex'].includes(provider)) return undefined;
+  let selected;
+  const candidates = [
+    { source: 'refresh', reading: quota?.schema === 1 ? quota.providers?.[provider]?.reading : undefined },
+    { source: 'headers', reading: status?.providers?.[provider] },
+    { source: 'headers', reading: status?.providerId === provider ? status : undefined },
+  ];
+  for (const { reading, source } of candidates) {
+    if (!reading || reading.authRevision !== authRevision || !Number.isSafeInteger(reading.updatedAt)
+      || reading.updatedAt < 0 || reading.updatedAt > now || now - reading.updatedAt > LEDGER_MAX_AGE_MS
+      || !Array.isArray(reading.meters) || !reading.meters.length) continue;
+    const labels = new Set();
+    const valid = reading.meters.every(m => {
+      if (!m || typeof m.label !== 'string' || m.label.length > 32 || !/^\d+(?:\.\d+)?[mhd]$/.test(m.label)
+        || !(Number(m.label.slice(0, -1)) > 0) || labels.has(m.label)
+        || typeof m.percent !== 'number' || !Number.isFinite(m.percent) || m.percent < 0 || m.percent > 100
+        || (m.resetAt !== undefined && (!Number.isSafeInteger(m.resetAt) || m.resetAt < 0 || m.resetAt > 8.64e12))) return false;
+      labels.add(m.label);
+      return true;
+    });
+    // Refresh first, headers last: an equally recent header observation wins, without merging windows.
+    if (valid && (!selected || reading.updatedAt >= selected.reading.updatedAt)) selected = { reading, source };
+  }
+  return selected;
+};
 
 // --------------------------------- The route --------------------------------- //
 
@@ -139,24 +175,11 @@ const live = status && now - (status.updatedAt || 0) < STATUS_MAX_AGE_MS && stat
   ? status
   : undefined;
 
-// The ACTIVE Provider's own quota, wherever it currently lives. status.json is ONE global slot, so the last
-// bridged turn on the MACHINE owns the top level — a second session on another Provider pushes this route's
-// reading down into the `providers` ledger, and reading only the top level then prints that other session's
-// numbers as if they were yours. mergeStatus evicts the active Provider from the ledger, so a Provider is in
-// exactly one of the two places: check both. Keyed on providerId, not model, because a quota window belongs
-// to the ACCOUNT — a sibling model on the same Provider spends the same window. Context keeps the stricter
-// model test above: that one belongs to the conversation.
-// Either place is pruned on read at the ledger's own max age: nothing rewrites status.json while nothing
-// runs, so an idle machine would otherwise render yesterday's limits as this session's.
-const quotaSource = (() => {
-  if (!target?.providerId || !status) return undefined;
-  if (status.providerId === target.providerId && status.meters?.length) {
-    return { meters: status.meters, updatedAt: status.updatedAt || 0, live: Boolean(live) };
-  }
-  const entry = status.providers?.[target.providerId];
-  return entry?.meters?.length ? { meters: entry.meters, updatedAt: entry.updatedAt || 0, live: false } : undefined;
-})();
-const activeQuota = quotaSource && now - quotaSource.updatedAt <= LEDGER_MAX_AGE_MS ? quotaSource : undefined;
+// Quota belongs to the account, not the conversation. Refreshes never affect the context test above.
+const activeReading = selectQuotaReading(target?.providerId);
+const activeQuota = activeReading && { ...activeReading.reading,
+  live: activeReading.source === 'headers' && Boolean(live) && status.providerId === target.providerId
+    && status.updatedAt === activeReading.reading.updatedAt };
 
 const rows = [];
 
@@ -211,21 +234,11 @@ for (const meter of activeMeters) {
 
 // ------------------------------ Remembered rows ------------------------------ //
 
-// Providers whose limits are known but not being spent right now: the ledger's entries, plus the top-level
-// snapshot when another session's Provider wrote it (its meters are still the last thing that wire said).
-// The route's OWN Provider is excluded from both — it is the meter rows above, and rendering it twice would
-// present the same wire as current and stale at once.
-const remembered = [];
-if (status) {
-  if (status.meters?.length && status.providerId && status.providerId !== target?.providerId) {
-    remembered.push({ id: status.providerId, updatedAt: status.updatedAt || 0, meters: status.meters });
-  }
-  for (const [id, entry] of Object.entries(status.providers || {})) {
-    if (entry?.meters?.length && id !== target?.providerId) {
-      remembered.push({ id, updatedAt: entry.updatedAt || 0, meters: entry.meters });
-    }
-  }
-}
+// Use the same selection for every other supported Provider, including explicit cache-only readings.
+const remembered = ['anthropic', 'codex'].flatMap(id => {
+  const selected = id !== target?.providerId ? selectQuotaReading(id) : undefined;
+  return selected ? [{ id, ...selected.reading }] : [];
+});
 
 const shown = remembered
   .filter((e) => now - e.updatedAt <= LEDGER_MAX_AGE_MS)

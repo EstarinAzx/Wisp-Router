@@ -29,6 +29,7 @@ import type { AddressInfo } from 'net';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
+import { AuthStateChangedError } from './homeStore';
 import {
   CodexCreds, codeVerifier, codeChallenge, oauthState,
   parseChatgptAccountId, parseCodexAuthJson, shouldRefreshCodexToken, isCodexSignedIn,
@@ -166,7 +167,8 @@ const runCodexOAuth = async (openExternal: (url: string) => PromiseLike<boolean>
 // NEVER been written (truly first use); the {} tombstone means signed out.
 export type CodexCredsStore = {
   read: () => CodexCreds | undefined;
-  write: (creds: CodexCreds) => void;
+  // A supplied snapshot must be compared under the host's auth write lock.
+  write: (creds: CodexCreds, expected?: string) => void;
 };
 
 // Owns the Codex token lifecycle against one auth.json slice. Each face holds a single instance and
@@ -195,6 +197,7 @@ export class CodexAuth {
     const fresh = this.store.read() ?? creds;
     if (!shouldRefreshCodexToken({ accessToken: fresh.accessToken, idToken: fresh.idToken }, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: CodexCreds;
     try {
       const res = await fetch(CODEX_TOKEN_URL, {
@@ -215,10 +218,15 @@ export class CodexAuth {
       this.log(`[codex] token refresh error: ${String(err)}`);
       return fresh;
     }
+    // A sign-out, replacement or another renewal during the await owns the newer store state.
+    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Codex sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side (the old refresh token
     // may be consumed), so a failed auth.json write must not discard the new bundle — keep using it in
     // memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[codex] token persist error: ${String(err)}`); }
+    try { this.store.write(next, beforeRefresh); } catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[codex] token persist error: ${String(err)}`);
+    }
     return next;
   };
 
@@ -237,9 +245,10 @@ export class CodexAuth {
   // The credentials to use right now: the stored bundle, else — only when the field has NEVER been
   // written (truly first use, not a sign-out tombstone) — a one-time import of the CLI's auth.json
   // (persisted so the next read is fast), refreshed if near expiry. undefined = not signed in.
-  current = async (): Promise<CodexCreds | undefined> => {
+  // Explicit account-quota refresh disables native import even if the store is removed concurrently.
+  current = async (options: { importNative?: boolean } = {}): Promise<CodexCreds | undefined> => {
     let creds = this.store.read();
-    if (creds === undefined) {
+    if (creds === undefined && options.importNative !== false) {
       creds = await this.importAuthJson();
       if (creds) this.store.write(creds);
     }

@@ -177,6 +177,15 @@ describe('contextWindowFor', () => {
 // ----------------------------- The snapshot ----------------------------- //
 
 describe('buildStatus', () => {
+  it('keeps the captured auth revision through an unmetered turn and a Provider switch', () => {
+    const first = buildStatus({ now: 100, provider: provider({ id: 'codex' }), model: 'fixture',
+      authRevision: 'v1:1:2:3:4:5', meters: [{ label: '5h', percent: 42 }] });
+    expect(first.authRevision).toBe('v1:1:2:3:4:5');
+    const next = mergeStatus(first, buildStatus({ now: 200, provider: provider({ id: 'anthropic' }), model: 'other', authRevision: 'v1:1:2:3:4:6' }));
+    expect(next.authRevision).toBe('v1:1:2:3:4:6');
+    expect(next.providers?.codex).toEqual({ updatedAt: 100, model: 'fixture', authRevision: 'v1:1:2:3:4:5', meters: [{ label: '5h', percent: 42 }] });
+  });
+
   it('carries the model, the context reading and the meters', () => {
     const status = buildStatus({
       now: 1785816700000,

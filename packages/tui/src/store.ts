@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'child_process';
-import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, AntigravityAuth, isKimiProvider, resolveKeyId, type Provider } from '@wisp/core';
+import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, AntigravityAuth, isKimiProvider, resolveKeyId, type Provider, type QuotaProvider } from '@wisp/core';
 
 // ----------------------------- Store ----------------------------- //
 
@@ -42,11 +42,18 @@ export const openExternal = (url: string): Promise<boolean> =>
 // Same auth.json slices the extension wires — log is dropped (no output channel in a raw-mode TUI;
 // sign-in failures surface on the wait screen instead).
 export const codexAuth = new CodexAuth(
-  { read: () => home.readAuth().codex, write: (c) => { home.writeAuth({ codex: c }); } },
+  { read: () => home.readAuth().codex, write: (c, expected) => { home.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } },
   openExternal, () => {});
 export const anthropicAuth = new AnthropicAuth(
-  { read: () => home.readAuth().anthropic, write: (c) => { home.writeAuth({ anthropic: c }); } },
+  { read: () => home.readAuth().anthropic, write: (c, expected) => { home.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } },
   openExternal, () => {});
+
+// Quota is explicitly tied to Wisp sign-in; even a concurrent auth-file removal must not import native login.
+export const quotaCurrent = async (provider: QuotaProvider): Promise<{ accessToken: string; accountId?: string } | undefined> => {
+  const creds = provider === 'codex' ? await codexAuth.current({ importNative: false }) : await anthropicAuth.current();
+  return creds?.accessToken ? { accessToken: creds.accessToken,
+    ...(provider === 'codex' ? { accountId: (creds as { accountId?: string }).accountId } : {}) } : undefined;
+};
 export const xaiAuth = new XaiAuth(
   { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
   openExternal, () => {});
@@ -57,7 +64,9 @@ export const kimiAuth = new KimiAuth(
   () => {});
 // Antigravity (#188) is a browser flow like the first three — Google OAuth on a fixed loopback port.
 export const antigravityAuth = new AntigravityAuth(
-  { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+  { read: () => home.readAuth().antigravity, write: (c, expected) => {
+    home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected) });
+  } },
   openExternal, () => {});
 
 // ----------------------------- Bearer resolution ----------------------------- //
@@ -67,6 +76,7 @@ export const antigravityAuth = new AntigravityAuth(
 // exists as a shared function: its credential is an OAuth access token rather than a keys-map entry, and
 // resolving that in only some of the paths is how a signed-in user gets a silent 401 from the others.
 export const bearerFor = async (p: Provider): Promise<string> => {
+  if (p.id === 'gemini-api' || p.kind === 'gemini-interactions') throw new Error('Gemini API credentials are only available through the qualified Responses adapter.');
   if (isKimiProvider(p)) return kimiAuth.bearer();
   const stored = home.readAuth().keys?.[resolveKeyId(p)];
   return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';

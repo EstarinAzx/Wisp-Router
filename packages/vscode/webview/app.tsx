@@ -32,7 +32,7 @@ type State = {
   providerId?: string;
   providers: { id: string; label: string }[];
   isCustom: boolean;
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth' | 'gemini-interactions';
   signedIn?: boolean;
   account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
@@ -289,7 +289,11 @@ export const App = () => {
 
         {/* Credentials: OAuth sign-in OR API key. OAuth Providers (Codex, Anthropic) have no API key —
             "usable when signed in" → account sign-in/out control. Others keep the key field. */}
-        {terminalOauth ? (
+        {state.kind === 'gemini-interactions' ? (
+          <p class="hint">Gemini API: {state.keyIsSet ? 'key set' : 'no key'}. Separate API credentials and billing.
+            Use the command palette's Wisp: Set API Key, or terminal <code>/key gemini-api</code>.
+            Remove keys in terminal <code>/providers</code>. Only custom Responses is qualified.</p>
+        ) : terminalOauth ? (
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
               <label class="field-label">{terminalName} Account</label>

@@ -36,4 +36,6 @@ export * from './antigravityAuth';
 export * from './home';
 export * from './homeStore';
 export * from './status';
+export * from './quota';
+export * from './quotaClient';
 export * from './slash';

@@ -9,6 +9,7 @@ import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_CO
 import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE, antigravityImageRefusal } from '../src/catalog';
 import type { Provider } from '../src/catalog';
 import { codexCatalog } from '../src/codexModels';
+import { selectQuotaReading, type WispStatus } from '../src/index';
 
 // The Grok catalog row — id 'xai', the subscription-proxy base (grok-build routes there).
 const GROK: Provider = { id: 'xai', label: 'Grok', baseUrl: 'https://cli-chat-proxy.grok.com/v1', defaultModel: 'grok-build', apiKeyEnv: '', kind: 'xai-oauth' };
@@ -1101,6 +1102,30 @@ describe('Bridge — a STALE diagnosis still surfaces the #162 tail re-bill (2.0
   // STALE verdict. The stalled line must still fire.
   const T1 = [{ role: 'user', content: 'A' }, { role: 'assistant', content: 'B' }, { role: 'user', content: 'C' }];
   const T2 = [...T1, { role: 'assistant', content: 'D' }, { role: 'user', content: 'E' }];
+
+  it.each(['stable', 'renewal', 'inflight'])('binds passive meters before credentials resolve: %s', async (change) => {
+    let revision = 'v1:1:2:3:4:5';
+    let recorded: WispStatus | undefined;
+    vi.stubGlobal('fetch', async () => {
+      if (change === 'inflight') revision = 'v1:1:2:3:4:6';
+      const response = sse({ read: 100, creation: 0 });
+      response.headers.set('anthropic-ratelimit-unified-5h-utilization', '0.42');
+      return response;
+    });
+    await runServer(deps({ authRevision: () => revision,
+      anthropicCreds: async () => {
+        if (change === 'renewal') revision = 'v1:1:2:3:4:6';
+        return { accessToken: 'fixture-token', deviceId: 'd'.repeat(64) };
+      }, recordStatus: status => { recorded = status; },
+    }), async port => {
+      expect((await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T1 })).status).toBe(200);
+    });
+    expect(recorded?.authRevision).toBe('v1:1:2:3:4:5');
+    expect(recorded?.meters).toEqual([{ label: '5h', percent: 42 }]);
+    expect(recorded?.contextTokens).toBe(142);
+    const selected = selectQuotaReading('anthropic', { schema: 1, providers: {} }, recorded, revision, Date.now());
+    expect(selected?.reading.meters).toEqual(change === 'stable' ? [{ label: '5h', percent: 42 }] : undefined);
+  });
 
   it('logs the #162 stalled re-bill even when the diagnosis verdict is STALE', async () => {
     const lines: string[] = [];

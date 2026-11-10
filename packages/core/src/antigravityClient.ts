@@ -51,6 +51,7 @@ type AntigravityRequestArgs = {
   // Already folded to this wire's three stops by the caller. Absent = send no thinkingConfig at all,
   // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   log?: (message: string) => void;
 };
@@ -75,7 +76,7 @@ const fingerprint = (value: unknown): string =>
  *
  * Shared by antigravityStream and antigravityRequest.
  */
-const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): Promise<{ res: Response; requestId: string }> => {
+const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, singleAttempt = false): Promise<{ res: Response; requestId: string }> => {
   const token = args.creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
   // The envelope must carry a Cloud Code project — a hard failure at request-build time, not something the
@@ -94,6 +95,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     requestId: antigravityRequestId(crypto.randomUUID()),
     fallbackSessionId: antigravityFallbackSessionId(randomHex()),
     thinkingLevel: args.thinkingLevel,
+    maxOutputTokens: args.maxOutputTokens,
     preserveSystemText: args.preserveSystemText,
   });
   if (args.strictCompletion) {
@@ -102,7 +104,8 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
   }
   const body = JSON.stringify(request);
   const headers = antigravityRequestHeaders(token);
-  const hosts = antigravityHostChain(args.baseUrl);
+  const chain = antigravityHostChain(args.baseUrl);
+  const hosts = singleAttempt ? chain.slice(0, 1) : chain;
   if (args.log) {
     const { sessionId, systemInstruction, tools, contents = [], generationConfig, toolConfig } = request.request;
     args.log(`[bridge] antigravity cache-request ${JSON.stringify({ requestId: request.requestId, model: args.model,
@@ -127,6 +130,10 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     // Keep both host outcomes visible; the final error otherwise hides the primary failure.
     args.log?.(`[bridge] antigravity upstream ${new URL(host).hostname} status=${res.status} requestBytes=${Buffer.byteLength(body)} contents=${request.request.contents?.length ?? 0} tools=${args.tools?.length ?? 0} thinking=${args.thinkingLevel ?? 'default'} requestId=${request.requestId}`);
     if (res.ok) return { res, requestId: request.requestId };
+    if (singleAttempt) {
+      void res.body?.cancel().catch(() => {});
+      throw antigravityApiError(res.status, '', res.headers.get('retry-after'));
+    }
     const errBody = await res.text().catch(() => '');
     const error = antigravityApiError(res.status, errBody, res.headers.get('retry-after'));
     // A timed 429 goes back to the Bridge's bounded retry; immediately walking hosts would ignore its wait.
@@ -150,7 +157,8 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
 export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: string): Promise<string[]> => {
   const token = creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
-  const body = JSON.stringify(creds.projectId ? { project: creds.projectId } : {});
+  // Match the account-scoped Hub catalog request; generation still carries the project.
+  const body = '{}';
   const headers = antigravityRequestHeaders(token);
   const hosts = antigravityHostChain(baseUrl);
 
@@ -233,4 +241,39 @@ export const antigravityRequest = async (args: AntigravityRequestArgs): Promise<
     if (event.type === 'text') text += event.text;
   }
   return text;
+};
+
+// Buffer one complete generation before exposing executable output or sealing its original model parts.
+export const antigravityNativeResponse = async (args: AntigravityRequestArgs): Promise<unknown> => {
+  args.signal?.throwIfAborted();
+  let onAbort: (() => void) | undefined, response: Response | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(args.signal?.reason ?? new Error('Antigravity request aborted'));
+    args.signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const pending = antigravityFetch({ ...args, rejectRedirects: true }, false, true);
+    pending.then(({ res }) => { if (args.signal?.aborted) void res.body?.cancel().catch(() => {}); }, () => {});
+    response = (await Promise.race([pending, aborted])).res;
+    args.signal?.throwIfAborted();
+    if (response.redirected) throw new Error('Antigravity redirects are unsupported');
+    reader = response.body?.getReader();
+    if (!reader) throw new Error('Antigravity response body is missing');
+    let size = 0; const chunks: Uint8Array[] = [];
+    for (;;) {
+      const part = await Promise.race([reader.read(), aborted]);
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > 1048576) throw new Error('Antigravity response exceeds the replay byte limit');
+      chunks.push(part.value);
+    }
+    args.signal?.throwIfAborted();
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { throw new Error('Invalid Antigravity response JSON'); }
+  } finally {
+    if (onAbort) args.signal?.removeEventListener('abort', onAbort);
+    if (reader) { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+    void response?.body?.cancel().catch(() => {});
+  }
 };

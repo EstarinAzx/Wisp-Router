@@ -77,7 +77,7 @@ describe('parseAntigravityModels', () => {
 // ----------------------------- The outbound request ----------------------------- //
 
 describe('fetchAntigravityModels — the outbound request', () => {
-  it('POSTs the daily models endpoint with the mirrored headers and the project in the body', async () => {
+  it('POSTs the account catalog with the shared Hub headers and no legacy project filter', async () => {
     const calls = stubFetch([jsonResponse(MODELS_PAYLOAD)]);
     const ids = await fetchAntigravityModels(creds());
     expect(calls).toHaveLength(1);
@@ -88,7 +88,7 @@ describe('fetchAntigravityModels — the outbound request', () => {
       'Authorization': 'Bearer test-token',
       'User-Agent': ANTIGRAVITY_HTTP_USER_AGENT,
     });
-    expect(JSON.parse(String(calls[0].init.body))).toEqual({ project: 'example-project-1' });
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({});
     expect(ids).toEqual(['claude-sonnet-4-6', 'gemini-3.1-pro-low', 'gemini-4-flash']);
   });
 
