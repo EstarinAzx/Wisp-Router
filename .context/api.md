@@ -1,11 +1,19 @@
 ---
 type: api
 project: wisp
-updated: 2026-09-08
+updated: 2026-11-11
 tags: [context, api, vscode]
 ---
 
 # Surface
+
+## VS Code provider parity (2026-11-11)
+
+`wisp.antigravitySignIn` and `wisp.antigravitySignOut` plus matching panel controls manage the shared account.
+Native chat uses the Antigravity stream for its supported text models; Argon/image/unqualified models and
+Antigravity Inquire are explicitly refused. `wisp.codexContextWindows` is a machine/user-scoped map of exact
+Codex IDs to requested total budgets, bounded by account metadata. [Current behavior and limits](../docs/vscode-provider-parity.md)
+supersedes the historical descriptions below for these changed surfaces. [[active-work]] records the tested revision.
 
 ## Native Codex surface (2.1.5)
 

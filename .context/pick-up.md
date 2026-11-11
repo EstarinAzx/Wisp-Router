@@ -1,19 +1,18 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-10-14
+updated: 2026-11-11
 tags: [context, pick-up]
 ---
 
 # Pick up
 
-Start with [[active-work]] for current state and [[overview]] for the code map.
+Read [[active-work]] for completed VS Code provider-parity implementation at `607d359`, review disposition and acceptance limits. The fix branch is local; integration/release/installation awaits a new instruction. Do not repeat the implementation or review.
 
-**Repository handoff:** `.context/pick-up.md` is the entry point; `.context/active-work.md` is the current baton on upstream `main`. A local folder named `wisp/` may contain older notes; its name does not make it the current handoff. Traycer keeps detailed task evidence, linked by identifier from the baton.
-
-The 2.2.7 release and companion 1.14.4 delivery are complete. Remaining live/UI acceptance is explicitly open in [[active-work]]. Do not resume an old relay, repeat publication or run historical provider probes merely because an older note names them.
+Wisp2.2.9/companion1.14.6 is already merged/released. Do not repeat publication, revive the completed audit relay or resume closed provider experiments.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
+- [[flows]]

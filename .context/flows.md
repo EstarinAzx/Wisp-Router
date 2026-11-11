@@ -1,7 +1,7 @@
 ---
 type: flows
 project: wisp
-updated: 2026-07-30
+updated: 2026-11-11
 tags: [flows]
 ---
 # Flows
@@ -107,6 +107,35 @@ tags: [flows]
 5. **xAI arm** `bridgeServer.ts:673` → `xaiClient.ts:50` → `xaiReasoning` (`xai.ts:167`) — same `standardEffortToCodex` fold, gated to `grok-[4-9]`; grok-build/composer reject reasoning and get none. `rewriteXaiResponsesPayload` (`xai.ts:184`) additionally folds a raw-forwarded `minimal`→`low`.
 6. **Antigravity arm** `bridgeServer.ts:698` — `standardEffortToAntigravity(effort)` (`shared.ts`, folds `xhigh`/`max`→`high`, because this wire's own client offers exactly three stops) → `antigravityClient.ts` → `buildAntigravityRequestBody` → `applyAntigravityThinkingLevel` runs LAST and emits `request.generationConfig.thinkingConfig = {thinkingLevel, includeThoughts:true}` — but **only for `-tiered` rows** (`antigravityAcceptsThinkingLevel`, a suffix shape test). Every other id pins its depth in the name (`gemini-3.6-flash-low|-medium|-high` are three models), and Wisp lists all 21 flat, so there the user already chose the tier by choosing the row.
 7. **Panel ladder** `catalog.ts:522` `effortOptionsFor` — Anthropic offers `low..max`, Grok and everything else `low..xhigh`; Antigravity is never asked (only Codex/Anthropic/Grok call it), so the Antigravity tier rides the Bridge path alone, never a panel control.
+
+## VS Code Antigravity panel — single model, false key error and missing account controls
+- **Question:** Why does the VS Code Antigravity panel show only one model and have no sign-in/sign-out controls while the terminal shows the catalog? **Lens:** bug
+- **Summary:** The extension fetches Antigravity modelOptions, but the webview excludes its kind from the branch consuming that list; refresh uses API-key discovery instead, and a separate terminal-only account branch omits both account buttons.
+- **Entry:** packages/vscode/webview/app.tsx:205 (provider classification), :225 (picker options), :296 (status-only account UI), :411 (refresh message).
+- **Key files:** packages/vscode/webview/app.tsx, packages/vscode/src/sidePanelProvider.ts, packages/vscode/src/extension.ts, packages/tui/src/modelFetch.ts.
+- **Updated:** 2026-11-11; inspected source at release2.2.9 / companion1.14.6 and installed extension1.14.6 bundle.
+- **Data journey:** extension.ts:277 fetches the OAuth Antigravity list; :447 sends it as modelOptions. app.tsx:205 recognizes only Codex/Claude/Grok for modelOptions; :225 instead uses the empty keyed models list for Antigravity, then :226 prepends the current model. Automatic refresh at :124 requires keyIsSet, which Antigravity normally lacks. Manual refresh passes through sidePanelProvider.ts:166 to extension.ts:260, which only special-cases Gemini API/Codex before calling getClient. keyForProvider at extension.ts:168 has no Antigravity OAuth branch, causing NO_KEY_MESSAGE at :268. The terminal correctly uses antigravityAuth.current plus fetchAntigravityModels at modelFetch.ts:37.
+- **Account controls:** app.tsx:210 marks Antigravity/Kimi terminalOauth; :296 renders status and terminal instructions only. PanelHost/onMessage expose no Antigravity account actions even though extension.ts:1007 constructs its auth manager. This is an existing UI integration gap, not evidence of an account/model entitlement restriction.
+- **VS Code native chat picker (follow-up screenshot):** chatProvider.ts:116 builds usability flags with OAuth sign-in branches only for Codex, Anthropic and xAI; Antigravity falls through to deps.keyFor, which returns no API key at extension.ts:168. catalog.ts:331 consequently omits its descriptor. extension.ts:1131 registers native chat without Antigravity sign-in/credential dependencies, although the separate Bridge registration at :1092 does supply them. chatProvider.ts has no Antigravity stream adapter either, so exposing a row alone would not provide working chat. This native-chat feature gap is separate from the side-panel picker bug. Argon requires preserved Responses replay state and is explicitly not qualified for VS Code native chat in docs/releases/v2.2.8.md:12; do not broaden that support by merely removing the visibility gate.
+- **Limits:** Source/installed-bundle diagnosis only; no real provider call, sign-in/out, credential readback, UI edit or runtime replay performed. Repair and release are not part of this question. Existing Argon surface qualification remains separate from fixing the picker.
+
+## VS Code Codex context label — why GPT-6 Astra shows Max 272K
+- **Question:** Why does the Wisp VS Code picker show GPT-6 Astra at272K rather than1M? **Lens:** understand
+- **Summary:** Wisp takes context_window from its account catalog metadata and reports that total to VS Code; this path does not consume native Codex's local model_context_window override or promote max_context_window.
+- **Entry:** packages/vscode/src/chatProvider.ts:135 loads the account catalog; :141 prioritizes codexModelCaps over models.dev metadata.
+- **Key files:** packages/core/src/codexModels.ts:52, packages/core/src/codex.ts:215, packages/core/src/catalog.ts:329, packages/vscode/src/chatProvider.ts:135.
+- **Updated:** 2026-11-11; companion1.14.6/source2.2.9 inspection.
+- **Evidence:** Local Wisp model cache for gpt-6-astra has contextWindow272000 (clientVersion0.167.1). Native Codex cached metadata separately has context_window272000 and max_context_window872000. Local native config sets model_context_window1000000 and auto_compact900000; Wisp's native-chat descriptor path reads neither setting. Parser deliberately retains context_window only, consistent with the2026-09-06 discovery decision. buildChatModelInfos subtracts output reserve from input so advertised input+output stays equal to the selected total.
+- **Official model specification:** https://developers.openai.com/api/docs/models/gpt-6-astra lists1,050,000 context tokens as the API model specification. That is distinct from cached Codex metadata and does not by itself prove this subscription route accepts a1M request.
+- **Limits:** No fresh authenticated discovery, generation or long-context acceptance probe; no config/code changes. The observed272K is Wisp's reported descriptor, not proof of a universal VS Code or account hard limit.
+
+## VS Code provider parity implementation (2026-11-11)
+
+- Commit `607d359` repairs the panel path described above: `WispPanelProvider` dispatches Antigravity actions and correlates model replies by provider/request and opaque credential version; `App` consumes host `modelOptions`, handles account pending/errors and discards old-origin results. `getState` captures provider/model configuration before asynchronous discovery. `fetchModelIds` uses refreshed Antigravity OAuth rather than API-key discovery.
+- `AntigravityAuth.signIn` guards concurrent flow and verifies the starting account snapshot before the guarded shared-store write. False browser-open results fail immediately and close the callback listener.
+- `registerWispChatProvider` receives Antigravity credentials plus model-change events. Its adapter uses `antigravityStream`, strict completion, required tool mode, preserved call IDs/results and cancellation. `nativeChatSupport.ts` supplies the same refusal policy to advertisement, delivery and panel copy. Argon replay remains a separate Bridge Responses contract.
+- `parseCodexModels` retains both default and maximum. `codexModelCaps` accepts an optional bounded override. Native chat reads only the machine/user `wisp.codexContextWindows` map, removes public API context as an OAuth fallback, and explains effective/default/maximum/source in its tooltip. Input and output sum to the effective total.
+- These are synthetic implementation results, not installed-extension or real-provider acceptance. Current review status is in [[active-work]]; durable behavior details and runnable checks are in `docs/vscode-provider-parity.md`.
 
 ## Related
 
