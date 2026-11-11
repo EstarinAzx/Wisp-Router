@@ -279,6 +279,7 @@ export class AntigravityAuth {
     try { this.store.write(next, snapshot); }
     catch (err) {
       if (err instanceof AuthStateChangedError) throw err;
+      if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
       this.log(`[antigravity] project persist error: ${String(err)}`);
     }
     return next;

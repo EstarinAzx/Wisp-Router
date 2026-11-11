@@ -72,7 +72,10 @@ describe.each(['codex', 'anthropic', 'xai', 'kimi'] as const)('%s renewal at aut
     } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
   });
 
-  test.each(['signout', 'replacement', 'removal'])('preserves a concurrent %s and returns no old-account credentials', async change => {
+  test.each([
+    ['signout', false], ['replacement', false], ['removal', false],
+    ['signout', true], ['replacement', true], ['removal', true],
+  ] as const)('preserves a concurrent %s and returns no old-account credentials (lock held: %s)', async (change, lockHeld) => {
     const a = home(), b = home();
     const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
     a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, tokenEndpoint: 'https://auth.x.ai/token' } });
@@ -85,6 +88,8 @@ describe.each(['codex', 'anthropic', 'xai', 'kimi'] as const)('%s renewal at aut
         changed = true;
         b.writeAuth({ [provider]: change === 'signout' ? {} : change === 'removal' ? undefined : { accessToken: 'fixture-new-account' } });
         preserved = readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8');
+        // Another process may have renamed auth.json but still own the lock when renewal arrives.
+        if (lockHeld) writeFileSync(join(dir, '.wisp', 'auth.lock'), 'other-writer', { flag: 'wx' });
       }
       return open(...args);
     });
@@ -95,7 +100,8 @@ describe.each(['codex', 'anthropic', 'xai', 'kimi'] as const)('%s renewal at aut
       expect(readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8')).toBe(preserved);
       expect(result).toBeInstanceOf(Error);
       expect(String(result)).toMatch(/sign-in changed/);
-      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(lockHeld);
+      if (lockHeld) expect(readFileSync(join(dir, '.wisp', 'auth.lock'), 'utf8')).toBe('other-writer');
     } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
   });
 });

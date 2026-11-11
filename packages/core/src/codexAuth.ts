@@ -236,6 +236,7 @@ export class CodexAuth {
     // memory and let a later write retry.
     try { this.store.write(next, beforeRefresh); } catch (err) {
       if (err instanceof AuthStateChangedError) throw err;
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
       this.log(`[codex] token persist error: ${String(err)}`);
     }
     return next;

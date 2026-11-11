@@ -103,9 +103,9 @@
 
 ## Task 7 — Integrated verification and CodeRabbit
 
-- [ ] Map every finding 1–17 to its changed files and verification evidence. No unchecked item is silently dropped because it is minor or dormant.
-- [ ] With pinned Bun and process-local PATH, run root `bun run test`, `bun test packages/tui/tests`, core typecheck, TUI compile, root `bun run compile`, `node plugins/slot/statusline/check.js`, and the repaired hermetic span check.
-- [ ] Get an independent whole-diff review of the integrated branch. Preserve actual failures and qualified platform limits.
+- [x] Map every finding 1–17 to its changed files and verification evidence. No unchecked item is silently dropped because it is minor or dormant.
+- [x] With pinned Bun and process-local PATH, run root `bun run test`, `bun test packages/tui/tests`, core typecheck, TUI compile, root `bun run compile`, `node plugins/slot/statusline/check.js`, and the repaired hermetic span check.
+- [x] Get an independent whole-diff review of the integrated branch. Preserve actual failures and qualified platform limits.
 - [ ] Run CodeRabbit on the actual fix-branch diff against the recorded audit base, after local checks. Use the single checkpoint in the execution brief; initial plus at most two follow-ups, never paid credits without approval. Record complete coverage/outcome and validate each finding before acting.
 - [ ] Apply justified in-scope follow-ups and rerun affected checks/review within budget. Exhausted budget or auth/quota blockers stay explicit; do not label them a pass.
 - [ ] Commit the final verified state and push the fix branch. Do not merge, tag, publish or install a release.

@@ -170,6 +170,20 @@ test.each([false, true])('Antigravity shares pending project hydration with a la
   ]);
 });
 
+test.each(['signout', 'replacement', 'unchanged'] as const)('Antigravity checks the account after a failed project save (%s)', async change => {
+  const store = memStore({ accessToken: 'old-account' });
+  const save = store.write;
+  store.write = () => {
+    if (change !== 'unchanged') save(change === 'signout' ? {} : { accessToken: 'new-account' });
+    throw new Error('synthetic busy store');
+  };
+  vi.stubGlobal('fetch', async () => Response.json({ cloudaicompanionProject: 'project' }));
+  const result = manager('antigravity', store).current();
+  if (change === 'unchanged') await expect(result).resolves.toMatchObject({ accessToken: 'old-account', projectId: 'project' });
+  else await expect(result).rejects.toBeInstanceOf(AuthStateChangedError);
+  expect(store.read()).toEqual(change === 'signout' ? {} : { accessToken: change === 'replacement' ? 'new-account' : 'old-account' });
+});
+
 test('Antigravity rejects an account changed during failed project hydration', async () => {
   const response = deferred<Response>();
   vi.stubGlobal('fetch', () => response.promise);
