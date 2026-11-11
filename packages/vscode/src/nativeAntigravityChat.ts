@@ -1,26 +1,27 @@
-// Argon native chat: Copilot's persisted stateful_marker carries authenticated original model parts.
+// Antigravity native chat: Copilot's persisted stateful_marker carries authenticated original model parts.
 // Depends on the shared bounded transport, native-result validator, AES-GCM and request pairing checks.
 import * as vscode from 'vscode';
 import {
   antigravityNativeResponse, antigravityFailureOf, parseAntigravityNativeResult,
   buildAntigravityRequestBody, validateAntigravityFunctionCallPairing,
   createAntigravityReplayContext, sealGeminiReplay, openGeminiReplay,
-  type AntigravityCreds, type AntigravityTurn, type AntigravityReplayContext,
+  type AntigravityCreds, type AntigravityTurn, type AntigravityReplayContext, type AntigravityThinkingLevel,
 } from '@wisp/core';
 
 const MIME = 'stateful_marker';
+// Keep the original carrier/key labels so existing Argon conversations remain readable.
 const PREFIX = 'wisp.argon.native.v1.';
 // The account refresh token supplies secret key material; this label separates native and Bridge replay.
 const contextFor = (creds: AntigravityCreds | undefined) => createAntigravityReplayContext(creds, 'wisp.vscode.argon.v1');
-const historyError = (): never => { throw new Error('Argon conversation state is missing or invalid. Start a new chat if history was compacted, edited or switched from another model.'); };
-const accountError = (): never => { throw new Error('Argon sign-in changed or is incomplete. Sign in to Antigravity and start a new chat.'); };
+const historyError = (): never => { throw new Error('Antigravity conversation state is missing or invalid. Start a new chat if history was compacted, edited or switched from another model.'); };
+const accountError = (): never => { throw new Error('Antigravity sign-in changed or is incomplete. Sign in to Antigravity and start a new chat.'); };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const HISTORY_BYTES = 16 * 1024 * 1024;
-const tooLarge = (): never => { throw new Error('Argon conversation is too large to retain safely. Start a new chat with less context.'); };
+const tooLarge = (): never => { throw new Error('Antigravity conversation is too large to retain safely. Start a new chat with less context.'); };
 
 // shortcut: Local mode sends reference-only continuations; reload/eviction requires a new chat.
 // Classic Copilot retains its encrypted per-turn packets and does not depend on this cache.
-export class NativeArgonHistory {
+export class NativeAntigravityHistory {
   private entries = new Map<string, string>();
   private bytes = 0;
   get = (marker: string): AntigravityTurn[] | undefined => {
@@ -80,8 +81,10 @@ const turnsFrom = (messages: readonly vscode.LanguageModelChatRequestMessage[], 
       const original = readMarker(part, context, binding);
       if (seen.has(original.marker)) return historyError();
       seen.add(original.marker); turn.nativeParts = original.parts;
+    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith('image/') && turn.role === 'user') {
+      (turn.images ??= []).push({ mimeType: part.mimeType, dataBase64: Buffer.from(part.data).toString('base64') });
     } else {
-      throw new Error('Argon native chat currently accepts text and tool results only; this message contains an unsupported image or data part.');
+      throw new Error('Antigravity native chat received an unsupported data part. Use text, images or text tool results.');
     }
   }
   if (turn.role === 'assistant' && !turn.nativeParts) return historyError();
@@ -89,19 +92,19 @@ const turnsFrom = (messages: readonly vscode.LanguageModelChatRequestMessage[], 
   });
 };
 
-export const provideArgonChatResponse = async (args: {
-  model: string; baseUrl: string; maxOutputTokens?: number;
+export const provideAntigravityChatResponse = async (args: {
+  model: string; baseUrl: string; maxOutputTokens?: number; thinkingLevel?: AntigravityThinkingLevel;
   messages: readonly vscode.LanguageModelChatRequestMessage[];
   options: vscode.ProvideLanguageModelChatResponseOptions;
   progress: vscode.Progress<vscode.LanguageModelResponsePart>;
   signal: AbortSignal;
   current: () => Promise<AntigravityCreds | undefined>;
   stored: () => AntigravityCreds | undefined;
-  history: NativeArgonHistory;
+  history: NativeAntigravityHistory;
 }): Promise<void> => {
   const conversation = args.options.modelOptions?._conversationId;
   if (typeof conversation !== 'string' || !conversation.trim() || conversation.length > 2048) {
-    throw new Error('Argon native chat needs a VS Code Copilot conversation identity. Start a new Copilot chat.');
+    throw new Error('Antigravity native chat needs a VS Code Copilot conversation identity. Start a new Copilot chat.');
   }
   args.signal.throwIfAborted();
   let context = contextFor(args.stored()), creds: AntigravityCreds | undefined;
@@ -119,7 +122,7 @@ export const provideArgonChatResponse = async (args: {
   if (referenceOnly) {
     // Local prepends previous_response_id, then new instructions and incremental tool/user input.
     const original = readMarker(first, context, binding), saved = args.history.get(original.marker);
-    if (!saved) throw new Error('Argon Local chat state is no longer available after reload or cache eviction. Start a new chat.');
+    if (!saved) throw new Error('Antigravity Local chat state is no longer available after reload or cache eviction. Start a new chat.');
     const tail = turnsFrom(args.messages.slice(1), context, binding);
     if (tail.some(t => t.role === 'assistant')) return historyError();
     const instructions = tail.filter(t => t.role === 'system');
@@ -140,11 +143,13 @@ export const provideArgonChatResponse = async (args: {
   try {
     raw = await antigravityNativeResponse({ creds: creds!, baseUrl: args.baseUrl, model: args.model, messages, tools,
       toolChoice: args.options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
-      maxOutputTokens: args.maxOutputTokens, preserveSystemText: true, strictCompletion: true, signal: args.signal });
+      // The native descriptor already bounds this reserve using the account catalogue or its fallback.
+      modelMaxOutputTokens: args.maxOutputTokens, allowCapacityFallback: true,
+      maxOutputTokens: args.maxOutputTokens, thinkingLevel: args.thinkingLevel, preserveSystemText: true, strictCompletion: true, signal: args.signal });
   } catch (error) {
     args.signal.throwIfAborted();
     const status = antigravityFailureOf(error)?.status;
-    throw new Error(`Argon request failed${status ? ` (HTTP ${status})` : ''}. Retry the turn.`);
+    throw new Error(`Antigravity request failed${status ? ` (HTTP ${status})` : ''}. Retry the turn.`);
   }
   args.signal.throwIfAborted();
   if (contextFor(args.stored())?.snapshot !== current.snapshot) return accountError();
@@ -181,7 +186,7 @@ export const provideArgonChatResponse = async (args: {
       prompt_tokens_details: { cached_tokens: usage.cachedContentTokenCount },
       completion_tokens_details: { reasoning_tokens: usage.thoughtsTokenCount } })), 'usage'));
   } catch {
-    throw new Error('Argon returned an incomplete or unsupported response. No tools were executed; retry the turn.');
+    throw new Error('Antigravity returned an incomplete or unsupported response. No tools were executed; retry the turn.');
   }
   args.signal.throwIfAborted();
   if (!checkpoint || !args.history.remember(checkpoint.marker, [...messages, checkpoint.turn])) return tooLarge();

@@ -16,22 +16,24 @@ const user = (...parts: unknown[]) => message(1, ...parts);
 const assistant = (...parts: unknown[]) => message(2, ...parts);
 const text = (value: string) => new vscode.LanguageModelTextPart(value);
 const requests: any[] = [];
-const frame = (parts: any[], finishReason = 'STOP') => `data: ${JSON.stringify({ response: { candidates: [{ content: { role: 'model', parts }, finishReason }] } })}\n\n`;
+const frame = (parts: any[], finishReason = 'STOP') => JSON.stringify({ response: { candidates: [{ content: { role: 'model', parts }, finishReason }],
+  usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20 } } });
 let response: () => Response;
 const setup = (model = 'gemini-3-flash', overrides: Partial<ChatProviderDeps> = {}) => {
+  const creds = { accessToken: 'test-token', refreshToken: 'test-refresh', projectId: 'test-project' };
   const deps = { providers: [antigravity], modelMap: () => ({ antigravity: model }), customBaseUrl: () => '',
     keyFor: async () => '', clientFor: async () => undefined,
     codexSignedIn: async () => false, codexCreds: async () => undefined,
     anthropicSignedIn: async () => false, anthropicCreds: async () => undefined,
     xaiSignedIn: async () => false, xaiCreds: async () => undefined,
     antigravitySignedIn: async () => true,
-    antigravityCreds: async () => ({ accessToken: 'test-token', projectId: 'test-project' }),
+    antigravityCreds: async () => creds, antigravityStoredCreds: () => creds,
     effort: () => 'medium', log: () => {}, ...overrides } as ChatProviderDeps;
   registerWispChatProvider(deps);
   const provider = vscode.testing.chat;
   const send = async (messages = [user(text('hello'))], opts: any = {}, cancellation = token()) => {
     const output: any[] = [];
-    await provider.provideLanguageModelChatResponse({ id: 'antigravity' }, messages, { toolMode: 1, ...opts },
+    await provider.provideLanguageModelChatResponse({ id: 'antigravity' }, messages, { toolMode: 1, modelOptions: { _conversationId: 'test-conversation' }, ...opts },
       { report: (part: any) => output.push(part) }, cancellation);
     return { output, cancellation };
   };
@@ -41,7 +43,7 @@ beforeEach(() => {
   requests.length = 0;
   response = () => new Response(frame([{ text: 'answer' }]));
   vi.stubGlobal('fetch', async (url: any, init: any) => {
-    if (String(url).includes(':streamGenerateContent')) { requests.push({ url: String(url), init, body: JSON.parse(init.body) }); return response(); }
+    if (String(url).includes(':generateContent')) { requests.push({ url: String(url), init, body: JSON.parse(init.body) }); return response(); }
     return Response.json({});
   });
 });
@@ -79,9 +81,10 @@ describe('native VS Code Antigravity chat', () => {
     const infos = await provider.provideLanguageModelChatInformation();
     expect(infos).toHaveLength(1); expect(infos[0].capabilities.toolCalling).toBe(true);
   });
-  it('delivers the actual Cloud Code text stream and disposes cancellation', async () => {
+  it('delivers the Cloud Code reply with state and disposes cancellation', async () => {
     const { output, cancellation } = await setup().send();
-    expect(output).toEqual([text('answer')]);
+    expect(output.filter(p => p instanceof vscode.LanguageModelTextPart)).toEqual([text('answer')]);
+    expect(output.some(p => p instanceof vscode.LanguageModelDataPart && p.mimeType === 'stateful_marker')).toBe(true);
     expect(requests[0].init.headers.Authorization).toBe('Bearer test-token');
     expect(requests[0].body.request.contents[0].parts[0].text).toBe('hello');
     expect(cancellation.dispose).toHaveBeenCalledOnce();
@@ -91,16 +94,17 @@ describe('native VS Code Antigravity chat', () => {
     const { send } = setup();
     const tools = [{ name: 'read_file', description: 'Read', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }];
     const first = await send([user(text('read it'), new vscode.LanguageModelDataPart(new Uint8Array([1,2]), 'image/png'))], { tools, toolMode: 2 });
-    expect(first.output).toEqual([new vscode.LanguageModelToolCallPart('native-call-1', 'read_file', { path: 'a.ts' })]);
+    expect(first.output.filter(p => p instanceof vscode.LanguageModelToolCallPart)).toEqual([new vscode.LanguageModelToolCallPart('native-call-1', 'read_file', { path: 'a.ts' })]);
     expect(requests[0].body.request.toolConfig.functionCallingConfig.mode).toBe('ANY');
     expect(requests[0].body.request.contents[0].parts).toContainEqual({ inlineData: { mimeType: 'image/png', data: 'AQI=' } });
     response = () => new Response(frame([{ text: 'done' }]));
-    await send([user(text('read it')), assistant(...first.output), user(new vscode.LanguageModelToolResultPart('native-call-1', [text('file contents')]))], { tools });
+    await send([user(text('read it')), assistant(...first.output.filter(p => !(p instanceof vscode.LanguageModelDataPart) || p.mimeType === 'stateful_marker')),
+      user(new vscode.LanguageModelToolResultPart('native-call-1', [text('file contents')]))], { tools });
     const contents = requests[1].body.request.contents;
     expect(contents[1].parts[0].functionCall).toMatchObject({ id: 'native-call-1', name: 'read_file', args: { path: 'a.ts' } });
     expect(contents[2].parts[0].functionResponse).toMatchObject({ id: 'native-call-1', name: 'read_file' });
   });
-  it.each(['gemini-4-argon', 'gemini-3.1-flash-image', 'unqualified-model'])('hides and refuses unsupported %s before network', async model => {
+  it.each(['gemini-3.1-flash-image'])('hides and refuses image-generation %s before network', async model => {
     const { provider, send } = setup(model);
     expect(await provider.provideLanguageModelChatInformation()).toEqual([]);
     await expect(send()).rejects.toThrow(/native chat/i); expect(requests).toHaveLength(0);
@@ -125,12 +129,12 @@ describe('native VS Code Antigravity chat', () => {
     const work = send(undefined, {}, cancellation); await start; cancellation.cancel();
     expect((await work).output).toEqual([]); expect(requests).toHaveLength(1); expect(cancellation.dispose).toHaveBeenCalledOnce();
   });
-  it('rejects a stream cut off before completion', async () => {
+  it('rejects a reply cut off before completion', async () => {
     response = () => new Response(frame([{ text: 'partial' }], ''));
-    await expect(setup().send()).rejects.toThrow(/before completion/);
+    await expect(setup().send()).rejects.toThrow(/incomplete/);
   });
   it('refuses tool calls without original upstream ids', async () => {
     response = () => new Response(frame([{ functionCall: { name: 'read_file', args: {} } }]));
-    await expect(setup().send()).rejects.toThrow(/tool call/i);
+    await expect(setup().send()).rejects.toThrow(/unsupported response/i);
   });
 });

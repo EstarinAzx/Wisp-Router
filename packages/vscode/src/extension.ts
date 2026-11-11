@@ -273,7 +273,9 @@ const fetchModelIds = async (providerId = activeProvider().id): Promise<string[]
   if (isAntigravityProvider(p)) {
     const creds = await antigravityAuth.current();
     if (!creds?.accessToken) throw new Error('Sign in to Antigravity to discover models.');
-    return fetchAntigravityModels(creds, resolveBaseUrl(p, ''));
+    const models = await fetchAntigravityModels(creds, resolveBaseUrl(p, ''));
+    chatModelsChanged?.fire();
+    return models;
   }
   if (isCodexProvider(p)) {
     const result = await loadCodexModels(true);

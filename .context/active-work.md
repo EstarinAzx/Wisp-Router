@@ -1,23 +1,25 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-11-11
+updated: 2026-11-12
 tags: [context, active-work, vscode]
 ---
 
 # Active Work
 
-_Last updated: 2026-11-11 by Codex (GPT-6 Astra)._
+_Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
 _Argon implementation: 427993c (Local continuation), 33c8895 (exact tool pairing), 05a5f4a (native adapter). PR #232 tracks integration._
 
 ## Current focus
 
-Implementation and independent review are complete. The user deferred hands-on Argon testing to the next session and requested ownership transfer plus integration into local `main`. The next session belongs in the **primary checkout on `main`**, not the retained development worktree. [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232) remains the remote integration vehicle; no release/install is requested.
+The user confirmed basic Argon Local chat works, then requested support for discovered Antigravity models without per-name patches and correction of the 128K context display. The repair uses one native text/chat adapter and account-discovered limits. Core2073/TUI201, core/TUI typechecks and extension build passed. One independent review returned three P2 findings, all fixed with failing-then-passing regressions. Work remains in the **primary checkout on `main`**. The reopened host shows **gemini-4-carbon-high, Context1M**. [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232) remains open; these new changes have not been published.
 
 **Workspace guard:** if this file is being read from a linked worktree or a branch other than `main`, use `git worktree list --porcelain` to locate `refs/heads/main`, then read that checkout's `.context/pick-up.md`. That is the single authoritative baton. Older `wisp/` notes and backup snapshots are historical, not alternative current batons.
 
 ## Work contract
 
+- **Current scope:** khitarashi, 2026-11-12: Argon works; remove per-model Antigravity support hardcoding and fix the context display. Implementation plan/evidence: `.claude/vscode-parity/dynamic-models-plan.md`. Live catalogue metadata confirms Argon and Carbon context 1,048,576, output 65,536/262,144 respectively. This is catalogue evidence, not full-window generation acceptance.
+- **Current host:** the user requested a reload for Argon/Carbon testing and reported Argon success afterward. After the repair, the host had closed and was reopened from this primary checkout with the final build; observed VS Code1.146.0, Wisp ready, Carbon-high Context1M. No generation prompt or model/settings change was sent. Local chat needs a new conversation after reload.
 - **Authority:** khitarashi, 2026-11-11, after screenshots and explanations of all four areas: “all the fixes needed for the vscode extension do it on next main”. Execute repairs, not another diagnosis-only response. Detailed scope/boundaries: `.claude/vscode-parity/brief.md`.
 - **Continuation:** khitarashi's “continue” after the push-and-open-PR next step authorized branch publication and PR creation on 2026-11-11. PR #232 is open; no merge, release, installation or reload approval was added.
 - **Argon scope:** user said “interesting how it doesnt recognise argon. you have to fix that”, then “sorry mb continue”. Implement working native Argon delivery and continuation, not just picker visibility. Plan/evidence: `.claude/vscode-parity/argon-plan.md`. Their requested dev host remains open; preserve real settings/auth and do not force-reload it.
@@ -30,19 +32,19 @@ Implementation and independent review are complete. The user deferred hands-on A
 - **Review disposition:** reviewer `303581b2-b8b2-4d07-b29b-c9d008303b5c` covered all 20 initial files in `2cfab42..dc49531` (report `.claude/vscode-parity/review.md`). Its three P2 findings were fixed in `607d359` with observed failing-then-passing tests: repeated sign-out, same-provider credential replacement and the full automatic-discovery deadline. The inline workflow uses one final review and a regression-tested correction pass, not a second review claim.
 - **Argon review:** `ca2f3228-55ac-4b27-83eb-c8997bf2b773` reviewed `a263f2d..05a5f4a`; its sole P2 pairing issue is fixed at33c8895 with failing-then-passing unknown/duplicate/whitespace-ID regressions and a real-host refusal check. Report `.claude/vscode-parity/argon-review.md`; reviewer archived.
 - **Local review:** `20921d38-e92d-462d-823d-67eba81aec38` reviewed all six files in `33c8895..427993c`: PASS, no verified actionable findings. Report `.claude/vscode-parity/argon-local-review.md`; independent checks included38 Argon tests, pinned source contracts and additional scope/cache/refusal probes.
-- **Pending:** no implementation/review worker. Ownership handoff uses the local state/receipt above. Real-provider and interactive Local compaction acceptance remain untested. The successor waits for the user next session.
-- **Checkpoint:** implementation complete; user testing deferred. Integration receipts must establish the primary-main revision and preservation before transfer. Remote merge/release/install/forced reload remain outside this local-only grant.
+- **Review completion:** `a56a1c74-7a70-4c5c-9891-48a1a7e7de4f` reviewed the full change from27ee22d, including new `nativeAntigravityChat.ts`. Disposition/evidence: `.claude/vscode-parity/dynamic-models-review.md`; four failing regressions for three P2 findings became green, followed by the full suite/build. No review worker remains pending.
+- **Checkpoint:** repair and host refresh complete; await user testing. Exact local revision and checks are in `.claude/vscode-parity/dynamic-models-complete.json`. All233 original untracked files hash-match their preservation manifest. No remote merge/push/release/install is authorized by this repair; broad live generations/full-window/interactive compaction remain unverified.
 
 ## Pick up here
 
-Wait for the user in the next-session root chat. When they are ready, verify primary `main` and the handoff receipt, then open a development host from **that checkout's `packages/vscode`** and choose an exact Argon low/medium/high model in a new chat. The currently open dev host was launched from the old worktree, so merely reloading it does not change its source path. Do not close/reload it or make live generations now. Do not repeat implementation/review or revive the old audit/release.
+Wait for the user's test result in the current root chat. The running development host loads **this checkout's `packages/vscode`**, with Carbon-high selected and Context1M visible. Use a new Local chat after reload; do not repeat the completed implementation/review or send unrequested provider generations. Do not revive historical experiments or publish the branch.
 
 ## Implementation calls
 
-- Argon low/medium/high has a native text/tool adapter for VS Code1.145.3+. Classic Copilot uses encrypted per-assistant packets; Local sends only a previous marker and incremental input, restored from a32-checkpoint/16MiB serialized-history memory cache. Authenticate account/endpoint/tier/conversation before lookup. Local needs a new chat after reload/eviction; classic full history remains independently replayable. No Bridge secret/start or disk conversation store is used. Missing/tampered state fails before transport. Images, Carbon/other unqualified IDs and Antigravity Inquire remain unsupported.
+- Antigravity text/chat models share the native adapter on VS Code1.145.3+, including Carbon/new IDs. Account metadata supplies context/output/image-input capability. Classic Copilot uses encrypted per-assistant packets; Local restores incremental input from a32-checkpoint/16MiB memory cache. Authenticate account/endpoint/model/conversation before lookup. Local needs a new chat after reload/eviction; classic history remains independently replayable. Image-generation output and Antigravity Inquire remain unsupported. Bridge qualification is unchanged.
 - `wisp.codexContextWindows` is optional, machine/user-scoped and keyed by exact model ID. Defaults remain account metadata; overrides cannot exceed the known maximum, or known default when the maximum is missing. No native Codex config import/mutation and no blanket API-sized context.
 - Traycer browser DOM automation passed, but screenshot/viewport requests timed out. Isolated headless Chrome supplied the inspected captures; no real browser profile was used. Canvas inline rendering is unavailable; the canvas remains a Task artifact.
-- The user-requested dev window remains attached to the old worktree. Keep that worktree until the user has moved testing to the primary checkout and separately agrees to cleanup. Review workers and isolated test windows completed. One temporary test-profile askpass socket resisted cleanup; its remainder is recorded locally and no permissions or user processes were changed.
+- Testing has moved to the primary checkout. Retain the old worktree until the user separately agrees to cleanup. One earlier temporary test-profile askpass socket resisted cleanup; its remainder is recorded locally and no permissions or user processes were changed.
 - Review corrections persist unique sign-out tombstones (legacy empty tombstones are marked before sign-in), scope model replies to a process-local HMAC credential version, and include token/project preparation inside the four-second panel fallback. A full-suite test collision on callback port 51121 was fixed by isolating the extension-test listener; the real auth loopback tests remain intact.
 
 ## Boundaries and earlier work

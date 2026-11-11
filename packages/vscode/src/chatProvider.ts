@@ -37,9 +37,9 @@ import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
-import { isAntigravityProvider, isAntigravityArgonModel, antigravityStream, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds } from '@wisp/core';
+import { isAntigravityProvider, fetchAntigravityModelInfos, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds, type AntigravityModelInfo } from '@wisp/core';
 import { antigravityNativeChatError } from './nativeChatSupport';
-import { NativeArgonHistory, provideArgonChatResponse } from './nativeArgonChat';
+import { NativeAntigravityHistory, provideAntigravityChatResponse } from './nativeAntigravityChat';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -119,7 +119,7 @@ const toAnthropicMessages = (messages: readonly vscode.LanguageModelChatRequestM
 // Implements the three LanguageModelChatProvider methods over Wisp's catalog. The model `id` we
 // advertise IS the Provider id, so the response/token methods map it straight back to a Provider.
 const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => {
-  const argonHistory = new NativeArgonHistory();
+  const antigravityHistory = new NativeAntigravityHistory();
   return ({
   onDidChangeLanguageModelChatInformation: deps.onDidChangeModels,
   // Advertise one model per usable Provider. Key presence is async (the injected resolver) so resolve it for
@@ -137,13 +137,28 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
               : !!(await deps.keyFor(p))] as const),
     );
     const keyed = Object.fromEntries(keyedPairs);
+    const antigravityProvider = deps.providers.find(isAntigravityProvider);
+    let antigravityAccount = deps.antigravityStoredCreds?.();
+    let antigravityTimer: ReturnType<typeof setTimeout> | undefined;
+    const accountModels: Promise<AntigravityModelInfo[]> = antigravityProvider && keyed[antigravityProvider.id]
+      ? Promise.race([
+        (async () => {
+          const creds = await deps.antigravityCreds();
+          if (!creds?.accessToken) return [];
+          antigravityAccount = { refreshToken: creds.refreshToken, projectId: creds.projectId };
+          const models = await fetchAntigravityModelInfos(creds, resolveBaseUrl(antigravityProvider, deps.customBaseUrl()));
+          return models;
+        })().catch(() => []),
+        new Promise<AntigravityModelInfo[]>(resolve => { antigravityTimer = setTimeout(() => resolve([]), 4000); }),
+      ]).finally(() => clearTimeout(antigravityTimer)) : Promise.resolve([]);
     // Pull the real context/output/vision from models.dev. Race a timeout so a cold/slow fetch never
     // stalls the picker — it keeps caching in the background, so the next open is accurate; missing
     // data just falls back to the table/default inside buildChatModelInfos.
-    const catalog = await Promise.race([
+    const [catalog, antigravityModels] = await Promise.all([Promise.race([
       getModelsDevCatalog(),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
-    ]);
+    ]), accountModels]);
+    const antigravityInfo = (id: string) => antigravityModels.find(model => model.id === id);
     // Codex's account catalogue takes precedence over public API metadata for context and vision.
     // Other OAuth providers use models.dev with their existing offline capability fallbacks.
     const codexProvider = deps.providers.find(isCodexProvider);
@@ -151,13 +166,22 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       ? await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) }) : undefined;
     const codexModels = codexResult?.models ?? [];
     const codexInfo = (id: string) => codexModels.find((m) => m.id === id);
+    // Validate after every discovery await, including other providers' catalogues.
+    if (antigravityProvider && deps.antigravityStoredCreds) {
+      const stored = deps.antigravityStoredCreds();
+      if (!stored?.accessToken || stored.refreshToken !== antigravityAccount?.refreshToken || stored.projectId !== antigravityAccount?.projectId) {
+        keyed[antigravityProvider.id] = false;
+      }
+    }
     const contextOverrides = deps.codexContextWindows?.() ?? {};
     const caps = (provider: Provider, model: string) =>
       isCodexProvider(provider) ? ({ maxOutput: lookupModelsDevCaps(catalog, 'openai', model)?.maxOutput,
         ...codexModelCaps(model, codexInfo(model), contextOverrides[model]) })
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
-            : isAntigravityProvider(provider) ? { maxOutput: antigravityMaxCompletionTokens(model), vision: !isAntigravityArgonModel(model) && (model.startsWith('gemini-') || model.startsWith('claude-')) }
+            : isAntigravityProvider(provider) ? { contextInput: antigravityInfo(model)?.contextWindow,
+              maxOutput: antigravityInfo(model)?.maxOutputTokens ?? antigravityMaxCompletionTokens(model),
+              vision: antigravityInfo(model)?.supportsImages ?? false }
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed,
@@ -168,6 +192,13 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       effort: deps.effort(),
       codexInfo,
     }).map(info => {
+      if (antigravityProvider && info.id === antigravityProvider.id) {
+        const meta = antigravityInfo(resolveModel(modelMap, antigravityProvider));
+        return { ...info, tooltip: (meta?.contextWindow
+          ? `Antigravity account catalogue: ${meta.contextWindow} context tokens. `
+          : 'Antigravity context limit unavailable; using a conservative 128000-token fallback. ')
+          + `Native input budget: ${info.maxInputTokens}; output reserve: ${info.maxOutputTokens}.` };
+      }
       if (!codexProvider || info.id !== codexProvider.id) return info;
       const id = resolveModel(modelMap, codexProvider), meta = codexInfo(id), override = contextOverrides[id];
       return { ...info, tooltip: `Codex context: ${info.maxInputTokens + info.maxOutputTokens} total tokens (input + output). `
@@ -198,33 +229,10 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
 
     if (isAntigravityProvider(provider)) {
       try {
-        if (isAntigravityArgonModel(modelId)) {
-          await provideArgonChatResponse({ model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
-            maxOutputTokens: model.maxOutputTokens, messages, options, progress, signal: controller.signal,
-            current: deps.antigravityCreds, stored: deps.antigravityStoredCreds ?? (() => undefined), history: argonHistory });
-          return;
-        }
-        const creds = await deps.antigravityCreds();
-        if (controller.signal.aborted) return;
-        if (!creds?.accessToken) throw new Error('Sign in to Antigravity before using native chat.');
-        const tools = (options.tools ?? []).map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
-        let truncated = false;
-        for await (const ev of antigravityStream({ creds, model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
-          messages: toAnthropicMessages(messages), tools, toolChoice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
-          thinkingLevel: standardEffortToAntigravity(deps.effort()), strictCompletion: true, rejectRedirects: true, signal: controller.signal })) {
-          if (controller.signal.aborted) return;
-          if (ev.type === 'text') progress.report(new vscode.LanguageModelTextPart(ev.text));
-          if (ev.type === 'truncation') {
-            truncated = true;
-            progress.report(new vscode.LanguageModelTextPart(`\n\n_[Response truncated: ${ev.reason}]_`));
-          }
-          if (ev.type === 'tool_call' && !truncated) {
-            if (!ev.call.id || !ev.call.name) throw new Error('Antigravity returned a tool call without its original id or name.');
-            const input: unknown = JSON.parse(ev.call.argsJson);
-            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Antigravity returned invalid tool call arguments.');
-            progress.report(new vscode.LanguageModelToolCallPart(ev.call.id, ev.call.name, input));
-          }
-        }
+        await provideAntigravityChatResponse({ model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
+          maxOutputTokens: model.maxOutputTokens, thinkingLevel: standardEffortToAntigravity(deps.effort()),
+          messages, options, progress, signal: controller.signal, current: deps.antigravityCreds,
+          stored: deps.antigravityStoredCreds ?? (() => undefined), history: antigravityHistory });
       } catch (err) {
         if (controller.signal.aborted) return;
         deps.log('[error] Antigravity native chat failed');
@@ -369,7 +377,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     const str = typeof text === 'string' ? text : normalizeTurn(text).text;
     const p = deps.providers.find(p => p.id === _model.id);
     // Encrypted state hides its tokenizer input. Charge bytes conservatively instead of zero tokens.
-    const stateBudget = typeof text !== 'string' && p && isAntigravityProvider(p) && isAntigravityArgonModel(resolveModel(deps.modelMap(), p))
+    const stateBudget = typeof text !== 'string' && p && isAntigravityProvider(p)
       ? text.content.reduce((total: number, part) => total + (part instanceof vscode.LanguageModelDataPart && part.mimeType === 'stateful_marker' ? part.data.byteLength : 0), 0) : 0;
     return Math.ceil(str.length / 4) + stateBudget;
   },

@@ -4,6 +4,7 @@ import * as vscode from './fixtures/vscode';
 import { registerWispChatProvider } from '../../vscode/src/chatProvider';
 import { antigravityNativeChatError } from '../../vscode/src/nativeChatSupport';
 import { PROVIDERS } from '../src/catalog';
+import * as modelsDev from '../src/modelsDev';
 
 const provider = PROVIDERS.find(p => p.id === 'antigravity')!;
 const text = (value: string) => new vscode.LanguageModelTextPart(value);
@@ -20,10 +21,13 @@ const callParts = () => [
   { functionCall: { id: 'original-b', name: 'read_file', args: { path: 'b.ts' } }, futureState: { opaque: 'retain me' } },
 ];
 const requests: { body: any; signal: AbortSignal }[] = [];
-let next: any, onRequest: (() => void) | undefined;
+let next: any, onRequest: (() => void) | undefined, modelRows: Record<string, unknown>;
 beforeEach(() => {
   next = result([{ text: 'Hello back', thoughtSignature: 'private-signature' }]); requests.length = 0; onRequest = undefined;
+  modelRows = Object.fromEntries(['low', 'medium', 'high'].map(tier => [`gemini-4-argon-${tier}`,
+    { maxTokens: 1_048_576, maxOutputTokens: 65_536, supportsImages: true }]));
   vi.stubGlobal('fetch', async (url: any, init: any) => {
+    if (String(url).includes(':fetchAvailableModels')) return Response.json({ models: modelRows });
     if (String(url).includes(':generateContent')) {
       requests.push({ body: JSON.parse(init.body), signal: init.signal }); onRequest?.();
       return Response.json(next);
@@ -69,7 +73,103 @@ describe('Argon native VS Code chat', () => {
   it.each(['low', 'medium', 'high'])('advertises the signed-in Argon %s tier with truthful capabilities', async tier => {
     const rows = await setup(`gemini-4-argon-${tier}`).chat.provideLanguageModelChatInformation();
     expect(rows).toHaveLength(1); expect(rows[0].capabilities.toolCalling).toBe(true);
+    expect(rows[0].maxInputTokens + rows[0].maxOutputTokens).toBe(1_048_576);
+    expect(rows[0].maxOutputTokens).toBe(65_536);
+    expect(rows[0].capabilities.imageInput).toBe(true);
+  });
+  it.each([
+    ['gemini-4-carbon-high', 1_048_576, 262_144],
+    ['claude-sonnet-5-5-high', 1_000_000, 128_000],
+    ['future-chat-model', 345_000, 12_000],
+  ])('uses discovered limits for %s without a name allowlist', async (model, context, output) => {
+    modelRows[model] = { maxTokens: context, maxOutputTokens: output, supportsImages: false };
+    const rows = await setup(model).chat.provideLanguageModelChatInformation();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].maxInputTokens + rows[0].maxOutputTokens).toBe(context);
+    expect(rows[0].maxOutputTokens).toBe(output);
     expect(rows[0].capabilities.imageInput).not.toBe(true);
+  });
+  it('labels unavailable limits rather than presenting the fallback as account metadata', async () => {
+    modelRows = {};
+    const [row] = await setup().chat.provideLanguageModelChatInformation();
+    expect(row.maxInputTokens + row.maxOutputTokens).toBe(128_000);
+    expect(row.tooltip).toMatch(/fallback/i);
+  });
+  it('uses the discovered output reserve on the wire even when the static table is older', async () => {
+    modelRows['gemini-3-flash'] = { maxTokens: 1_048_576, maxOutputTokens: 131_072 };
+    const h = setup('gemini-3-flash'), [descriptor] = await h.chat.provideLanguageModelChatInformation();
+    expect(descriptor.maxOutputTokens).toBe(131_072);
+    await h.chat.provideLanguageModelChatResponse(descriptor, firstMessages(),
+      { toolMode: 1, tools, modelOptions: { _conversationId: 'dynamic-limit-session' } }, { report() {} },
+      { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+    expect(requests[0].body.request.generationConfig.maxOutputTokens).toBe(131_072);
+  });
+  it.each(['signOut', 'changeAccount'] as const)('hides stale account limits after %s while another catalogue is pending', async change => {
+    let release!: (value: any) => void, fetched = false;
+    const delayed = new Promise<any>(resolve => { release = resolve; });
+    vi.spyOn(modelsDev, 'getModelsDevCatalog').mockReturnValue(delayed);
+    vi.stubGlobal('fetch', async (url: any) => {
+      if (String(url).includes(':fetchAvailableModels')) fetched = true;
+      return Response.json({ models: modelRows });
+    });
+    const h = setup(), pending = h.chat.provideLanguageModelChatInformation();
+    await vi.waitFor(() => expect(fetched).toBe(true));
+    h[change](); release(undefined);
+    expect(await pending).toEqual([]);
+  });
+  it('fails over a confirmed capacity rejection with the identical request and conversation state', async () => {
+    const calls: { url: string; body: string }[] = [];
+    vi.stubGlobal('fetch', async (url: any, init: any) => {
+      if (!String(url).includes(':generateContent')) return Response.json({});
+      calls.push({ url: String(url), body: init.body });
+      return calls.length === 1 ? new Response('no capacity available', { status: 503 }) : Response.json(next);
+    });
+    const output = await setup('gemini-3-flash').send();
+    expect(output.filter(p => p instanceof vscode.LanguageModelTextPart)).toEqual([text('Hello back')]);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain('daily-cloudcode-pa');
+    expect(calls[1].url).toContain('//cloudcode-pa');
+    expect(calls[0].body).toBe(calls[1].body);
+  });
+  it.each([400, 429, 500])('does not fail over an ambiguous or non-capacity HTTP %s failure', async status => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: any) => {
+      if (!String(url).includes(':generateContent')) return Response.json({});
+      calls.push(String(url)); return new Response('rejected', { status });
+    });
+    await expect(setup().send()).rejects.toThrow(/request failed/);
+    expect(calls).toHaveLength(1);
+  });
+  it.each(['gemini-4-carbon-high', 'claude-sonnet-5-5-high', 'gpt-oss-120b-medium', 'future-chat-model'])
+  ('retains exact model state and Local tool continuation for %s', async model => {
+    const h = setup(model), original = callParts();
+    original[3].thoughtSignature = 'second-original-signature';
+    next = result(original); next.response.modelVersion = `${model}-upstream-version`;
+    const first = await h.send(undefined, { toolMode: 2 });
+    expect(first.filter(p => p instanceof vscode.LanguageModelToolCallPart)).toHaveLength(2);
+    next = result([{ text: 'Done' }]); next.response.modelVersion = `${model}-upstream-version`;
+    await h.send([localHeader(first), message(1,
+      new vscode.LanguageModelToolResultPart('original-a', [text('A')]),
+      new vscode.LanguageModelToolResultPart('original-b', [text('B')]))]);
+    expect(requests[0].body.model).toBe(model);
+    expect(requests[1].body.request.contents[1].parts).toEqual(original);
+    await h.send(followup(first).slice(0, -1).concat(message(1,
+      new vscode.LanguageModelToolResultPart('original-a', [text('A')]),
+      new vscode.LanguageModelToolResultPart('original-b', [text('B')]))));
+    expect(requests[2].body.request.contents[1].parts).toEqual(original);
+  });
+  it('forwards image input and retains it through Local continuation', async () => {
+    const h = setup();
+    const first = await h.send([message(1, text('Look'), new vscode.LanguageModelDataPart(new Uint8Array([1, 2]), 'image/png'))]);
+    expect(requests[0].body.request.contents[0].parts).toContainEqual({ inlineData: { mimeType: 'image/png', data: 'AQI=' } });
+    await h.send([localHeader(first), message(1, text('Continue'))]);
+    expect(requests[1].body.request.contents[0].parts).toContainEqual({ inlineData: { mimeType: 'image/png', data: 'AQI=' } });
+  });
+  it('accepts a structurally valid native reply without an optional modelVersion', async () => {
+    delete next.response.modelVersion;
+    const h = setup('future-chat-model'), first = await h.send();
+    await h.send(followup(first));
+    expect(requests).toHaveLength(2);
   });
   it('emits an encrypted host marker and restores exact native parts after persistence', async () => {
     const h = setup(), original = structuredClone(next.response.candidates[0].content.parts);
@@ -123,26 +223,26 @@ describe('Argon native VS Code chat', () => {
   it('fails safely for a Local marker after a provider restart, while classic history remains usable', async () => {
     const first = setup(); const parts = await first.send();
     const restarted = setup();
-    await expect(restarted.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Argon/i);
+    await expect(restarted.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1);
     await restarted.send(followup(parts)); expect(requests).toHaveLength(2);
   });
   it('does not let a Local continuation cross conversation or account boundaries', async () => {
     const h = setup(); const parts = await h.send();
-    await expect(h.send([localHeader(parts), message(1, text('Continue'))], { modelOptions: { _conversationId: 'other-session' } })).rejects.toThrow(/Argon/i);
-    h.changeAccount(); await expect(h.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([localHeader(parts), message(1, text('Continue'))], { modelOptions: { _conversationId: 'other-session' } })).rejects.toThrow(/Antigravity/i);
+    h.changeAccount(); await expect(h.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1);
   });
   it('keeps Local continuation storage bounded and preserves the newest checkpoint', async () => {
     const h = setup(); let oldest: any[] = [], newest: any[] = [];
     for (let i = 0; i < 33; i++) { newest = await h.send(); if (!i) oldest = newest; }
-    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Antigravity/i);
     await h.send([localHeader(newest), message(1, text('Current branch'))]);
     expect(requests).toHaveLength(34);
   });
   it('refuses oversized continuation history before making a provider request', async () => {
     const h = setup();
-    await expect(h.send([message(1, text('x'.repeat(16 * 1024 * 1024 + 1)))])).rejects.toThrow(/Argon.*large/i);
+    await expect(h.send([message(1, text('x'.repeat(16 * 1024 * 1024 + 1)))])).rejects.toThrow(/Antigravity.*large/i);
     expect(requests).toHaveLength(0);
   });
   it('evicts Local checkpoints by aggregate bytes before the entry-count limit', async () => {
@@ -150,18 +250,18 @@ describe('Argon native VS Code chat', () => {
     for (let i = 0; i < 17; i++) {
       newest = await h.send([message(1, text('x'.repeat(1024 * 1024)))]); if (!i) oldest = newest;
     }
-    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Antigravity/i);
     await h.send([localHeader(newest), message(1, text('Current branch'))]);
     expect(requests).toHaveLength(18);
   });
   it('refuses positioned system instructions instead of silently hoisting them', async () => {
     const h = setup(), parts = await h.send();
-    await expect(h.send([...firstMessages(), persistedAssistant(parts), message(3, text('Late system instruction')), message(1, text('Next'))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([...firstMessages(), persistedAssistant(parts), message(3, text('Late system instruction')), message(1, text('Next'))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1);
   });
   it('rejects a duplicated replay packet within one conversation history', async () => {
     const h = setup(), parts = await h.send();
-    await expect(h.send([...followup(parts), persistedAssistant(parts), message(1, text('Next again'))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([...followup(parts), persistedAssistant(parts), message(1, text('Next again'))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1);
   });
   it('budgets opaque model state rather than treating a replay packet as zero tokens', async () => {
@@ -177,27 +277,27 @@ describe('Argon native VS Code chat', () => {
     if (kind === 'account') h.changeAccount();
     const active = kind === 'tier' ? setup('gemini-4-argon-low') : h;
     const before = active.refreshed.mock.calls.length;
-    await expect(active.send(messages, kind === 'session' ? { modelOptions: { _conversationId: 'another-session' } } : {})).rejects.toThrow(/Argon/i);
+    await expect(active.send(messages, kind === 'session' ? { modelOptions: { _conversationId: 'another-session' } } : {})).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1); expect(active.refreshed.mock.calls.length).toBe(before);
   });
   it('rejects unmatched results and altered tool arguments before transport', async () => {
     const h = setup(); next = result(callParts()); const parts = await h.send();
     const assistant = persistedAssistant(parts);
     (assistant.content.find(p => p instanceof vscode.LanguageModelToolCallPart) as any).input.path = 'tampered';
-    await expect(h.send([...firstMessages(), assistant, message(1, new vscode.LanguageModelToolResultPart('unknown', [text('A')]))])).rejects.toThrow(/Argon/i);
+    await expect(h.send([...firstMessages(), assistant, message(1, new vscode.LanguageModelToolResultPart('unknown', [text('A')]))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1);
   });
   it('refuses missing parallel tool results without another transport call', async () => {
     const h = setup(); next = result(callParts()); const parts = await h.send();
     await expect(h.send([...firstMessages(), persistedAssistant(parts), message(1,
-      new vscode.LanguageModelToolResultPart('original-a', [text('A')]))])).rejects.toThrow(/Argon/i);
+      new vscode.LanguageModelToolResultPart('original-a', [text('A')]))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1); expect(h.output).toEqual([]);
   });
   it.each([['unknown-a', 'unknown-b'], ['original-a', 'original-a'], ['original-a ', 'original-b']])('refuses same-count results with mismatched ids %s / %s before transport', async (a, b) => {
     const h = setup(); next = result(callParts()); const parts = await h.send();
     const refreshed = h.refreshed.mock.calls.length;
     await expect(h.send([...firstMessages(), persistedAssistant(parts), message(1,
-      new vscode.LanguageModelToolResultPart(a, [text('A')]), new vscode.LanguageModelToolResultPart(b, [text('B')]))])).rejects.toThrow(/Argon/i);
+      new vscode.LanguageModelToolResultPart(a, [text('A')]), new vscode.LanguageModelToolResultPart(b, [text('B')]))])).rejects.toThrow(/Antigravity/i);
     expect(requests).toHaveLength(1); expect(h.output).toEqual([]); expect(h.refreshed.mock.calls.length).toBe(refreshed);
   });
   it.each(['truncation', 'unknown tool', 'missing id', 'duplicate id', 'missing usage', 'oversized state'])('refuses %s before exposing executable output', async kind => {
@@ -208,18 +308,18 @@ describe('Argon native VS Code chat', () => {
     if (kind === 'duplicate id') next.response.candidates[0].content.parts[3].functionCall.id = 'original-a';
     if (kind === 'missing usage') delete next.response.usageMetadata;
     if (kind === 'oversized state') next.response.candidates[0].content.parts[0].text = 'x'.repeat(70000);
-    await expect(h.send()).rejects.toThrow(/Argon/i);
+    await expect(h.send()).rejects.toThrow(/Antigravity/i);
     expect(h.output).toEqual([]);
   });
   it('suppresses delivery if the account is signed out during generation', async () => {
     const h = setup(); onRequest = h.signOut;
-    await expect(h.send()).rejects.toThrow(/Argon/i);
+    await expect(h.send()).rejects.toThrow(/Antigravity/i);
     expect(h.output).toEqual([]);
   });
-  it('requires a conversation identity and refuses unqualified image input before transport', async () => {
+  it('requires a conversation identity and refuses unsupported data input before transport', async () => {
     const h = setup();
     await expect(h.send(undefined, { modelOptions: {} })).rejects.toThrow(/conversation/i);
-    await expect(h.send([message(1, new vscode.LanguageModelDataPart(new Uint8Array([1]), 'image/png'))])).rejects.toThrow(/image|part/i);
+    await expect(h.send([message(1, new vscode.LanguageModelDataPart(new Uint8Array([1]), 'application/octet-stream'))])).rejects.toThrow(/data|part/i);
     expect(requests).toHaveLength(0);
   });
   it('does not start a pre-cancelled request', async () => {

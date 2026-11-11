@@ -1037,8 +1037,8 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
  * The static model table — the FALLBACK the pickers show when the live list is unreachable (signed out,
  * offline, upstream error). Signed-in pickers prefer fetchAntigravityModels (the upstream's own
  * /v1internal:fetchAvailableModels answer), so a model released after this snapshot still appears; this
- * table also stays the source of the per-model output cap applyAntigravityFamilyForks clamps against —
- * the live payload's caps are not plumbed (a live-fetched unknown id simply goes unclamped).
+ * table also supplies the legacy output cap. Native chat passes its validated account-discovered
+ * reserve instead, so a stale fallback never overrides newer account limits.
  *
  * ⚠ ADVISORY, not a guarantee — and so is the LIVE list. #186 asked the upstream's own list and got 24
  * rows, several of which 400 on every request shape tried (gemini-3.1-pro-high among them, despite being
@@ -1074,14 +1074,26 @@ export const ANTIGRAVITY_MODELS: string[] = ANTIGRAVITY_MODEL_SPECS.map((spec) =
  * id, because the roster shifts under us (the usage-payload codename rule). Anything else stays, image
  * rows included: isAntigravityImageModel refuses those at selection, same as the static table.
  */
-export const parseAntigravityModels = (payload: unknown): string[] => {
+export type AntigravityModelInfo = {
+  id: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsImages?: boolean;
+};
+
+export const parseAntigravityModelInfos = (payload: unknown): AntigravityModelInfo[] => {
   const models = (payload as { models?: unknown } | undefined)?.models;
   if (!models || typeof models !== 'object' || Array.isArray(models)) return [];
-  return Object.keys(models)
-    .map((id) => id.trim())
-    .filter((id) => id && !id.startsWith('tab_') && !/^chat_\d+$/.test(id))
-    .sort();
+  const limit = (value: unknown): number | undefined => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  return Object.entries(models).map(([key, value]) => {
+    const row = isObj(value) ? value : {};
+    return { id: key.trim(), contextWindow: limit(row.maxTokens), maxOutputTokens: limit(row.maxOutputTokens),
+      supportsImages: typeof row.supportsImages === 'boolean' ? row.supportsImages : undefined };
+  }).filter(({ id }) => id && !id.startsWith('tab_') && !/^chat_\d+$/.test(id))
+    .sort((a, b) => a.id.localeCompare(b.id));
 };
+
+export const parseAntigravityModels = (payload: unknown): string[] => parseAntigravityModelInfos(payload).map(model => model.id);
 
 // The model's output ceiling, fed to applyAntigravityFamilyForks so a request that carries a larger
 // maxOutputTokens is clamped rather than 400'd. undefined = no published cap for this row.
@@ -1386,9 +1398,10 @@ export const buildAntigravityRequestBody = (args: {
   fallbackSessionId?: string;
   thinkingLevel?: AntigravityThinkingLevel;
   maxOutputTokens?: number;
+  modelMaxOutputTokens?: number;
   preserveSystemText?: boolean;
 }): Json => {
-  if (args.maxOutputTokens !== undefined && (!Number.isSafeInteger(args.maxOutputTokens) || args.maxOutputTokens <= 0)) {
+  if ([args.maxOutputTokens, args.modelMaxOutputTokens].some(value => value !== undefined && (!Number.isSafeInteger(value) || value <= 0))) {
     throw new Error('Invalid Antigravity output token limit');
   }
   const argon = isAntigravityArgonModel(args.model);
@@ -1403,18 +1416,20 @@ export const buildAntigravityRequestBody = (args: {
   let envelope = buildAntigravityEnvelope(args.model, payload, {
     projectId: args.projectId, requestId: args.requestId, sessionId,
   });
-  envelope = applyAntigravityFamilyForks(envelope, args.model, antigravityMaxCompletionTokens(args.model));
+  const outputLimit = args.modelMaxOutputTokens ?? antigravityMaxCompletionTokens(args.model);
+  envelope = applyAntigravityFamilyForks(envelope, args.model, outputLimit);
   if (antigravityNeedsSchemaSanitization(envelope)) {
     envelope = sanitizeAntigravityRequestSchemas(envelope, usesAntigravitySchema(args.model));
   }
   envelope = normalizeAntigravityFunctionResponses(envelope);
   // Last, deliberately: see applyAntigravityThinkingLevel — appending after every other stage is what keeps
   // their behaviour byte-identical on the rows this does not touch.
-  const request = applyAntigravityThinkingLevel(argon ? envelope : sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
+  const nativeState = args.messages.some(message => message.nativeParts !== undefined);
+  const request = applyAntigravityThinkingLevel(argon || nativeState ? envelope : sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
   // An explicit caller limit must survive the legacy family defaults. Omitted limits stay unchanged.
   if (args.maxOutputTokens !== undefined) {
     request.request.generationConfig = { ...request.request.generationConfig,
-      maxOutputTokens: Math.min(args.maxOutputTokens, antigravityMaxCompletionTokens(args.model) ?? args.maxOutputTokens) };
+      maxOutputTokens: Math.min(args.maxOutputTokens, outputLimit ?? args.maxOutputTokens) };
   }
   return request;
 };

@@ -17,23 +17,34 @@ request plus an opaque credential version, and older state snapshots are discard
 Account or nonempty key replacement clears accepted lists and routing caches, even when the signed-in
 boolean stays true. A process-local HMAC versions credentials without exposing them to the webview.
 
-Native chat adapts the shared Cloud Code stream: text, supported image inputs, tool definitions,
-required tool mode and tool results. Original tool-call IDs survive continuation. A missing ID is an
-error, not an invented ID. Cancellation aborts transport; incomplete streams report failure. A truncated
-reply is labelled and its tool calls are not executed. The initial supported set is the shared
-`ANTIGRAVITY_MODELS` text catalogue; being listed does not establish account entitlement or upstream
-availability. New discovered IDs still appear in the side panel, with an explanation if native chat
-has not qualified them. Inquire is a separate editor command and remains unavailable for Antigravity.
+Native chat uses one shared Cloud Code adapter for Antigravity text/chat models, including newly
+discovered IDs such as Carbon. There is no per-model native allowlist. Choose the model in Wisp's
+dropdown, then reopen the native chat picker. Being listed does not establish account entitlement or
+upstream availability. Image-generation models remain refused because the adapter has no image-output
+channel. Inquire is a separate editor command and remains unavailable for Antigravity.
 
-Argon `gemini-4-argon-low`, `gemini-4-argon-medium` and `gemini-4-argon-high` are available in native
-Copilot chat on VS Code 1.145.3 or newer. Choose the tier in Wisp's model dropdown, then reopen the
-native chat picker. This adapter supports text and tools; image input/output is not advertised.
-Argon replies are buffered until the complete native response is validated, before any tools are
-handed to VS Code. Other unknown models, including Carbon, still require separate qualification.
+The adapter requires VS Code 1.145.3 or newer and supports text, user image inputs, tool definitions,
+required tool mode and text tool results. Original tool-call IDs survive continuation; a missing ID is
+an error, not an invented ID. Replies are buffered until the complete native response is validated,
+before any tools are handed to VS Code. Cancellation aborts transport; incomplete or truncated responses
+fail without executing their tool calls. Response structure is validated independently of model names.
+The Bridge's existing Argon qualification remains separate from this native chat path.
+Native requests retain the same request ID and body when failing over an explicit capacity rejection;
+ambiguous transport failures and rate limits are not automatically retried.
 
-Each Argon assistant turn carries an AES-GCM encrypted packet in Copilot's `stateful_marker` data
+Native context, output limits and image-input capability come from the account's
+`fetchAvailableModels` metadata (`maxTokens`, `maxOutputTokens`, `supportsImages`). Input and output
+budgets sum to the reported context window; output is reserved within it, not added on top. Invalid
+limits are ignored. A missing or slow catalogue uses the conservative 128,000-token fallback and says so
+in the model tooltip. Discovery, including credential preparation, has a four-second fallback and is
+not cached across accounts. Explicit model refresh also refreshes the native descriptor.
+The account is checked again after all discovery awaits; signed-out or replaced accounts do not retain
+stale native rows. The descriptor's validated output reserve also takes precedence over legacy static
+caps in the outgoing request.
+
+Each assistant turn carries an AES-GCM encrypted packet in Copilot's `stateful_marker` data
 part. It contains the original model parts, thought signatures and tool IDs, bound to the account,
-endpoint, exact tier and Copilot conversation identity. The account's refresh token supplies secret key
+endpoint, exact model and Copilot conversation identity. The account's refresh token supplies secret key
 material with a separate native-chat domain label; no Bridge start or Bridge secret is needed.
 Restored assistant text and tool calls must match the authenticated native parts before transport.
 System instructions stay system instructions, and positioned mid-conversation system turns are refused
@@ -41,7 +52,7 @@ rather than silently moved. Credential changes during generation suppress delive
 
 VS Code's **Local** session mode sends a previous-response marker plus incremental input, rather than
 the full conversation. Wisp restores that path from an in-memory cache bounded to 32 checkpoints and
-16 MiB of serialized history. Markers are authenticated for the account, tier and conversation before
+16 MiB of serialized history. Markers are authenticated for the account, model and conversation before
 cache access; new leading instructions replace the cached ones. Local chats require a new conversation
 after extension reload or cache eviction. No conversation files or extra credentials are written.
 Classic Copilot history continues to use its self-contained encrypted packets without depending on
@@ -61,9 +72,10 @@ tool continuation, and rejection of an altered tool-result ID before another tra
 
 Copilot deliberately removes old markers when its summary generation changes. A summary-only request
 can start a new chain; retained assistant history without its state is refused with a new-chat message.
-Changing accounts or tiers also requires a new chat. Packets are limited to 64 KiB before encryption,
-and encrypted bytes count conservatively toward the estimated token budget. Live provider generations
-and interactive Copilot compaction remain untested; all generation tests intercept provider I/O.
+Changing accounts or models also requires a new chat. Packets are limited to 64 KiB before encryption,
+and encrypted bytes count conservatively toward the estimated token budget. Automated generation tests
+intercept provider I/O; advertising upstream limits is not a full-window generation qualification.
+Live coverage of every model and interactive Copilot compaction remain unverified.
 
 ## Codex context
 
