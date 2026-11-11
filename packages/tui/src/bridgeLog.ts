@@ -25,7 +25,8 @@ export const runLogCli = (args: string[], listOnly = false): number => {
   }
   const entries = readSessionLog(id);
   if (!entries.length) { console.error('Unknown or unavailable session ID. Run wisp logs to list recent sessions.'); return 1; }
-  console.log(sessionLabel(entries.at(-1)!));
+  const summary = listLogSessions(undefined, true).find(session => session.id === id);
+  console.log(sessionLabel(summary ?? { ...entries.at(-1)!, inFlight: 0 }));
   let sequence = -1;
   const print = () => {
     for (const entry of readSessionLog(id)) if (entry.sequence > sequence) {

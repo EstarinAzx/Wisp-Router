@@ -61,9 +61,9 @@ not passing live Local/forced-tool claims. Core2120/TUI187, typechecks/build pas
 
 ## Unit 3: release readiness and integration
 
-- [ ] Update release versions/changelogs/surface notes only after deliverables are verified. Check existing package/release scripts for all required version mirrors.
-- [ ] Run full core tests, TUI tests, package typechecks, extension/webview build; package VSIX and Windows binary and run existing isolated smokes. Retain command exits and source identities.
-- [ ] Complete CodeRabbit for new release-prep bytes; reuse matching completed source reviews. Verify final source tree matches tested/reviewed bytes.
+- [x] Update release versions/changelogs/surface notes only after deliverables are verified. Check existing package/release scripts for all required version mirrors.
+- [x] Run full core tests, TUI tests, package typechecks, extension/webview build; package VSIX and Windows binary and run existing isolated smokes. Retain command exits and source identities.
+- [x] Complete CodeRabbit for new release-prep bytes; reuse matching completed source reviews. Verify final source tree matches tested/reviewed bytes.
 - [ ] Integrate authorized commits into remote main through existing GitHub policy; reconcile remote changes and rerun affected checks if needed. Return this checkout to main. Confirm CI, clean intended working tree and exact remote revision.
 - [ ] Refresh baton, retain review/evidence links, and transfer ownership to a fresh verified root/main chat using PREPARE/READY/ACTIVATE. Final owner verifies readiness and presents the result. No tag/publication.
 

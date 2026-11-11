@@ -8,40 +8,41 @@ tags: [context, active-work, session-logs, vscode]
 # Active Work
 
 _Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Source: reviewed Unit 2 over 2b92446ab3fcf78dda4054546bbe5512489cdf33; exact local commit in `.claude/wisp-2.2.11/unit2-receipt.json`._
+_Verified product source: 15d3eae03f3d39e7a78475ce0623df6e56a08bef; integration/final revision is recorded in local `.claude/wisp-2.2.11/unit3-receipt.json` once settled._
 
 ## Current focus
 
-Wisp **2.2.11**: session logging and both reproduced Copilot SDK/Agent Host failures are implemented and review-passed. The next root owns release preparation and remote-main integration. No release readiness is claimed yet.
+Wisp **2.2.11** / companion **1.14.8** implementation and local release preparation are complete. PR [233](https://github.com/EstarinAzx/Wisp-Router/pull/233) passed four-platform CI and its automatic review. That review exposed a stale CLI detail heading; a two-file correction is now local, with focused RED/GREEN verified and full checks passed:2120 core,191 TUI/1027 assertions, types and rebuilt Windows package smokes. The user explicitly approved up to two follow-up logging reviews (existing cap3 ->5); attempt4 passed both changed files with zero issues before integration. The remaining acceptance is remote-main integration and final verification/presentation by a fresh ownership-transferred root. No publication or client installation is authorized.
 
 ## Work contract
 
-- **Authority:** khitarashi, 2026-11-12, root chat 4cbf4b5f-18e7-4f99-84e1-31a6607f68cc: full autonomous engineering, CodeRabbit ON, Traycer root relays, no worktrees, integrate into main and leave release-ready in a fresh ownership-transferred main chat. Approval excerpt and acceptance: local `.claude/relay/wisp-2.2.11.body.md`.
-- **Requirements:** `docs/superpowers/specs/2026-11-12-session-logs-copilot-design.md`; plan `docs/superpowers/plans/2026-11-12-session-logs-copilot.md`. Do not repeat planning or ask for design approval already covered by autonomy.
-- **Execution:** primary checkout only, one inline root owner. `.claude/relay/wisp-2.2.11.traycer.json` owns runtime identity/phase; N=1 meaningful unit per leg, max20. This checkpoint was written by 21e2d4f4-4b08-4e20-960f-bb231f121db6 in leg3; the control JSON names the current owner. Preserve GUI settings across roots.
-- **Review:** [[review-policy]] on. Session-logs **passed at 3/3**, Copilot **passed at 1/3**, release-prep **not started at 0/3**. No pending run or unresolved finding. Copilot attempt1 completed exit0, all8 paths covered, zero issues; delivered source/instruction hashes match. Local `.claude/relay/wisp-2.2.11.body.md` is the single budget ledger; `.claude/wisp-2.2.11/unit{1,2}-receipt.json` and `copilot-review-1/` retain evidence. Reuse matching reviews; do not reopen identical source.
-- **Integration:** versioned context/docs; local relay/evidence ignored. Commit/PR/merge into remote main authorized. No tag/publication, actual client installation/restart or historical cleanup. No worktree creation/use.
-- **Pending:** no implementation worker or review. Root transfer identifiers/thread live in relay JSON. Only ACTIVATE grants a successor body ownership.
-- **Checkpoint:** Units1/2 are review-passed; exact local commits are in their receipts. Unit3 is the next authorized substantive work.
+- **Authority:** khitarashi, 2026-11-12, root chat4cbf4b5f-18e7-4f99-84e1-31a6607f68cc: full autonomous engineering, CodeRabbit ON, root relays, primary checkout only/no worktrees, integrate main and leave release-ready in a fresh ownership-transferred main chat. Approval excerpt and acceptance: local `.claude/relay/wisp-2.2.11.body.md`.
+- **Requirements:** `docs/superpowers/specs/2026-11-12-session-logs-copilot-design.md`; plan `docs/superpowers/plans/2026-11-12-session-logs-copilot.md`. Completed units stay complete.
+- **Execution:** one inline root owner; local `.claude/relay/wisp-2.2.11.traycer.json` owns identity/phase. N=1 meaningful unit per leg, max20. Only matching ACTIVATE grants a successor body ownership. Preserve GUI settings.
+- **Review:** [[review-policy]] on. Single budget ledger is the relay body: session-logs **passed4/5** (original3 consumed; user approved two follow-ups for the stale-heading fix), Copilot **passed1/3**, release-prep **passed1/3**. Logging attempt4 completed2/2 with zero issues; immutable snapshot, exit0 and dispositions are in `heading-review-4/`. Release scope14/14, zero issues; exact source/instructions in `release-review-1/manifest.json`, dispositions adjacent. Reuse matching earlier reviews; never reset budgets or reopen unchanged scopes.
+- **Integration:** versioned context/docs; ignored local evidence/relay. Commit/PR/merge into remote main authorized. No tag/publication, real-client installation/restart, historical cleanup, or worktree creation/use.
+- **Evidence:** local `.claude/wisp-2.2.11/unit{1,2,3}-receipt.json`, `release-checks.json`, `release-package-receipt.json`, `release-ci.json`, and `release-prior-review-check.json`. Original reviewed product source commit15d3eae; Units1/2 commits2b92446/2c3ea709. The heading correction passed review4/5; `stale-heading-red.log`, `stale-heading-green.log`, `heading-fix-checks.json` and `release-pr-review-dispositions.json` record its state.
+- **Pending:** push corrected PR head, recheck CI and integrate; no implementation worker, CLI review or disposable test host. Relay JSON carries any pending root transfer thread.
+- **Checkpoint:** Unit3 initial local checks and scoped release review complete. Fix and reverify the final PR display bug, settle the authorized focused logging review, then integrate and transfer final readiness ownership. Never relabel the logging correction as a new checkpoint.
 
-## State
+## Verified state
 
-- Unit1 local commit `2b92446`: bounded shared per-session logs across CLI/TUI/VS Code; lifecycle-only serve stdout; safe request attribution and multi-process regression coverage. Its evidence remains closed and unchanged.
-- Unit2 reproduced the actual installed VS Code1.146.0 (`69047191fc`) / Copilot0.74.0 SDK harness. Full history dropped response-ID markers between user turns; Wisp now carries the same authenticated packet in reasoning `encrypted_content`. Matching dual carriers are accepted; missing, altered, duplicate or conflicting state is rejected. No cache-based unauthenticated recovery or plaintext thinking.
-- Cloud Code's Claude tool-use replies ended with `OTHER`. Native chat now recognizes only well-formed tool calls with exact requested/returned Claude model identity. Default Bridge validation stays STOP-only. Truncation, safety stops, bad IDs, bad arguments and account/model/conversation changes remain guarded.
-- Real SDK UI/live transport: Carbon high and Claude Opus5.5 high each read a controlled file, returned PEAR, then answered OK in the next user turn. Sanitized evidence: `copilot-host-events.jsonl`. RED/GREEN logs: `copilot-carrier-*`, `copilot-claude-*`; clean real API synthetic receipt: `synthetic-host-receipt.json`.
-- Final checks: **2120 core +187 TUI tests**, both typechecks and extension/webview build pass on Bun1.4.2; `copilot-checks.json`. CodeRabbit0.9.5 completed 8/8 files with0 issues. Clean build contains no diagnostic hooks.
-- Classic Local UI asked for GitHub sign-in in the isolated profile and was stopped before transport. Its real API synthetic classic/incremental/SDK history tests passed. Direct Claude forced ANY tool mode returned HTTP400; automatic tool selection is the qualified path. All variants, live compaction and full-window generation remain unqualified.
-- All disposable host processes stopped and temporary Wisp credential copies removed. SYSTEM-only Git askpass directories resisted deletion; exact harmless test-profile remnants are recorded in `copilot-cleanup.json`. Leave actual permissions/installations untouched. The installed host displayed a pre-existing integrity warning; no installed files were edited.
-- Unit3 must recapture TUI spans for version changes. Unit1's old fixture recapture and Windows EPERM investigation remain in its original evidence, not new issues to reopen.
+- Shared bounded per-session logs across CLI/TUI/VS Code; lifecycle-only serve stdout; safe attribution and interleaved multi-process regressions. `docs/session-logs.md` owns behavior/limits.
+- Both actual Copilot SDK/Agent Host failures reproduced and corrected: missing response-ID state now also travels in authenticated encrypted reasoning; Claude terminal OTHER is accepted only for well-formed native tool calls with exact model identity. Replay/tool-ID/account/conversation guards remain enforced.
+- Actual VS Code1.146.0 / Copilot0.74.0 SDK UI/live transport: Carbon high and Claude Opus5.5 high each read a controlled file, returned PEAR and answered OK on the next user turn. Sanitized evidence: `copilot-host-events.jsonl`; clean API synthetic receipt: `synthetic-host-receipt.json`.
+- Bun1.4.2: **2120 core +191 TUI tests**, **1027 TUI assertions**, both typechecks, extension/webview build pass. **34 actual TUI captures** differ only by the version string. VSIX1.14.8 bundle equals the tested build. Windows binary2.2.11 passes isolated launcher/Responses and signed Desktop smokes, version and empty session list.
+- CI [43050381056](https://github.com/EstarinAzx/Wisp-Router/actions/runs/43050381056) passed Windows x64, macOS arm64/x64 and Linux x64 builds plus both package smokes on source15d3eae. Publication skipped. These use local fixtures, not additional live-provider qualification.
+- Local CLI CodeRabbit0.9.5 release-prep review covered14/14, zero issues at1/3. Prior product source review hashes still match; only README/version spans were superseded by release review, and context/plan status bookkeeping is separate.
+
+## Limits and preservation
+
+The isolated classic Local UI required GitHub sign-in and stopped before transport; its real API synthetic continuation checks passed. Direct Claude forced ANY tool choice returned HTTP400; automatic tools passed. All variants, live compaction, full-window generation and every model/tool combination remain unqualified. Existing broken chats need a new chat.
+
+All disposable test hosts stopped and temporary Wisp credential copies removed. SYSTEM-only Git askpass remnants remain at exact paths in `copilot-cleanup.json`; leave ACLs and unrelated cleanup alone. The installed host's pre-existing integrity warning was not repaired. Real auth/settings, permissions, hook trust, running clients, 233 excluded historical files and the old worktree remain untouched. Desktop protocol5 and wisp-slot1.7.5 are unchanged.
 
 ## Pick up here
 
-After ACTIVATE, verify relay ownership and the Unit2 receipt, then execute **Unit3**: versions/changelogs, package/binary smokes, final regression checks, release-prep CodeRabbit0/3, and remote-main integration through existing repository policy. Reuse matching Units1/2 source reviews. No worker/review remains pending. Versions are still2.2.10/1.14.7; prepare2.2.11/1.14.8 without publishing or tagging. Preserve the documented qualification limits. Transfer final readiness ownership to a fresh verified root using PREPARE/READY/ACTIVATE.
-
-## Preservation
-
-Real auth/settings, permissions, hook trust, running clients, 233 excluded historical files and the retained old worktree are unchanged. Prior 2.2.10 receipt: `.claude/vscode-parity/release-2.2.10.json`. Native full-window generation, all model/tool combinations and live compaction remain incompletely qualified. Run fixed OAuth-port core tests serially. Pinned Bun: task scratch `bun-1.4.2/bun.exe`; do not replace the older global Bun.
+Current owner remains in leg4. Read the logging budget and `heading-fix-checks.json`; the user approved cap5 and attempt4 passed. The correction and handoff update are ready to commit/push; verify the receipt before repeating that step, push it to PR233, rerun affected CI and integrate. For the eventual final root: after matching ACTIVATE, validate ownership and the latest Unit3 receipt. Verify local main/remote main and tested/reviewed source identity, no pending work, package hashes and CI/review dispositions. Present release readiness with the recorded limits from this fresh root and finish the relay only after acceptance is established. Do not publish/tag/install/restart. Use pinned task-scratch `bun-1.4.2/bun.exe` if a changed source needs rechecking; core OAuth tests run serially.
 
 ## Related
 

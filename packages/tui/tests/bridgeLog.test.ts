@@ -1,5 +1,5 @@
-import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createSessionLogger } from '@wisp/core';
@@ -31,4 +31,19 @@ test('lists stable IDs and reads only the selected conversation', () => {
 });
 test.each([['-f'], ['--unknown'], ['../auth.json'], ['a'.repeat(32)], ['a', 'b']])('rejects missing, unknown or invalid selection: %j', (...args) => {
   expect(capture(args).code).toBe(1);
+});
+
+test.each([[0, 'in flight (1)'], [89_999, 'in flight (1)'], [90_000, 'idle'], [31 * 60_000, 'idle']] as const)
+('detail heading expires a crashed request after 90 seconds: age %i', (age, status) => {
+  const now = 1_800_000_000_000, id = 'a'.repeat(32);
+  const clock = spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    mkdirSync(join(home, 'sessions'));
+    writeFileSync(join(home, 'sessions', `${id}.jsonl`), JSON.stringify({ id, source: 'vscode-chat',
+      protocol: 'native', correlated: true, at: now - age, sequence: 1, inFlight: 1, event: 'request' }) + '\n');
+    const result = capture([id]);
+    expect(result.code).toBe(0);
+    expect(result.out.split('\n')[0]).toBe(`${id}  vscode-chat/native  ${status}`);
+    expect(result.out).toContain(`[${new Date(now - age).toISOString()}] request`);
+  } finally { clock.mockRestore(); }
 });
