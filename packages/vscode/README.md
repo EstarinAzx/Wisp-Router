@@ -2,7 +2,7 @@
 
 **Experimental Desktop bridge:** ChatGPT Desktop (Codex) can use Wisp aliases alongside native models. See the [README preview](https://github.com/EstarinAzx/Wisp-Router#chatgpt-desktop-codex-bridge--experimental). Compatibility varies by Provider and model; verification boundaries are described below.
 
-**Companion 1.14.6:** the extension-hosted Bridge implements terminal 2.2.9's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
+**Companion 1.14.7:** the extension-hosted Bridge implements terminal 2.2.10's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 
 Update the terminal setup command and serving Bridge together; older protocols are refused. A protocol-3 setup needs journaled disable then enable for voice settings. Antigravity `gemini-3.8-flash-tiered` and the exact `gemini-4-argon-low`, `gemini-4-argon-medium` and `gemini-4-argon-high` targets are qualified under explicit compatibility: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Strict mode and other Antigravity targets remain excluded. Native context limits still apply. See the [2.2.8 release evidence and limits](../../docs/releases/v2.2.8.md) for Desktop and extension-host acceptance. Coordinate any installation/reload around active clients; keep the current working Bridge running until a handover is explicitly arranged. Slot is unchanged.
 
@@ -63,7 +63,7 @@ Wisp-routed models are **first-class** in the Copilot harness, not a degraded fa
 - **Tool calling** — agent tools are forwarded and tool calls round-trip, so Wisp models work in **Agent mode**, **Edit mode**, and **`Ctrl+I`**. This matters: VS Code **hides** models that lack tool-calling from those pickers, so tool calling is exactly what makes a routed model selectable there.
 - **Vision** — image attachments are forwarded to multimodal models (native chat and the Bridge's Anthropic door alike).
 - **Reasoning Effort** — a side-panel knob (`low` → `max`) governs the reasoning depth of the effort-aware backends (Codex and Claude); Claude Code's own `/effort` overrides it per request over the Bridge.
-- **Live, per-model context windows + capabilities** — read from [models.dev](https://models.dev) (cached, with graceful fallback). The picker shows each model's real numbers and tracks model switches as you make them.
+- **Live, per-model context windows + capabilities** — Codex and Antigravity use account metadata; other providers use [models.dev](https://models.dev) where available. The picker tracks model switches and uses a conservative fallback when limits are unavailable.
 
 ---
 
@@ -98,7 +98,8 @@ OpenAI-compatible chat endpoints authenticated with a Bearer key.
 
 Reach Codex by running **`Wisp: Sign in to Codex`** (OAuth with a ChatGPT account). You can also import an existing Codex CLI login — see [Security](#security).
 
-Native chat uses the signed-in account catalogue's default context window. The optional machine setting
+Native chat automatically uses the signed-in account catalogue's maximum context window, falling back
+to its default when no maximum is reported. The optional machine setting
 `wisp.codexContextWindows` maps exact model IDs to requested total token budgets, capped at the account
 catalogue's maximum (or its default when no maximum is known). The picker tooltip shows the effective
 budget, default, maximum and catalogue source. Input plus reserved output equals that total.
@@ -127,13 +128,13 @@ Sign in or out from the panel's **Antigravity Account** controls or **Wisp: Sign
 **Wisp: Sign out of Antigravity**. The terminal and extension share the same credentials. Browser sign-in
 requires callback port `51121`; an occupied port fails rather than moving the callback elsewhere.
 
-The model dropdown consumes OAuth discovery and offers manual refresh and model entry. Native chat
-supports the shared catalogue's known text models with streaming, tools and tool-result continuation;
-account availability still depends on the service. Argon low/medium/high also support native text and
-tools on VS Code 1.145.3+, with encrypted conversation replay and complete-response validation.
-Image-output and other unqualified IDs remain out of the native picker, with a reason in the panel.
-Argon needs a new chat after an account/tier change or if Copilot drops required history state.
-Local-mode continuation is cached only while the extension runs, so start a new chat after reloading it.
+The model dropdown consumes OAuth discovery and offers manual refresh and model entry. On VS Code
+1.145.3+, native chat uses one shared text/tool adapter for discovered models, including Argon and
+Carbon, with encrypted conversation replay and complete-response validation. Context/output limits
+and image-input support come from account metadata; account availability still depends on the service.
+Image-generation output remains unsupported, with a reason in the panel. Start a new chat after an
+account/model change or if Copilot drops required history state. Local-mode continuation is cached only
+while the extension runs, so start a new chat after reloading it.
 Antigravity Inquire is not supported. See [details and validation limits](../../docs/vscode-provider-parity.md).
 
 ### Custom

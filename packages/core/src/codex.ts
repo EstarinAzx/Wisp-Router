@@ -103,6 +103,7 @@ const enforceStrictResponsesSchema = (schema: unknown): Record<string, unknown> 
       record.properties = enforced;
       record.required = Object.keys(enforced);
     } else {
+      record.properties = {};
       record.required = [];
     }
   }
@@ -117,11 +118,9 @@ const enforceStrictResponsesSchema = (schema: unknown): Record<string, unknown> 
   return record;
 };
 
-// Map tool defs to Responses function tools. `strict` (default true) drives Codex's exact-schema mode for
-// native VS Code tools. The Bridge door forwarding an EXTERNAL client's toolset (Claude Code) passes
-// strict:false — Codex strict rejects rich schemas (dynamic maps, propertyNames, partial `required`), so
-// the schema rides through verbatim instead. A tool with no schema gets an empty object either way.
-export const toCodexResponsesTools = (tools: ToolSpec[], strict = true): CodexResponsesTool[] =>
+// External client/MCP schemas may contain optional fields and open maps: preserve them by default.
+// Strict closure is only for callers explicitly requesting it. Missing schemas become empty objects.
+export const toCodexResponsesTools = (tools: ToolSpec[], strict = false): CodexResponsesTool[] =>
   tools.map((t) => ({
     type: 'function',
     name: t.name,
@@ -217,7 +216,7 @@ export const codexModelCaps = (model: string, info?: CodexModelInfo, contextOver
   // Old caches have no maximum: they may shrink their known default, but cannot prove a larger budget.
   const ceiling = info.maxContextWindow ?? info.contextWindow;
   const requested = typeof contextOverride === 'number' && Number.isSafeInteger(contextOverride) && contextOverride >= 2
-    ? contextOverride : info.contextWindow;
+    ? contextOverride : ceiling;
   const context = requested && ceiling ? Math.min(requested, ceiling) : info.contextWindow;
   return {
     ...(context ? { contextInput: context } : {}),

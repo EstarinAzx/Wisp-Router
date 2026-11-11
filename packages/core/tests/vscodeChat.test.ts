@@ -50,6 +50,47 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('native Codex context descriptor', () => {
+  it('forwards optional MCP maps unchanged through the registered native Codex request', async () => {
+    vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
+    const codex = PROVIDERS.find(p => p.id === 'codex')!;
+    const { provider } = setup('unused', { providers: [codex], modelMap: () => ({ codex: 'gpt-6-astra' }),
+      codexSignedIn: async () => true, codexCreds: async () => ({ accessToken: 'fake', accountId: 'fake' }),
+    });
+    const inputSchema = { type: 'object', properties: {
+      workspaceRoot: { type: 'string' }, method: { type: 'string' }, params: { type: 'object', additionalProperties: {} },
+    }, required: ['workspaceRoot', 'method'] };
+    const original = structuredClone(inputSchema), sent: any[] = [], output: any[] = [];
+    vi.stubGlobal('fetch', async (url: any, init: any) => {
+      if (!String(url).endsWith('/responses')) throw new Error('Unexpected test destination');
+      const body = JSON.parse(init.body); sent.push(body);
+      if (body.tools[0].strict) return Response.json({ error: { message: 'Invalid schema: params object must define properties' } }, { status: 400 });
+      return new Response('event: response.completed\ndata: {"response":{"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}}\n\n');
+    });
+    await provider.provideLanguageModelChatResponse({ id: 'codex' }, [user(text('test message'))],
+      { tools: [{ name: 'mcp_pylance_mcp_s_pylanceLSP', description: 'LSP', inputSchema }], toolMode: 1 },
+      { report: (part: any) => output.push(part) }, token());
+    expect(sent).toHaveLength(1);
+    expect(sent[0].tools[0]).toMatchObject({ strict: false, parameters: original });
+    expect(output).toEqual([text('OK')]);
+    expect(inputSchema).toEqual(original);
+  });
+  it.each([
+    ['gpt-6-astra', 272000, 872000],
+    ['gpt-6.1-sol', 500000, 872000],
+    ['future-gpt', 345000, 999000],
+  ])('advertises the account maximum automatically for %s', async (model, defaultWindow, maximumWindow) => {
+    vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'live', models: [
+      { id: model, name: model, visible: true, contextWindow: defaultWindow, maxContextWindow: maximumWindow },
+    ] } as any);
+    const codex = PROVIDERS.find(p => p.id === 'codex')!;
+    const { provider } = setup('unused', { providers: [codex], modelMap: () => ({ codex: model }),
+      codexSignedIn: async () => true, codexCreds: async () => ({ accessToken: 'fake', accountId: 'fake' }),
+    } as any);
+    const [info] = await provider.provideLanguageModelChatInformation();
+    expect(info.maxInputTokens + info.maxOutputTokens).toBe(maximumWindow);
+    expect(info.tooltip).toContain(String(defaultWindow));
+    expect(info.tooltip).toContain(String(maximumWindow));
+  });
   it('uses only the selected model override and keeps input plus output within account limits', async () => {
     vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [
       { id: 'gpt-6-astra', name: 'Astra', visible: true, contextWindow: 272000, maxContextWindow: 872000 },

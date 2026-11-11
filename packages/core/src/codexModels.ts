@@ -50,7 +50,7 @@ export const parseCodexModels = (body: unknown): CodexModelInfo[] => {
       ...(typeof m.default_reasoning_level === 'string' ? { defaultEffort: m.default_reasoning_level } : {}),
       ...(typeof m.default_reasoning_summary === 'string' ? { reasoningSummary: m.default_reasoning_summary } : {}),
       ...(strings(m.input_modalities) ? { inputModalities: m.input_modalities } : {}),
-      // Preserve the default and override ceiling separately; a larger ceiling is not an active window.
+      // Preserve the client default and supported maximum separately; each surface chooses its budget.
       ...(positive(m.context_window) ? { contextWindow: m.context_window } : {}),
       ...(positive(m.max_context_window) ? { maxContextWindow: m.max_context_window } : {}),
     };

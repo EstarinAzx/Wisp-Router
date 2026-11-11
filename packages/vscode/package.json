@@ -2,7 +2,7 @@
   "name": "wisp",
   "displayName": "Wisp",
   "description": "BYOK model router for VS Code's Copilot chat, agent, and Ctrl+I — bring your own API keys or ChatGPT (Codex) / Claude.ai subscription. Bridge external tools like Claude Code onto the same providers. Plus Inquire inline edits.",
-  "version": "1.14.6",
+  "version": "1.14.7",
   "license": "MIT",
   "publisher": "EsarinAzx",
   "repository": {
@@ -122,7 +122,7 @@
           "scope": "machine",
           "default": {},
           "additionalProperties": { "type": "integer", "minimum": 2 },
-          "description": "Optional native-chat total context tokens by exact Codex model ID. Uses the account catalogue default when unset; overrides are capped at its advertised maximum (or default if no maximum is known). Refresh Codex models after changing account access. This does not change native Codex settings or establish service entitlement."
+          "description": "Optional native-chat total context tokens by exact Codex model ID. Automatically uses the account catalogue maximum, or its default when no maximum is known. Overrides are capped at that same limit. Refresh Codex models after changing account access. This does not change native Codex settings or establish service entitlement."
         },
         "wisp.maxTokens": {
           "type": "number",

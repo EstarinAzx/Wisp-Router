@@ -4,6 +4,21 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.7] - 2026-11-12
+
+### Fixed
+
+- Add native Antigravity account controls and discovered model selection, with stale-account and sign-out protection.
+- Share one authenticated native chat adapter across Antigravity text/chat models, including Argon and Carbon; preserve classic and Local tool continuations and supported image inputs.
+- Use discovered Antigravity context/output limits and the supported Codex maximum instead of conservative defaults. Keep exact-model Codex overrides bounded by account metadata.
+- Preserve optional and open-ended MCP tool schemas in native Codex/Grok requests, fixing Pylance LSP schema rejection.
+- Retain safe capacity failover, authoritative output limits and account checks after discovery.
+
+### Surfaces
+
+- **VSIX: 1.14.7**, **terminal/npm: 2.2.10**, **wisp-slot: unchanged at 1.7.5**. Native Antigravity stateful chat requires VS Code 1.145.3+; start a new Local chat after reload or cache eviction.
+- See [release notes and limits](../../docs/releases/v2.2.10.md). Image-generation output and Antigravity Inquire remain unsupported; full-window and interactive compaction behavior are not newly qualified.
+
 ## [1.14.6] - 2026-11-11
 
 ### Fixed

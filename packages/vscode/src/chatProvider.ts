@@ -203,8 +203,9 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       const id = resolveModel(modelMap, codexProvider), meta = codexInfo(id), override = contextOverrides[id];
       return { ...info, tooltip: `Codex context: ${info.maxInputTokens + info.maxOutputTokens} total tokens (input + output). `
         + `Account default: ${meta?.contextWindow ?? 'unknown'}; maximum: ${meta?.maxContextWindow ?? 'unknown'}. `
-        + (typeof override === 'number' && Number.isSafeInteger(override) && override >= 2 ? `Wisp override requested: ${override}, bounded by known account limits. ` : '')
-        + (meta?.contextWindow ? `Catalogue: ${codexResult?.source ?? 'unavailable'}. ` : 'Conservative fallback; refresh Codex models for account limits. ')
+        + (typeof override === 'number' && Number.isSafeInteger(override) && override >= 2 ? `Wisp override requested: ${override}, bounded by known account limits. `
+          : meta?.maxContextWindow ? 'Using the account maximum automatically. ' : '')
+        + (meta?.maxContextWindow || meta?.contextWindow ? `Catalogue: ${codexResult?.source ?? 'unavailable'}. ` : 'Conservative fallback; refresh Codex models for account limits. ')
         + 'Native Codex settings and public API limits are separate.' };
     });
   },
@@ -242,7 +243,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     }
 
     // Codex speaks the Responses API, not chat completions — stream it through the dedicated client. Agent
-    // tools are forwarded as strict Responses tools; codexStream yields text fragments live and the
+    // tools retain their client schemas in non-strict Responses mode; codexStream yields text fragments live and the
     // assembled tool calls at the end, which map to text / tool-call parts exactly like the OpenAI path.
     if (isCodexProvider(provider)) {
       const creds = await deps.codexCreds();

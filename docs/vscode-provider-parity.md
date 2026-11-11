@@ -79,9 +79,10 @@ Live coverage of every model and interactive Copilot compaction remain unverifie
 
 ## Codex context
 
-The account catalogue's `context_window` is the default. `max_context_window` is retained separately as
-the ceiling for an explicit override, including in the account-scoped cache. Neither a model name nor
-public API metadata raises the subscription-route context budget.
+Native chat automatically uses the account catalogue's `max_context_window`, falling back to
+`context_window` when no maximum is reported. Both values remain separate in the account-scoped cache
+and tooltip, so the native client's conservative default is not mistaken for the supported maximum.
+Neither a model name nor public API metadata raises the subscription-route context budget.
 
 Optional VS Code user setting (example, not applied automatically):
 
@@ -91,9 +92,10 @@ Optional VS Code user setting (example, not applied automatically):
 
 An override uses the exact selected model ID and must be a safe integer of at least 2. Invalid values
 are ignored. It cannot exceed the discovered maximum; a stale cache without a maximum cannot expand
-above its known default. Without an override, the default remains active. For example, metadata with
-default 272000 and maximum 872000 stays at 272000 by default; requesting 1000000 yields 872000. This
-configures Wisp's budget, not service entitlement. The tooltip shows the requested and effective values.
+above its known default. For example, metadata with default272000 and maximum872000 automatically uses
+872000; an override of512000 lowers it, and an override of1000000 remains capped at872000. This
+configures Wisp's budget, not service entitlement. The tooltip shows the default, maximum and effective
+policy. Native Codex configuration and Bridge status accounting are unchanged.
 
 VS Code displays the sum of input and output budgets. Wisp reserves output within the total and never
 adds output capacity on top of the selected window. Unknown model metadata uses the existing conservative
@@ -103,6 +105,14 @@ Native Codex's configuration is independent and is not read or modified by this 
 [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) describes
 `model_context_window` for that client. The [Astra API specification](https://developers.openai.com/api/docs/models/gpt-6-astra)
 lists 1,050,000 tokens for the API model; it does not establish that total for an OAuth subscription route.
+
+## Native Responses tool schemas
+
+Codex and Grok preserve the native client's tool schemas with explicit `strict: false`. MCP tools can
+have optional fields and open-ended maps, such as Pylance's LSP `params`; forcing those into closed
+strict objects can reject the entire request or remove valid tool arguments. Existing Bridge callers
+retain their explicit strict/non-strict choice. Callers that explicitly request strict conversion get
+defined `properties` even for empty objects. Tool permissions and execution remain with the native host.
 
 ## Synthetic checks
 

@@ -6,6 +6,18 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.10] - 2026-11-12
+
+### Fixed
+
+- Rebuild the shared core alongside the native VS Code provider repairs, retaining Antigravity model metadata and authenticated native state without changing existing Bridge qualification.
+- Preserve external tool schemas by default in the shared Responses converter; existing Bridge callers retain their explicit schema policy.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.10**, **companion VSIX: 1.14.7**, **wisp-slot: unchanged at 1.7.5**. The visible native-chat, account-control and context-budget improvements belong to the VS Code companion. Desktop protocol remains **5**.
+- See [verification and limits](../../docs/releases/v2.2.10.md). Publication does not install or restart existing clients.
+
 ## [2.2.9] - 2026-11-11
 
 ### Fixed

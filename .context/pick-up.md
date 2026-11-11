@@ -7,13 +7,11 @@ tags: [context, pick-up]
 
 # Pick up
 
-**Use the primary checkout on local `main`.** If you are in a linked worktree, locate `refs/heads/main` with `git worktree list --porcelain` and switch your working directory there before continuing. Its `.context/active-work.md` is the one current baton; older `wisp/` notes and snapshots are historical.
+Use the primary checkout on local `main`; `.context/active-work.md` is the single current baton. Older `wisp/` notes and the retained worktree are historical and are not work queues.
 
-Read [[active-work]] for completed dynamic Antigravity model support and context-limit repairs, review evidence, local-main preservation and ownership receipts. Root owner: `8f60fde8-74fa-49f0-98e5-788163a75924` (“Wisp VS Code testing - main checkout”). The user reported Argon working; the generic-model repair, review corrections and checks are complete. Await user testing. [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232) remains open; local `main` intentionally includes its commits. Remote publication/merge/release/install are separate.
+The user approved release after basic Argon, Carbon and Codex chat passed. **Wisp2.2.10 / companion1.14.7 release is in progress** through [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232). Read [[active-work]] and `.claude/vscode-parity/release-2.2.10.json` for exact source/CI/tag state before continuing; reconcile existing publication rather than starting another cut. Root owner: `8f60fde8-74fa-49f0-98e5-788163a75924`.
 
-The development host was reopened from primary `main` with the final build and shows Carbon-high Context1M. Local chats need a new conversation after reload. Do not repeat implementation/review or resume historical experiments.
-
-Wisp2.2.9/companion1.14.6 is already merged/released. Do not repeat publication, revive the completed audit relay or resume closed provider experiments.
+The233 local historical files are preserved and excluded only in this checkout. Installation, cleanup of the old worktree and new live provider experiments are not implied by release approval.
 
 ## Related
 
