@@ -226,7 +226,8 @@ preservation and npm optional-dependency/cache resolution.
 
 The following records the historical 2.1.5 / 1.13.8 preparation checkpoint: those versions
 were prepared locally; publication and installation were separate. For current release
-evidence, see [2.2.8 verification and limits](releases/v2.2.8.md).
+evidence, see [2.2.9 verification and limits](releases/v2.2.9.md). Earlier Desktop and
+extension-host acceptance remains recorded in [2.2.8](releases/v2.2.8.md).
 
 - **Terminal 2.1.5:** compiled TUI/headless Bridge bundles the shared exact model resolver;
   source, compiled and npm launchers include additive picker Aliases. npm exposes
