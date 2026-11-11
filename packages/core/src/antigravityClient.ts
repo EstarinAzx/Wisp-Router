@@ -48,6 +48,7 @@ type AntigravityRequestArgs = {
   model: string;
   messages: AntigravityTurn[];
   tools?: ToolSpec[];
+  toolChoice?: 'auto' | 'required';
   // Already folded to this wire's three stops by the caller. Absent = send no thinkingConfig at all,
   // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
@@ -98,6 +99,10 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
     maxOutputTokens: args.maxOutputTokens,
     preserveSystemText: args.preserveSystemText,
   });
+  if (args.tools?.length && args.toolChoice === 'required') {
+    request.request.toolConfig = { ...request.request.toolConfig,
+      functionCallingConfig: { ...request.request.toolConfig?.functionCallingConfig, mode: 'ANY' } };
+  }
   if (args.strictCompletion) {
     const issue = validateAntigravityFunctionCallPairing(request);
     if (issue) throw new Error(`Invalid Antigravity tool history: ${issue}`);

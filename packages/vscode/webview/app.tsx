@@ -34,6 +34,9 @@ type State = {
   isCustom: boolean;
   kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth' | 'gemini-interactions';
   signedIn?: boolean;
+  authPending?: boolean;
+  authError?: string;
+  chatUnavailable?: string;
   account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
   effort?: string;
@@ -53,8 +56,8 @@ const FAMILY_KEYS: FamilyKey[] = ['opus', 'sonnet', 'haiku', 'fable'];
 
 type InMsg =
   | { type: 'state'; state: State }
-  | { type: 'models'; ids: string[] }
-  | { type: 'modelsError'; message: string }
+  | { type: 'models'; providerId: string; requestId: number; ids: string[] }
+  | { type: 'modelsError'; providerId: string; requestId: number; message: string }
   | { type: 'providerModels'; providerId: string; ids: string[] } // a Routing-map row's list (#53); [] = unavailable
   | { type: 'activity'; thinking: boolean };
 
@@ -66,7 +69,7 @@ export const App = () => {
   const [state, setState] = useState<State | undefined>(undefined);
   // Activity arrives on its own lightweight 'activity' message, kept apart from `state`.
   const [thinking, setThinking] = useState(false);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<string[] | undefined>(undefined);
   const [modelsError, setModelsError] = useState('');
   const [keyDraft, setKeyDraft] = useState('');
   const [modelDraft, setModelDraft] = useState('');
@@ -79,11 +82,16 @@ export const App = () => {
   const [aliasDraft, setAliasDraft] = useState({ name: '', providerId: '', model: '' });
   // Where the current models list came from — used to drop it when Provider/endpoint/credentials
   // change. Keyed on providerId too so a switch refetches even if two rows shared a base URL.
-  const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean } | undefined>(undefined);
+  const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean; signedIn?: boolean } | undefined>(undefined);
+  const modelRequest = useRef(0);
   // Per-Provider model lists for the Routing-map rows (#53) — one cache entry serves every row that
   // picked that Provider; [] means "asked, unavailable" → the row falls back to free text.
   const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
   const requestedProviders = useRef(new Set<string>());
+  const refreshModels = (providerId?: string) => {
+    setModelsError('');
+    vscode.postMessage({ type: 'refreshModels', providerId, requestId: ++modelRequest.current });
+  };
 
   // Reuse lists during the panel session, with an explicit refresh for newly released models.
   const ensureProviderModels = (id: string, refresh = false) => {
@@ -99,12 +107,12 @@ export const App = () => {
         // The fetched list belonged to the previous endpoint/credentials — don't keep
         // offering ids the new endpoint may not serve.
         const prev = modelsOrigin.current;
-        if (prev && (prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl || (prev.keyIsSet && !msg.state.keyIsSet))) {
-          setModels([]);
-        }
+        const newOrigin = !prev || prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl
+          || prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn;
+        if (newOrigin) { setModels(undefined); setModelsError(''); modelRequest.current++; }
         // Key presence changed → the row caches (including cached empties from a key-less fetch) are
         // stale; drop them so the next row pick refetches with the new credentials (#53).
-        if (prev && prev.keyIsSet !== msg.state.keyIsSet) {
+        if (prev && (prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn)) {
           setProviderModels({});
           requestedProviders.current.clear();
         }
@@ -112,8 +120,7 @@ export const App = () => {
         // list once so the dropdown fills on its own. Without this the user only ever sees the
         // configured model until they discover the manual ↻. Gated on origin change so it can't loop
         // on an empty result or re-fire on unrelated config pushes (model changes).
-        const newOrigin = !prev || prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl || prev.keyIsSet !== msg.state.keyIsSet;
-        modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet };
+        modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet, signedIn: msg.state.signedIn };
         setState(msg.state);
         // Seed the Routing map drafts from the FIRST state only (functional update — the [] effect
         // closure never sees fresh routeDrafts); later pushes leave in-progress row edits alone.
@@ -121,9 +128,8 @@ export const App = () => {
           const t = msg.state.routingFamilies?.[k];
           return [k, { providerId: t?.providerId ?? '', model: t?.model ?? '' }];
         })) as Record<FamilyKey, { providerId: string; model: string }>);
-        if (newOrigin && msg.state.keyIsSet) {
-          setModelsError('');
-          vscode.postMessage({ type: 'refreshModels' });
+        if (newOrigin && msg.state.modelOptions === undefined && (msg.state.keyIsSet || msg.state.signedIn)) {
+          refreshModels(msg.state.providerId);
         }
         // First state: fetch lists for the Providers the saved Family rows already reference, so
         // their dropdowns fill on open without a re-pick (#53).
@@ -131,9 +137,11 @@ export const App = () => {
           FAMILY_KEYS.forEach((k) => ensureProviderModels(msg.state.routingFamilies?.[k]?.providerId ?? ''));
         }
       }
-      if (msg.type === 'models') { setModels(msg.ids); setModelsError(''); }
+      if (msg.type === 'models' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current) {
+        setModels(msg.ids); setModelsError('');
+      }
       if (msg.type === 'providerModels') setProviderModels((cur) => ({ ...cur, [msg.providerId]: msg.ids }));
-      if (msg.type === 'modelsError') setModelsError(msg.message);
+      if (msg.type === 'modelsError' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current) setModelsError(msg.message);
       if (msg.type === 'activity') setThinking(msg.thinking);
     };
     window.addEventListener('message', onMessage);
@@ -202,18 +210,15 @@ export const App = () => {
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
   // API key field. Model discovery is handled by the host for each kind.
-  const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth';
-  // Two rows are credential-wise OAuth but sign in from the `wisp` terminal face, so the panel shows status
-  // and points there rather than offering a button it cannot run: Kimi (#170, a device flow) and Antigravity
-  // (#188, whose browser flow needs a fixed loopback port this face does not own). Both keep a live model
-  // route, so they stay out of `oauth` for the dropdown source above.
-  const terminalOauth = state.kind === 'kimi-oauth' || state.kind === 'antigravity-oauth';
-  const terminalName = state.kind === 'antigravity-oauth' ? 'Antigravity' : 'Kimi';
-  const terminalCommand = state.kind === 'antigravity-oauth' ? '/signin antigravity' : '/signin kimi';
-  const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : state.kind === 'xai-oauth' ? 'Grok Account' : 'Codex Account';
-  const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : state.kind === 'xai-oauth' ? 'xaiSignIn' : 'codexSignIn';
-  const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : state.kind === 'xai-oauth' ? 'xaiSignOut' : 'codexSignOut';
-  const accountHint = state.kind === 'anthropic-oauth'
+  const antigravity = state.kind === 'antigravity-oauth';
+  const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth' || antigravity;
+  const terminalOauth = state.kind === 'kimi-oauth';
+  const terminalName = 'Kimi';
+  const terminalCommand = '/signin kimi';
+  const accountLabel = antigravity ? 'Antigravity Account' : state.kind === 'anthropic-oauth' ? 'Claude Account' : state.kind === 'xai-oauth' ? 'Grok Account' : 'Codex Account';
+  const signInMsg = antigravity ? 'antigravitySignIn' : state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : state.kind === 'xai-oauth' ? 'xaiSignIn' : 'codexSignIn';
+  const signOutMsg = antigravity ? 'antigravitySignOut' : state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : state.kind === 'xai-oauth' ? 'xaiSignOut' : 'codexSignOut';
+  const accountHint = antigravity ? 'Sign in with your Google account. Credentials are shared with the Wisp terminal app.' : state.kind === 'anthropic-oauth'
     ? 'Subscription-backed Claude — sign in with your Claude.ai account; no API key.'
     : state.kind === 'xai-oauth'
     ? 'Subscription-backed Grok — sign in with your xAI account; no API key.'
@@ -222,7 +227,7 @@ export const App = () => {
   // OAuth kinds use host-discovered modelOptions; every other Provider uses the
   // fetched list. Either way, prepend the current model if it isn't already present so the select stays
   // truthful (e.g. a stale pick still shows alongside the curated ids).
-  const baseOptions = oauth ? (state.modelOptions ?? []) : models;
+  const baseOptions = models ?? state.modelOptions ?? [];
   const options = baseOptions.includes(state.model) ? baseOptions : [state.model, ...baseOptions];
 
   return (
@@ -258,7 +263,10 @@ export const App = () => {
             value={state.providerId}
             onChange={(e) => {
               const value = e.currentTarget.value;
-              setState({ ...state, providerId: value }); // optimistic; the state push confirms
+              // Hide old account controls until the host confirms the new provider's kind and state.
+              modelRequest.current++;
+              modelsOrigin.current = { providerId: value, baseUrl: '', keyIsSet: false };
+              setModels(undefined); setModelsError(''); setState(undefined);
               vscode.postMessage({ type: 'selectProvider', value });
             }}
           >
@@ -331,18 +339,23 @@ export const App = () => {
               )}
             </div>
             <div class="flex gap-1.5">
-              <button class="btn flex-1" disabled={state.signedIn} onClick={() => vscode.postMessage({ type: signInMsg })}>
+              <button class="btn flex-1" disabled={state.signedIn || state.authPending} onClick={() => {
+                if (antigravity) setState({ ...state, authPending: true, authError: undefined });
+                vscode.postMessage({ type: signInMsg });
+              }}>
                 Sign in
               </button>
               <button
                 class="btn btn-secondary flex-1"
-                disabled={!state.signedIn}
+                disabled={!state.signedIn || state.authPending}
                 onClick={() => vscode.postMessage({ type: signOutMsg })}
               >
                 Sign out
               </button>
             </div>
             <p class="hint">{accountHint}</p>
+            {state.authPending && <p class="hint" role="status">Waiting for browser sign-in…</p>}
+            {state.authError && <p class="hint text-[var(--vscode-errorForeground)]" role="alert">{state.authError}</p>}
           </div>
         ) : (
           <div class="flex flex-col gap-2">
@@ -404,11 +417,12 @@ export const App = () => {
               {options.map((id) => <option key={id} value={id}>{id}</option>)}
             </select>
             {/* Codex has its own discovery endpoint; keyed providers use their ordinary model list. */}
-            {(!oauth || state.kind === 'codex') && (
+            {(!oauth || state.kind === 'codex' || antigravity) && (
               <button
                 class="btn btn-secondary shrink-0"
                 title="Refresh model list from the endpoint"
-                onClick={() => { setModelsError(''); vscode.postMessage({ type: 'refreshModels' }); }}
+                aria-label="Refresh model list"
+                onClick={() => refreshModels(state.providerId)}
               >
                 ↻
               </button>
@@ -423,6 +437,7 @@ export const App = () => {
             onKeyDown={(e) => { if (e.key === 'Enter') applyModelDraft(); }}
           />
           {modelsError && <p class="hint text-[var(--vscode-errorForeground)]">{modelsError}</p>}
+          {state.chatUnavailable && <p class="hint">{state.chatUnavailable}</p>}
         </div>
 
         {/* Reasoning depth for the effort-aware OAuth Providers — Codex and Anthropic (#31) — one value

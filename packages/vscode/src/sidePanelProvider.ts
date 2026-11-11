@@ -38,13 +38,13 @@ export type PanelState = {
   providerId?: string; // Active Provider id (drives the dropdown's selected value)
   providers: { id: string; label: string }[]; // the catalog, for the dropdown
   isCustom: boolean; // active Provider is Custom → the panel reveals the editable base-URL field (Issue 7)
-  // The OAuth kinds swap the API-key field for sign-in/out (Grok wiring lands in #97). 'kimi-oauth' (#170)
-  // and 'antigravity-oauth' (#188) are carried so the row's kind survives the round-trip, but their sign-in
-  // lives in `wisp`, not this panel — the webview shows them as no-key rows rather than offering a button
-  // this face cannot run.
+  // OAuth kinds carry account controls; Kimi retains its terminal device-flow sign-in.
   kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth' | 'gemini-interactions';
   signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
   account?: string; // #150: "you@email · Max" from the bootstrap identity (Anthropic only)
+  authPending?: boolean;
+  authError?: string;
+  chatUnavailable?: string;
   modelOptions?: string[]; // OAuth kinds only: host-discovered ids for the dropdown
   effort?: string; // Codex + Anthropic: the reasoning-effort knob (governs every call)
   effortOptions?: string[]; // provider/model options computed by the host
@@ -65,7 +65,7 @@ export type PanelHost = {
   getActivity: () => boolean; // true = a completion request is in flight (Thinking)
   storeApiKey: (value: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
-  fetchModelIds: () => Promise<string[]>;
+  fetchModelIds: (providerId?: string) => Promise<string[]>;
   fetchProviderModelIds: (providerId: string, refresh?: boolean) => Promise<string[]>; // Routing-map row dropdowns (#53): any Provider, [] on failure
   setModel: (id: string) => Promise<void>;
   setProvider: (id: string) => Promise<void>;
@@ -76,6 +76,8 @@ export type PanelHost = {
   anthropicSignOut: () => Promise<void>;
   xaiSignIn: () => Promise<void>;
   xaiSignOut: () => Promise<void>;
+  antigravitySignIn: () => Promise<void>;
+  antigravitySignOut: () => Promise<void>;
   setEffort: (effort: string) => Promise<void>;
   setFamilyRoute: (family: FamilyKey, target: Target | undefined) => Promise<void>; // set/clear one Routing map Family row (#51)
   setAlias: (name: string, target: Target) => Promise<void>; // add/retarget one Routing map Alias row (#52)
@@ -106,6 +108,7 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'wisp.panel';
 
   private view: vscode.WebviewView | undefined;
+  private stateRequest = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -128,8 +131,10 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
   // Push fresh state to the UI. Called on 'ready' and by extension.ts whenever
   // config or the stored key changes outside the panel.
   postState = async (): Promise<void> => {
-    if (!this.view) return;
-    void this.view.webview.postMessage({ type: 'state', state: await this.host.getState() });
+    const view = this.view, request = ++this.stateRequest;
+    if (!view) return;
+    const state = await this.host.getState();
+    if (view === this.view && request === this.stateRequest) void view.webview.postMessage({ type: 'state', state });
   };
 
   // Push the live Thinking/Idle Activity to the UI. Kept separate from postState so this
@@ -140,7 +145,7 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
 
   // ----------------------------- Message routing ----------------------------- //
 
-  private onMessage = async (msg: { type?: string; value?: unknown; refresh?: boolean }): Promise<void> => {
+  private onMessage = async (msg: { type?: string; value?: unknown; refresh?: boolean; providerId?: string; requestId?: number }): Promise<void> => {
     try {
       switch (msg?.type) {
         case 'ready':
@@ -164,9 +169,9 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           if (typeof msg.value === 'string' && msg.value.trim()) await this.host.setBaseUrl(msg.value.trim());
           return;
         case 'refreshModels': {
-          const ids = await this.host.fetchModelIds();
-          void this.view?.webview.postMessage({ type: 'models', ids });
-          await this.postState();
+          if (typeof msg.providerId !== 'string' || !Number.isSafeInteger(msg.requestId)) return;
+          const ids = await this.host.fetchModelIds(msg.providerId);
+          void this.view?.webview.postMessage({ type: 'models', providerId: msg.providerId, requestId: msg.requestId, ids });
           return;
         }
         case 'fetchProviderModels': {
@@ -195,6 +200,12 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'xaiSignOut':
           await this.host.xaiSignOut();
+          return;
+        case 'antigravitySignIn':
+          await this.host.antigravitySignIn();
+          return;
+        case 'antigravitySignOut':
+          await this.host.antigravitySignOut();
           return;
         case 'selectEffort':
           // Validate shape here; the host checks the model's advertised choices.
@@ -244,7 +255,7 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       if (msg?.type === 'refreshModels') {
-        void this.view?.webview.postMessage({ type: 'modelsError', message: sanitizeError(err) });
+        void this.view?.webview.postMessage({ type: 'modelsError', providerId: msg.providerId, requestId: msg.requestId, message: sanitizeError(err) });
         return;
       }
       // A failed mutation fires no config event, so nothing would re-sync the controlled

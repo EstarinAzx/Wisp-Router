@@ -23,11 +23,12 @@ export type CodexModelInfo = {
   reasoningSummary?: string;
   inputModalities?: string[];
   contextWindow?: number;
+  maxContextWindow?: number;
 };
 
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
-const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const positive = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 2;
 
 // Validate the envelope and every id before replacing a working cache. No name/suffix whitelist:
 // visibility is the upstream picker policy; supported_in_api describes API-key access, not OAuth.
@@ -49,8 +50,9 @@ export const parseCodexModels = (body: unknown): CodexModelInfo[] => {
       ...(typeof m.default_reasoning_level === 'string' ? { defaultEffort: m.default_reasoning_level } : {}),
       ...(typeof m.default_reasoning_summary === 'string' ? { reasoningSummary: m.default_reasoning_summary } : {}),
       ...(strings(m.input_modalities) ? { inputModalities: m.input_modalities } : {}),
-      // context_window is the configured Codex window; max_context_window is a possible larger tier.
+      // Preserve the default and override ceiling separately; a larger ceiling is not an active window.
       ...(positive(m.context_window) ? { contextWindow: m.context_window } : {}),
+      ...(positive(m.max_context_window) ? { maxContextWindow: m.max_context_window } : {}),
     };
   });
 };
@@ -86,7 +88,8 @@ export class CodexModelCatalog {
         && (m.inputModalities === undefined || strings(m.inputModalities))
         && (m.defaultEffort === undefined || typeof m.defaultEffort === 'string')
         && (m.reasoningSummary === undefined || typeof m.reasoningSummary === 'string')
-        && (m.contextWindow === undefined || positive(m.contextWindow)))) return undefined;
+        && (m.contextWindow === undefined || positive(m.contextWindow))
+        && (m.maxContextWindow === undefined || positive(m.maxContextWindow)))) return undefined;
       return s;
     } catch { return undefined; }
   };

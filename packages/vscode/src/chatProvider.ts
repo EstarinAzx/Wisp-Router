@@ -37,6 +37,8 @@ import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
+import { isAntigravityProvider, antigravityStream, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds } from '@wisp/core';
+import { antigravityNativeChatError } from './nativeChatSupport';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -52,6 +54,7 @@ export type ChatProviderDeps = {
   // (so a not-signed-in Codex stays hidden) and its refreshed OAuth creds for the streaming Responses call.
   codexSignedIn: () => Promise<boolean>;
   codexCreds: () => Promise<CodexCreds | undefined>;
+  codexContextWindows?: () => Record<string, unknown>;
   effort: () => EffortLevel;                        // the panel's reasoning Effort — shared by Codex + Anthropic (same value Inquire uses)
   // Anthropic is the same "usable when signed in" shape as Codex (no API key): the signed-in flag gates
   // the row, current() returns the refreshed OAuth bundle for the streaming Messages call.
@@ -61,6 +64,9 @@ export type ChatProviderDeps = {
   // the refreshed OAuth bundle for the streaming Responses call.
   xaiSignedIn: () => Promise<boolean>;
   xaiCreds: () => Promise<XaiCreds | undefined>;
+  antigravitySignedIn: () => Promise<boolean>;
+  antigravityCreds: () => Promise<AntigravityCreds | undefined>;
+  onDidChangeModels?: vscode.Event<void>;
   log: (message: string) => void;
 };
 
@@ -111,9 +117,11 @@ const toAnthropicMessages = (messages: readonly vscode.LanguageModelChatRequestM
 // Implements the three LanguageModelChatProvider methods over Wisp's catalog. The model `id` we
 // advertise IS the Provider id, so the response/token methods map it straight back to a Provider.
 const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => ({
+  onDidChangeLanguageModelChatInformation: deps.onDidChangeModels,
   // Advertise one model per usable Provider. Key presence is async (the injected resolver) so resolve it for
   // every Provider first, then hand the plain facts to the pure builder, which owns the usability rules.
   provideLanguageModelChatInformation: async () => {
+    const modelMap = deps.modelMap();
     const keyedPairs = await Promise.all(
       // The OAuth rows (Codex, Anthropic) are usable when "signed in" (no API key); every other row is
       // "has a key".
@@ -121,6 +129,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         isCodexProvider(p) ? await deps.codexSignedIn()
           : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
             : isXaiProvider(p) ? await deps.xaiSignedIn()
+              : isAntigravityProvider(p) ? !antigravityNativeChatError(resolveModel(modelMap, p)) && await deps.antigravitySignedIn()
               : !!(await deps.keyFor(p))] as const),
     );
     const keyed = Object.fromEntries(keyedPairs);
@@ -134,22 +143,34 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     // Codex's account catalogue takes precedence over public API metadata for context and vision.
     // Other OAuth providers use models.dev with their existing offline capability fallbacks.
     const codexProvider = deps.providers.find(isCodexProvider);
-    const codexModels = codexProvider && keyed[codexProvider.id]
-      ? (await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) })).models : [];
+    const codexResult = codexProvider && keyed[codexProvider.id]
+      ? await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) }) : undefined;
+    const codexModels = codexResult?.models ?? [];
     const codexInfo = (id: string) => codexModels.find((m) => m.id === id);
+    const contextOverrides = deps.codexContextWindows?.() ?? {};
     const caps = (provider: Provider, model: string) =>
-      isCodexProvider(provider) ? ({ ...lookupModelsDevCaps(catalog, 'openai', model), ...codexModelCaps(model, codexInfo(model)) })
+      isCodexProvider(provider) ? ({ maxOutput: lookupModelsDevCaps(catalog, 'openai', model)?.maxOutput,
+        ...codexModelCaps(model, codexInfo(model), contextOverrides[model]) })
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
+            : isAntigravityProvider(provider) ? { maxOutput: antigravityMaxCompletionTokens(model), vision: model.startsWith('gemini-') || model.startsWith('claude-') }
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed,
-      modelMap: deps.modelMap(),
+      modelMap,
       customBaseUrl: deps.customBaseUrl(),
       caps,
       // Label and request resolve effort through the same model metadata.
       effort: deps.effort(),
       codexInfo,
+    }).map(info => {
+      if (!codexProvider || info.id !== codexProvider.id) return info;
+      const id = resolveModel(modelMap, codexProvider), meta = codexInfo(id), override = contextOverrides[id];
+      return { ...info, tooltip: `Codex context: ${info.maxInputTokens + info.maxOutputTokens} total tokens (input + output). `
+        + `Account default: ${meta?.contextWindow ?? 'unknown'}; maximum: ${meta?.maxContextWindow ?? 'unknown'}. `
+        + (typeof override === 'number' && Number.isSafeInteger(override) && override >= 2 ? `Wisp override requested: ${override}, bounded by known account limits. ` : '')
+        + (meta?.contextWindow ? `Catalogue: ${codexResult?.source ?? 'unavailable'}. ` : 'Conservative fallback; refresh Codex models for account limits. ')
+        + 'Native Codex settings and public API limits are separate.' };
     });
   },
 
@@ -161,9 +182,46 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     if (!provider) return;
     if (isGeminiApiProvider(provider)) throw new Error('Gemini API is not qualified for VS Code chat.');
     const modelId = resolveModel(deps.modelMap(), provider);
+    if (isAntigravityProvider(provider)) {
+      const unsupported = antigravityNativeChatError(modelId);
+      if (unsupported) throw new Error(unsupported);
+    }
 
     const controller = new AbortController();
-    token.onCancellationRequested(() => controller.abort());
+    const cancellation = token.onCancellationRequested(() => controller.abort());
+    try {
+    if (token.isCancellationRequested) return;
+
+    if (isAntigravityProvider(provider)) {
+      try {
+        const creds = await deps.antigravityCreds();
+        if (controller.signal.aborted) return;
+        if (!creds?.accessToken) throw new Error('Sign in to Antigravity before using native chat.');
+        const tools = (options.tools ?? []).map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+        let truncated = false;
+        for await (const ev of antigravityStream({ creds, model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
+          messages: toAnthropicMessages(messages), tools, toolChoice: options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto',
+          thinkingLevel: standardEffortToAntigravity(deps.effort()), strictCompletion: true, rejectRedirects: true, signal: controller.signal })) {
+          if (controller.signal.aborted) return;
+          if (ev.type === 'text') progress.report(new vscode.LanguageModelTextPart(ev.text));
+          if (ev.type === 'truncation') {
+            truncated = true;
+            progress.report(new vscode.LanguageModelTextPart(`\n\n_[Response truncated: ${ev.reason}]_`));
+          }
+          if (ev.type === 'tool_call' && !truncated) {
+            if (!ev.call.id || !ev.call.name) throw new Error('Antigravity returned a tool call without its original id or name.');
+            const input: unknown = JSON.parse(ev.call.argsJson);
+            if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Antigravity returned invalid tool call arguments.');
+            progress.report(new vscode.LanguageModelToolCallPart(ev.call.id, ev.call.name, input));
+          }
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        deps.log('[error] Antigravity native chat failed');
+        throw err;
+      }
+      return;
+    }
 
     // Codex speaks the Responses API, not chat completions — stream it through the dedicated client. Agent
     // tools are forwarded as strict Responses tools; codexStream yields text fragments live and the
@@ -293,6 +351,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       deps.log(`[error] chat ${provider.id} ${String(err)}`);
       throw err; // surface real failures to VS Code's chat UI
     }
+    } finally { cancellation.dispose(); }
   },
 
   // No tokenizer dependency: a ~4-chars-per-token heuristic is enough for the picker's budgeting.

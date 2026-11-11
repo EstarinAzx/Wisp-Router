@@ -85,6 +85,14 @@
         "title": "Wisp: Sign out of Grok"
       },
       {
+        "command": "wisp.antigravitySignIn",
+        "title": "Wisp: Sign in to Antigravity"
+      },
+      {
+        "command": "wisp.antigravitySignOut",
+        "title": "Wisp: Sign out of Antigravity"
+      },
+      {
         "command": "wisp.bridgeToggle",
         "title": "Wisp: Toggle Bridge"
       }
@@ -109,6 +117,13 @@
     "configuration": {
       "title": "Wisp",
       "properties": {
+        "wisp.codexContextWindows": {
+          "type": "object",
+          "scope": "machine",
+          "default": {},
+          "additionalProperties": { "type": "integer", "minimum": 2 },
+          "description": "Optional native-chat total context tokens by exact Codex model ID. Uses the account catalogue default when unset; overrides are capped at its advertised maximum (or default if no maximum is known). Refresh Codex models after changing account access. This does not change native Codex settings or establish service entitlement."
+        },
         "wisp.maxTokens": {
           "type": "number",
           "default": 0,

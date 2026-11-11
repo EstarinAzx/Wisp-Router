@@ -212,10 +212,18 @@ export const codexReasoning = (model: string, effort?: CodexEffort, info?: Codex
   return selected ? { effort: selected, ...(summary && ['auto', 'concise', 'detailed'].includes(summary) ? { summary } : {}) } : undefined;
 };
 
-export const codexModelCaps = (model: string, info?: CodexModelInfo): ModelCaps => info?.id === model ? {
-  ...(info.contextWindow ? { contextInput: info.contextWindow } : {}),
-  ...(info.inputModalities ? { vision: info.inputModalities.includes('image') } : {}),
-} : {};
+export const codexModelCaps = (model: string, info?: CodexModelInfo, contextOverride?: unknown): ModelCaps => {
+  if (info?.id !== model) return {};
+  // Old caches have no maximum: they may shrink their known default, but cannot prove a larger budget.
+  const ceiling = info.maxContextWindow ?? info.contextWindow;
+  const requested = typeof contextOverride === 'number' && Number.isSafeInteger(contextOverride) && contextOverride >= 2
+    ? contextOverride : info.contextWindow;
+  const context = requested && ceiling ? Math.min(requested, ceiling) : info.contextWindow;
+  return {
+    ...(context ? { contextInput: context } : {}),
+    ...(info.inputModalities ? { vision: info.inputModalities.includes('image') } : {}),
+  };
+};
 
 // ----------------------------- Codex Responses reply ----------------------------- //
 

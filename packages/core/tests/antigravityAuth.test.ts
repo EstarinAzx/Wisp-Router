@@ -163,6 +163,53 @@ describe('AntigravityAuth.signIn', () => {
   });
 });
 
+describe('Antigravity sign-in ownership', () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('fails promptly when the system browser cannot open and releases its callback port', async () => {
+    vi.useFakeTimers();
+    const open = vi.fn(async () => false);
+    const auth = new AntigravityAuth(memStore(), open, () => {});
+    const first = auth.signIn(); first.catch(() => {});
+    await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(300001);
+    await expect(first).rejects.toThrow(/browser/i);
+    open.mockRejectedValueOnce(new Error('browser retry'));
+    await expect(auth.signIn()).rejects.toThrow('browser retry');
+  });
+  it('does not replace an account changed while browser sign-in was pending', async () => {
+    const store = memStore();
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: any, init: any) => {
+      if (String(url).startsWith('http://localhost:')) return realFetch(url, init);
+      if (String(url).includes('/token')) return Response.json({ access_token: 'new', refresh_token: 'new-r', expires_in: 3600 });
+      store.write({ accessToken: 'other-account', projectId: 'other' });
+      return Response.json({ cloudaicompanionProject: 'new-project' });
+    });
+    const auth = new AntigravityAuth(store, async (url) => {
+      const authorize = new URL(url), callback = new URL(authorize.searchParams.get('redirect_uri')!);
+      callback.searchParams.set('code', 'test'); callback.searchParams.set('state', authorize.searchParams.get('state')!);
+      await fetch(callback); return true;
+    }, () => {});
+    await expect(auth.signIn()).rejects.toThrow(AuthStateChangedError);
+    expect(store.read()?.accessToken).toBe('other-account');
+  });
+  it('rejects a second sign-in before attempting another callback listener', async () => {
+    let second: Promise<unknown> | undefined;
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: any, init: any) => String(url).startsWith('http://localhost:')
+      ? realFetch(url, init) : Response.json(String(url).includes('/token')
+        ? { access_token: 'test', expires_in: 3600 } : { cloudaicompanionProject: 'p' }));
+    const auth = new AntigravityAuth(memStore(), async (url) => {
+      second = auth.signIn().catch(e => e);
+      const authorize = new URL(url), callback = new URL(authorize.searchParams.get('redirect_uri')!);
+      callback.searchParams.set('code', 'test'); callback.searchParams.set('state', authorize.searchParams.get('state')!);
+      await fetch(callback); return true;
+    }, () => {});
+    await auth.signIn();
+    expect(String(await second)).toMatch(/already in progress/i);
+  });
+});
+
 // ----------------------------- Refresh: the #59 contract ----------------------------- //
 
 describe('AntigravityAuth — token lifecycle', () => {

@@ -98,6 +98,13 @@ OpenAI-compatible chat endpoints authenticated with a Bearer key.
 
 Reach Codex by running **`Wisp: Sign in to Codex`** (OAuth with a ChatGPT account). You can also import an existing Codex CLI login — see [Security](#security).
 
+Native chat uses the signed-in account catalogue's default context window. The optional machine setting
+`wisp.codexContextWindows` maps exact model IDs to requested total token budgets, capped at the account
+catalogue's maximum (or its default when no maximum is known). The picker tooltip shows the effective
+budget, default, maximum and catalogue source. Input plus reserved output equals that total.
+Public API limits and native Codex's `model_context_window` are separate; Wisp does not import or change
+native Codex configuration. See [context and native-chat boundaries](../../docs/vscode-provider-parity.md).
+
 ### Anthropic provider
 
 | Provider | Auth | Notes |
@@ -113,6 +120,18 @@ Reach Claude by running **`Wisp: Sign in to Claude`** (OAuth with a Claude.ai ac
 | **Grok** | xAI account (OAuth) | No API key. Runs Grok on **your own Grok subscription** via the Responses API — `grok-build` (default), `grok-composer-2.5-fast`, `grok-4.5`. Supports streaming, tool calling, and reasoning Effort. **Not** the API-key **Groq** (Llama) row above. |
 
 Reach Grok by running **`Wisp: Sign in to Grok`** (OAuth with an xAI account). An existing Grok CLI login (`~/.grok/auth.json`) is imported on first use.
+
+### Antigravity provider
+
+Sign in or out from the panel's **Antigravity Account** controls or **Wisp: Sign in to Antigravity** /
+**Wisp: Sign out of Antigravity**. The terminal and extension share the same credentials. Browser sign-in
+requires callback port `51121`; an occupied port fails rather than moving the callback elsewhere.
+
+The model dropdown consumes OAuth discovery and offers manual refresh and model entry. Native chat
+supports the shared catalogue's known text models with streaming, tools and tool-result continuation;
+account availability still depends on the service. Argon, image-output and unqualified model IDs remain
+out of the native picker, with a reason in the panel. Argon's encrypted replay remains on qualified
+Bridge Responses routes. Antigravity Inquire is not supported. See [details](../../docs/vscode-provider-parity.md).
 
 ### Custom
 
@@ -203,6 +222,7 @@ Only editor-local tuning remains under VS Code `wisp.*` settings:
 | --- | --- | --- |
 | `wisp.maxTokens` | `0` | Max output tokens; `0` = uncapped. |
 | `wisp.temperature` | `0.1` | Sampling temperature. |
+| `wisp.codexContextWindows` | `{}` | Native-chat total context overrides by exact Codex model ID, bounded by account metadata. Machine/user setting only. |
 
 ---
 
