@@ -137,6 +137,13 @@ tags: [flows]
 - `parseCodexModels` retains both default and maximum. `codexModelCaps` accepts an optional bounded override. Native chat reads only the machine/user `wisp.codexContextWindows` map, removes public API context as an OAuth fallback, and explains effective/default/maximum/source in its tooltip. Input and output sum to the effective total.
 - These are synthetic implementation results, not installed-extension or real-provider acceptance. Current review status is in [[active-work]]; durable behavior details and runnable checks are in `docs/vscode-provider-parity.md`.
 
+## Argon native and Local continuation (2026-11-11 follow-up)
+
+- `nativeChatSupport.ts` accepts exact Argon low/medium/high IDs on VS Code1.145.3+; `chatProvider.ts` routes them to `nativeArgonChat.ts` instead of the generic SSE adapter.
+- The adapter decrypts/authenticates original assistant parts before credential refresh or generation, preserves System role3, validates visible history and exact result IDs, then buffers/validates `antigravityNativeResponse` before emitting marker/text/tools/usage. Shared `validateAntigravityFunctionCallPairing` now matches each identified result once; legacy ID-less name matching remains.
+- Classic Copilot returns per-assistant encrypted markers. Local's pinned handler supplies a marker-only assistant header followed by instructions and incremental input; `NativeArgonHistory` restores a bounded32-checkpoint/16MiB process-local history after authenticating the marker. Reload/eviction requires a new Local chat. No Bridge start/secret or conversation disk store is needed.
+- Source contracts and isolated real `vscode.lm` IPC were tested with synthetic credentials/intercepted fetch. Final core2050, Argon38 and Local scoped review pass at427993c; [[active-work]] owns integration and live-acceptance limits.
+
 ## Related
 
 - [[overview]]

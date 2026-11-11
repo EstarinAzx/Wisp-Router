@@ -10,8 +10,10 @@ tags: [context, api, vscode]
 ## VS Code provider parity (2026-11-11)
 
 `wisp.antigravitySignIn` and `wisp.antigravitySignOut` plus matching panel controls manage the shared account.
-Native chat uses the Antigravity stream for its supported text models; Argon/image/unqualified models and
-Antigravity Inquire are explicitly refused. `wisp.codexContextWindows` is a machine/user-scoped map of exact
+Native chat uses the Antigravity stream for ordinary supported text models. Argon low/medium/high adds
+authenticated text/tool replay for classic Copilot and Local on VS Code1.145.3+; Local needs a new chat
+after extension reload or cache eviction. Images/unqualified IDs and Antigravity Inquire remain refused.
+`wisp.codexContextWindows` is a machine/user-scoped map of exact
 Codex IDs to requested total budgets, bounded by account metadata. [Current behavior and limits](../docs/vscode-provider-parity.md)
 supersedes the historical descriptions below for these changed surfaces. [[active-work]] records the tested revision.
 
