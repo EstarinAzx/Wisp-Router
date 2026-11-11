@@ -31,7 +31,7 @@ import {
   AntigravityCreds, AntigravityTurn, buildAntigravityRequestBody, antigravityRequestId,
   antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityModelsUrl,
   antigravityRequestHeaders, antigravityApiError, antigravityFailureOf, antigravityShouldTryNextHost, antigravityStreamEvents,
-  parseAntigravityModels, type ToolSpec, type AntigravityThinkingLevel, type BridgeUsage,
+  parseAntigravityModelInfos, type AntigravityModelInfo, type ToolSpec, type AntigravityThinkingLevel, type BridgeUsage,
   validateAntigravityFunctionCallPairing,
 } from './catalog';
 // TYPE only, exactly as antigravity.ts imports it: erased at runtime, so bridge -> catalog stays the sole
@@ -40,6 +40,7 @@ import type { BridgeStreamEvent } from './bridge';
 import { sseBlocks } from './codexClient';
 
 type AntigravityRequestArgs = {
+  allowCapacityFallback?: boolean;
   rejectRedirects?: boolean;
   strictCompletion?: boolean;
   preserveSystemText?: boolean;
@@ -48,10 +49,12 @@ type AntigravityRequestArgs = {
   model: string;
   messages: AntigravityTurn[];
   tools?: ToolSpec[];
+  toolChoice?: 'auto' | 'required';
   // Already folded to this wire's three stops by the caller. Absent = send no thinkingConfig at all,
   // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
   maxOutputTokens?: number;
+  modelMaxOutputTokens?: number;
   signal?: AbortSignal;
   log?: (message: string) => void;
 };
@@ -96,8 +99,13 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
     fallbackSessionId: antigravityFallbackSessionId(randomHex()),
     thinkingLevel: args.thinkingLevel,
     maxOutputTokens: args.maxOutputTokens,
+    modelMaxOutputTokens: args.modelMaxOutputTokens,
     preserveSystemText: args.preserveSystemText,
   });
+  if (args.tools?.length && args.toolChoice === 'required') {
+    request.request.toolConfig = { ...request.request.toolConfig,
+      functionCallingConfig: { ...request.request.toolConfig?.functionCallingConfig, mode: 'ANY' } };
+  }
   if (args.strictCompletion) {
     const issue = validateAntigravityFunctionCallPairing(request);
     if (issue) throw new Error(`Invalid Antigravity tool history: ${issue}`);
@@ -105,7 +113,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
   const body = JSON.stringify(request);
   const headers = antigravityRequestHeaders(token);
   const chain = antigravityHostChain(args.baseUrl);
-  const hosts = singleAttempt ? chain.slice(0, 1) : chain;
+  const hosts = singleAttempt && !args.allowCapacityFallback ? chain.slice(0, 1) : chain;
   if (args.log) {
     const { sessionId, systemInstruction, tools, contents = [], generationConfig, toolConfig } = request.request;
     args.log(`[bridge] antigravity cache-request ${JSON.stringify({ requestId: request.requestId, model: args.model,
@@ -118,19 +126,21 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
   }
 
   for (const [index, host] of hosts.entries()) {
+    args.signal?.throwIfAborted();
     const isLast = index === hosts.length - 1;
     let res: Response;
     try {
       res = await fetch(antigravityTurnUrl(host, stream), { method: 'POST', headers, body, signal: args.signal, ...(args.rejectRedirects ? { redirect: 'error' as const } : {}) });
     } catch (err) {
       // The client hanging up is not a host failure — never burn the fallback on it.
-      if (isLast || args.signal?.aborted) throw err;
+      if (singleAttempt || isLast || args.signal?.aborted) throw err;
       continue;
     }
     // Keep both host outcomes visible; the final error otherwise hides the primary failure.
     args.log?.(`[bridge] antigravity upstream ${new URL(host).hostname} status=${res.status} requestBytes=${Buffer.byteLength(body)} contents=${request.request.contents?.length ?? 0} tools=${args.tools?.length ?? 0} thinking=${args.thinkingLevel ?? 'default'} requestId=${request.requestId}`);
     if (res.ok) return { res, requestId: request.requestId };
-    if (singleAttempt) {
+    // Native chat may retry only an explicit capacity rejection, never an ambiguous transport failure.
+    if (singleAttempt && (!args.allowCapacityFallback || res.status !== 503 || isLast)) {
       void res.body?.cancel().catch(() => {});
       throw antigravityApiError(res.status, '', res.headers.get('retry-after'));
     }
@@ -154,7 +164,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
  * moves to the next host (a discovery read has no request id to keep stable and no 429 verdict to
  * classify), and the last host's failure surfaces in the API-error contract shape.
  */
-export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: string): Promise<string[]> => {
+export const fetchAntigravityModelInfos = async (creds: AntigravityCreds, baseUrl?: string): Promise<AntigravityModelInfo[]> => {
   const token = creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
   // Match the account-scoped Hub catalog request; generation still carries the project.
@@ -175,10 +185,13 @@ export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: 
       lastError = antigravityApiError(res.status, await res.text().catch(() => ''), res.headers.get('retry-after'));
       continue;
     }
-    return parseAntigravityModels(await res.json().catch(() => undefined));
+    return parseAntigravityModelInfos(await res.json().catch(() => undefined));
   }
   throw lastError;
 };
+
+export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: string): Promise<string[]> =>
+  (await fetchAntigravityModelInfos(creds, baseUrl)).map(model => model.id);
 
 // ----------------------------- Streaming ----------------------------- //
 

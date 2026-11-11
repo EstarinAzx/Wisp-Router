@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-09-08
+updated: 2026-11-11
 tags: [context, decisions]
 ---
 
@@ -10,6 +10,8 @@ tags: [context, decisions]
 Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
+
+- [[2026-11-11-vscode-context-and-replay-boundaries]] — Codex defaults and bounded explicit overrides stay distinct; native Antigravity chat has an explicit replay/support boundary.
 
 - [[2026-09-08-codex-wisp-native-contract-before-implementation]] — 2.1.4 planning follows native Codex evidence; preserve model metadata and require visible tool/text completion.
 

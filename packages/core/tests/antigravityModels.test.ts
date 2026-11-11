@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fetchAntigravityModels } from '../src/antigravityClient';
 import {
-  parseAntigravityModels, ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST, ANTIGRAVITY_HTTP_USER_AGENT,
+  parseAntigravityModels, parseAntigravityModelInfos, ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST, ANTIGRAVITY_HTTP_USER_AGENT,
   type AntigravityCreds,
 } from '../src/catalog';
 
@@ -53,6 +53,19 @@ afterEach(() => vi.unstubAllGlobals());
 // ----------------------------- The pure parser ----------------------------- //
 
 describe('parseAntigravityModels', () => {
+  it('retains upstream context, output and image-input metadata without guessing from the name', () => {
+    expect(parseAntigravityModelInfos({ models: {
+      'future-chat': { maxTokens: 1_048_576, maxOutputTokens: 262_144, supportsImages: true },
+      'text-chat': { maxTokens: 131_072, maxOutputTokens: 32_768, supportsImages: false },
+    } })).toEqual([
+      { id: 'future-chat', contextWindow: 1_048_576, maxOutputTokens: 262_144, supportsImages: true },
+      { id: 'text-chat', contextWindow: 131_072, maxOutputTokens: 32_768, supportsImages: false },
+    ]);
+  });
+  it.each([0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1, '1048576', null])('ignores malformed limits %s', value => {
+    expect(parseAntigravityModelInfos({ models: { future: { maxTokens: value, maxOutputTokens: value, supportsImages: 'yes' } } }))
+      .toEqual([{ id: 'future', contextWindow: undefined, maxOutputTokens: undefined, supportsImages: undefined }]);
+  });
   it('reads the models map keys, sorted', () => {
     expect(parseAntigravityModels(MODELS_PAYLOAD)).toEqual(['claude-sonnet-4-6', 'gemini-3.1-pro-low', 'gemini-4-flash']);
   });

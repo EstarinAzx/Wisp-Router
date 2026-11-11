@@ -27,6 +27,7 @@
  */
 
 import { createServer } from 'http';
+import { randomUUID } from 'crypto';
 import type { AddressInfo } from 'net';
 import { AuthStateChangedError } from './homeStore';
 import {
@@ -153,7 +154,7 @@ const runAntigravityOAuth = async (openExternal: (url: string) => PromiseLike<bo
   const { code, close } = await startCallbackServer(state);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await openExternal(buildAuthorizeUrl(challenge, state));
+    if (!await openExternal(buildAuthorizeUrl(challenge, state))) throw new Error('Could not open the browser for Antigravity sign-in.');
     const authCode = await Promise.race([
       code,
       new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('Antigravity sign-in timed out.')), OAUTH_TIMEOUT_MS); }),
@@ -200,7 +201,7 @@ export const fetchAntigravityProject = async (accessToken: string): Promise<stri
 // The antigravity slice of ~/.wisp/auth.json, as the host face exposes it.
 export type AntigravityCredsStore = {
   read: () => AntigravityCreds | undefined;
-  write: (creds: AntigravityCreds, expected?: AntigravityCreds) => void;
+  write: (creds: AntigravityCreds, expected?: AntigravityCreds | null) => void;
 };
 
 // Owns the Antigravity token lifecycle against one auth.json slice. Each face holds a single instance and
@@ -287,18 +288,32 @@ export class AntigravityAuth {
 
   // Sign in via the browser OAuth flow, bootstrap the project, and persist the result. The bootstrap is
   // best-effort: a failure still signs in (the tokens are good) and current() re-fetches later.
+  private signingIn = false;
   signIn = async (): Promise<AntigravityCreds> => {
-    const creds = await runAntigravityOAuth(this.openExternal);
-    const projectId = creds.accessToken ? await fetchAntigravityProject(creds.accessToken) : undefined;
-    const next = { ...creds, ...(projectId ? { projectId } : {}) };
-    this.store.write(next);
-    return next;
+    if (this.signingIn) throw new Error('Antigravity sign-in is already in progress.');
+    this.signingIn = true;
+    try {
+      let snapshot = this.store.read();
+      // Upgrade legacy empty tombstones before waiting: even an older client's {} sign-out must differ.
+      if (snapshot && Object.keys(snapshot).length === 0) {
+        const marked = { signOutId: randomUUID() };
+        this.store.write(marked, snapshot);
+        snapshot = marked;
+      }
+      const creds = await runAntigravityOAuth(this.openExternal);
+      const projectId = creds.accessToken ? await fetchAntigravityProject(creds.accessToken) : undefined;
+      const next = { ...creds, ...(projectId ? { projectId } : {}) };
+      if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
+      // null is an expected absent slice; undefined retains the store's unconditional-write contract.
+      this.store.write(next, snapshot ?? null);
+      return next;
+    } finally { this.signingIn = false; }
   };
 
   // Sign out by writing a TOMBSTONE rather than deleting the field — a present-but-bearer-less blob reads as
   // "signed out" (isAntigravitySignedIn === false) and survives a restart. The project id goes too: it
   // identifies the account that just left, not the install.
-  signOut = (): void => this.store.write({});
+  signOut = (): void => this.store.write({ signOutId: randomUUID() });
 
   private currentInFlight: Promise<AntigravityCreds> | undefined;
 

@@ -22,7 +22,7 @@ import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '@wisp/c
  */
 
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
@@ -34,6 +34,7 @@ import {
 import { getModelsDevCatalog } from '@wisp/core';
 import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
+import { antigravityNativeChatError } from './nativeChatSupport';
 import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { CodexAuth, AnthropicAuth, XaiAuth } from '@wisp/core';
 import { codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions } from '@wisp/core';
@@ -74,6 +75,11 @@ let statusBar: vscode.StatusBarItem;
 
 // The Wisp home store (~/.wisp/) — config.json + auth.json, shared with the TUI (ADR-0002).
 let home: WispHome;
+const credentialVersionKey = randomBytes(32);
+// Process-local HMAC prevents credential fingerprints (including weak keys) being exposed to the webview.
+const credentialVersion = (): string => createHmac('sha256', credentialVersionKey)
+  .update(JSON.stringify([home.readAuth(), PROVIDERS.map(p => p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined)]))
+  .digest('hex');
 
 // Reuse one client; rebuild only when key/baseURL change (construction is local, no network).
 let cachedClient: { key: string; baseURL: string; client: OpenAI } | undefined;
@@ -84,6 +90,7 @@ let lastError = false;
 
 // Side panel handle so key/config changes can push fresh state into the webview.
 let panel: WispPanelProvider | undefined;
+let chatModelsChanged: vscode.EventEmitter<void>;
 
 // Codex OAuth/token lifecycle (sign-in, store, import, refresh). Set in activate once the home store
 // exists; the Inquire codex branch + the sign-in/out commands + the panel state all go through it.
@@ -100,6 +107,8 @@ let xaiAuth: XaiAuth;
 // itself is a `wisp` command (both faces share ~/.wisp/auth.json, so a terminal sign-in lights up the picker).
 let kimiAuth: KimiAuth;
 let antigravityAuth: AntigravityAuth;
+let antigravityAuthPending = false;
+let antigravityAuthError: string | undefined;
 
 // The Bridge listener handle — created in activate, started/stopped by the command AND the panel switch. OFF
 // until toggled on (PRD: no local port open until the user deliberately enables it).
@@ -257,14 +266,26 @@ const clearApiKey = async (): Promise<void> => {
 // Probe GET <baseUrl>/models for the ids the endpoint actually serves. Return them exactly
 // as served (bare, e.g. "minimax-m3") — the /go chat endpoint rejects a provider-prefixed id,
 // so the selectable ids must match the served form to be usable.
-const fetchModelIds = async (): Promise<string[]> => {
-  if (isGeminiApiProvider(activeProvider())) return ['gemini-4-argon'];
-  if (isCodexProvider(activeProvider())) {
+const fetchModelIds = async (providerId = activeProvider().id): Promise<string[]> => {
+  const p = PROVIDERS.find(row => row.id === providerId);
+  if (!p) throw new Error('Unknown provider.');
+  if (isGeminiApiProvider(p)) return ['gemini-4-argon'];
+  if (isAntigravityProvider(p)) {
+    const creds = await antigravityAuth.current();
+    if (!creds?.accessToken) throw new Error('Sign in to Antigravity to discover models.');
+    const models = await fetchAntigravityModels(creds, resolveBaseUrl(p, ''));
+    chatModelsChanged?.fire();
+    return models;
+  }
+  if (isCodexProvider(p)) {
     const result = await loadCodexModels(true);
     if (result.error) throw new Error(result.error);
+    chatModelsChanged?.fire();
+    void panel?.postState();
     return codexModelIds(result.models);
   }
-  const client = await getClient();
+  if (isAnthropicProvider(p) || isXaiProvider(p)) return providerModelIds(p.id);
+  const client = await clientForProvider(p);
   if (!client) throw new Error(NO_KEY_MESSAGE);
   const page = await client.models.list();
   return page.data.map((m) => m.id).sort();
@@ -275,16 +296,18 @@ const fetchModelIds = async (): Promise<string[]> => {
 // against the same 4s ceiling as the models.dev fetches so a slow upstream can never stall panel open;
 // signed out, timeout, empty, or error all fall back to the static table — never a throw.
 const antigravityModelIds = async (p: Provider): Promise<string[]> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const creds = await antigravityAuth.current();
-    if (creds?.accessToken) {
-      const live = await Promise.race([
-        fetchAntigravityModels(creds, resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '')),
-        new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 4000)),
-      ]);
-      if (live.length) return live;
-    }
+    const live = await Promise.race([
+      (async () => {
+        const creds = await antigravityAuth.current();
+        return creds?.accessToken ? fetchAntigravityModels(creds, resolveBaseUrl(p, '')) : [];
+      })(),
+      new Promise<string[]>(resolve => { timer = setTimeout(() => resolve([]), 4000); }),
+    ]);
+    if (live.length) return live;
   } catch { /* static fallback below */ }
+  finally { clearTimeout(timer); }
   return oauthModelOptions(p, undefined) ?? [];
 };
 
@@ -304,7 +327,7 @@ const providerModelIds = async (id: string, refresh = false): Promise<string[]> 
   try {
     if (isAntigravityProvider(p)) return await antigravityModelIds(p);
     if (isCodexProvider(p)) return codexModelIds((await loadCodexModels(refresh)).models);
-    if (isAnthropicProvider(p)) {
+    if (isAnthropicProvider(p) || isXaiProvider(p)) {
       // Same timeout race as getState so a cold models.dev can't stall the row; undefined → curated list.
       const catalog = await Promise.race([
         getModelsDevCatalog(),
@@ -323,6 +346,7 @@ const providerModelIds = async (id: string, refresh = false): Promise<string[]> 
 // COPILOT_MODEL rides the process env into new terminals (#35) — keep it true when the Provider or its
 // model changes mid-run. Only the model var; BASE_URL stays bound to the port.
 const refreshCopilotModelEnv = (): void => {
+  chatModelsChanged?.fire();
   if (bridge.isRunning()) envCollection.replace('COPILOT_MODEL', activeModel());
 };
 
@@ -408,6 +432,9 @@ const setBaseUrl = async (url: string): Promise<void> => {
 // keySource keeps the UI honest when the key comes from the env var (Clear can't remove that).
 const getState = async (): Promise<PanelState> => {
   const p = activeProvider();
+  const config = home.readConfig();
+  const model = resolveModel(config.models ?? {}, p);
+  const version = credentialVersion();
   const stored = isGeminiApiProvider(p) ? !!home.geminiReplayContext() : home.readAuth().keys?.[resolveKeyId(p)]?.trim();
   const keySource = stored ? 'stored' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env' : 'none';
   // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
@@ -415,8 +442,6 @@ const getState = async (): Promise<PanelState> => {
     : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
     : isXaiProvider(p) ? await xaiAuth.isSignedIn()
     : isKimiProvider(p) ? kimiAuth.isSignedIn()
-    // #188: a pure read of the stored slice — this face has no AntigravityAuth instance because it offers no
-    // sign-in button (that lives in `wisp`); both faces share auth.json, so the status is still truthful.
     : isAntigravityProvider(p) ? isAntigravitySignedIn(home.readAuth().antigravity)
     : false;
   // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
@@ -429,22 +454,26 @@ const getState = async (): Promise<PanelState> => {
       ])
     : undefined;
   const codexModels = isCodexProvider(p) ? (await loadCodexModels()).models : [];
-  const codexInfo = codexModels.find((m) => m.id === activeModel());
+  const codexInfo = codexModels.find((m) => m.id === model);
   return {
     keyIsSet: keySource !== 'none',
     keySource,
     keyEnv: p.apiKeyEnv, // shown in the env-key hint so it names the active Provider's var, not Zen's
-    model: activeModel(),
-    baseUrl: activeBaseUrl(),
+    model,
+    baseUrl: resolveBaseUrl(p, config.customBaseUrl ?? ''),
     providerId: p.id,
+    credentialVersion: version,
     providers: PROVIDERS.map((r) => ({ id: r.id, label: r.label })), // drives the panel dropdown
     isCustom: p.id === CUSTOM_ID,
     kind: p.kind ?? 'openai-chat',
     signedIn,
+    authPending: isAntigravityProvider(p) ? antigravityAuthPending : undefined,
+    authError: isAntigravityProvider(p) ? antigravityAuthError : undefined,
+    chatUnavailable: isAntigravityProvider(p) ? antigravityNativeChatError(model, vscode.version) : undefined,
     // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
     account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
     // Codex and Antigravity use their own discovery calls; the other OAuth kinds use models.dev.
-    modelOptions: isGeminiApiProvider(p) ? ['gemini-4-argon'] : isCodexProvider(p) ? codexModelIds(codexModels) : isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
+    modelOptions: isGeminiApiProvider(p) ? ['gemini-4-argon'] : isCodexProvider(p) ? codexModelIds(codexModels) : isAntigravityProvider(p) ? (antigravityAuthPending ? oauthModelOptions(p, undefined) : await antigravityModelIds(p)) : oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
     effort: isCodexProvider(p) ? codexModelEffort(codexInfo, activeEffort()) : isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,
@@ -653,6 +682,10 @@ const editCodeLensProvider: vscode.CodeLensProvider = {
 // Prompt for the API key and store it in the OS keychain.
 const setApiKey = async (): Promise<void> => {
   const provider = activeProvider();
+  if (isAntigravityProvider(provider)) {
+    vscode.window.showWarningMessage("Use 'Wisp: Sign in to Antigravity' or the panel account controls; this provider does not use an API key.");
+    return;
+  }
   const gemini = isGeminiApiProvider(provider);
   const expectedLifetime = gemini ? home.geminiReplayContext()?.lifetime ?? null : null;
   const value = await vscode.window.showInputBox({
@@ -727,6 +760,38 @@ const xaiSignOut = async (): Promise<void> => {
   await xaiAuth.signOut();
   vscode.window.showInformationMessage('Wisp: signed out of Grok.');
   void panel?.postState();
+};
+
+const antigravitySignIn = async (): Promise<void> => {
+  if (antigravityAuthPending) return;
+  antigravityAuthPending = true;
+  antigravityAuthError = undefined;
+  void panel?.postState();
+  try {
+    await antigravityAuth.signIn();
+    vscode.window.showInformationMessage('Wisp: signed in to Antigravity.');
+  } catch {
+    // OAuth responses can include credentials. Keep both the panel and notification safe.
+    antigravityAuthError = 'Antigravity sign-in failed. Finish the browser flow and ensure callback port 51121 is free, then retry.';
+    vscode.window.showErrorMessage(antigravityAuthError);
+  } finally {
+    antigravityAuthPending = false;
+    chatModelsChanged?.fire();
+    void panel?.postState();
+  }
+};
+
+const antigravitySignOut = async (): Promise<void> => {
+  try {
+    antigravityAuth.signOut();
+    antigravityAuthError = undefined;
+    vscode.window.showInformationMessage('Wisp: signed out of Antigravity.');
+  } catch {
+    antigravityAuthError = 'Antigravity sign-out could not be saved. Try again.';
+    vscode.window.showErrorMessage(antigravityAuthError);
+  }
+  void panel?.postState();
+  chatModelsChanged?.fire();
 };
 
 // The Bridge's localhost address (no path) — shown in the panel and the base for the injected BASE_URL.
@@ -806,10 +871,6 @@ const copyBridgeAddress = async (): Promise<void> => {
 
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
-  if (!isGeminiApiProvider(activeProvider()) && !(await resolveApiKey())) {
-    vscode.window.showWarningMessage(missingCredentialMessage());
-    return;
-  }
   try {
     const ids = await fetchModelIds();
     output.appendLine(`Models: ${ids.join(', ')}`);
@@ -829,6 +890,7 @@ const listModels = async (): Promise<void> => {
 // Editing via blocks — not a span or whole-file re-emit — keeps untouched code byte-for-byte intact,
 // so the diff shows only the real changes. No longer routes through the inline-completion provider.
 const inquire = async (): Promise<void> => {
+  if (isAntigravityProvider(activeProvider())) { vscode.window.showWarningMessage('Antigravity is available through Wisp native chat and qualified Bridge routes. Inquire is not supported for this provider.'); return; }
   if (isGeminiApiProvider(activeProvider())) { vscode.window.showWarningMessage('Gemini API is not qualified for Inquire. Use the custom Responses route.'); return; }
   const editor = vscode.window.activeTextEditor;
   if (!editor) return;
@@ -972,6 +1034,7 @@ const inquire = async (): Promise<void> => {
 // ----------------------------- Activation ----------------------------- //
 
 export const activate = (context: vscode.ExtensionContext): void => {
+  chatModelsChanged = new vscode.EventEmitter<void>();
   output = vscode.window.createOutputChannel('Wisp');
   secrets = context.secrets;
   globalState = context.globalState;
@@ -1000,13 +1063,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
   kimiAuth = new KimiAuth(
     { read: () => home.readAuth().kimi, write: (c, expected) => { home.writeAuth({ kimi: c }, expected === undefined ? undefined : { provider: 'kimi', snapshot: expected }); } },
     (m) => output.appendLine(m));
-  // Antigravity token lifecycle (#189) — like Kimi, the sign-in itself is driven from `wisp`; this face
-  // holds the manager only so the Bridge can REFRESH the stored bundle and bootstrap the Cloud Code
-  // project before a turn. openExternal is wired anyway because the constructor takes it, and nothing on
-  // this face calls signIn().
+  // Both faces use the same account slice and fixed callback port; the manager owns concurrency checks.
   antigravityAuth = new AntigravityAuth(
     { read: () => home.readAuth().antigravity, write: (c, expected) => {
-      home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected) });
+      home.writeAuth({ antigravity: c }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected ?? undefined) });
     } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
@@ -1036,6 +1096,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
   });
 
   panel = new WispPanelProvider(context.extensionUri, {
+    credentialVersion,
     getState,
     getActivity: () => inFlight > 0, // current Activity for the panel's initial sync on 'ready'
     storeApiKey,
@@ -1051,6 +1112,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     anthropicSignOut,
     xaiSignIn,
     xaiSignOut,
+    antigravitySignIn,
+    antigravitySignOut,
     setEffort,
     setFamilyRoute, // Routing map Family rows (#51) — set/clear one row
     setAlias, // Routing map Alias rows (#52) — add/retarget one
@@ -1106,6 +1169,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
   });
 
   context.subscriptions.push(
+    chatModelsChanged,
+    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration(CONFIG_NS)) chatModelsChanged.fire(); }),
     output,
     statusBar,
     bridge, // closes the listener on deactivate
@@ -1120,6 +1185,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
     vscode.commands.registerCommand('wisp.anthropicSignOut', anthropicSignOut),
     vscode.commands.registerCommand('wisp.xaiSignIn', xaiSignIn),
     vscode.commands.registerCommand('wisp.xaiSignOut', xaiSignOut),
+    vscode.commands.registerCommand('wisp.antigravitySignIn', antigravitySignIn),
+    vscode.commands.registerCommand('wisp.antigravitySignOut', antigravitySignOut),
     // Internal — invoked by the inline-diff CodeLenses, not contributed to the palette.
     vscode.commands.registerCommand('wisp.acceptEdit', () => resolvePreview(true)),
     vscode.commands.registerCommand('wisp.rejectEdit', () => resolvePreview(false)),
@@ -1130,6 +1197,14 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // Additional surface: expose the catalog's keyed Providers as models in VS Code's native chat /
     // Ctrl+I picker. extension.ts owns key resolution; the provider module is pure vscode/openai glue.
     registerWispChatProvider({
+      codexContextWindows: () => {
+        const value: unknown = cfg().inspect('codexContextWindows')?.globalValue;
+        return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      },
+      onDidChangeModels: chatModelsChanged.event,
+      antigravitySignedIn: () => antigravityAuth.isSignedIn(),
+      antigravityCreds: () => antigravityAuth.current(),
+      antigravityStoredCreds: () => home.readAuth().antigravity,
       providers: PROVIDERS,
       modelMap: () => home.readConfig().models ?? {},
       customBaseUrl: () => home.readConfig().customBaseUrl ?? '',

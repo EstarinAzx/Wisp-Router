@@ -37,6 +37,9 @@ import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
+import { isAntigravityProvider, fetchAntigravityModelInfos, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds, type AntigravityModelInfo } from '@wisp/core';
+import { antigravityNativeChatError } from './nativeChatSupport';
+import { NativeAntigravityHistory, provideAntigravityChatResponse } from './nativeAntigravityChat';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -52,6 +55,7 @@ export type ChatProviderDeps = {
   // (so a not-signed-in Codex stays hidden) and its refreshed OAuth creds for the streaming Responses call.
   codexSignedIn: () => Promise<boolean>;
   codexCreds: () => Promise<CodexCreds | undefined>;
+  codexContextWindows?: () => Record<string, unknown>;
   effort: () => EffortLevel;                        // the panel's reasoning Effort — shared by Codex + Anthropic (same value Inquire uses)
   // Anthropic is the same "usable when signed in" shape as Codex (no API key): the signed-in flag gates
   // the row, current() returns the refreshed OAuth bundle for the streaming Messages call.
@@ -61,6 +65,10 @@ export type ChatProviderDeps = {
   // the refreshed OAuth bundle for the streaming Responses call.
   xaiSignedIn: () => Promise<boolean>;
   xaiCreds: () => Promise<XaiCreds | undefined>;
+  antigravitySignedIn: () => Promise<boolean>;
+  antigravityCreds: () => Promise<AntigravityCreds | undefined>;
+  antigravityStoredCreds?: () => AntigravityCreds | undefined;
+  onDidChangeModels?: vscode.Event<void>;
   log: (message: string) => void;
 };
 
@@ -110,10 +118,14 @@ const toAnthropicMessages = (messages: readonly vscode.LanguageModelChatRequestM
 
 // Implements the three LanguageModelChatProvider methods over Wisp's catalog. The model `id` we
 // advertise IS the Provider id, so the response/token methods map it straight back to a Provider.
-const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => ({
+const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => {
+  const antigravityHistory = new NativeAntigravityHistory();
+  return ({
+  onDidChangeLanguageModelChatInformation: deps.onDidChangeModels,
   // Advertise one model per usable Provider. Key presence is async (the injected resolver) so resolve it for
   // every Provider first, then hand the plain facts to the pure builder, which owns the usability rules.
   provideLanguageModelChatInformation: async () => {
+    const modelMap = deps.modelMap();
     const keyedPairs = await Promise.all(
       // The OAuth rows (Codex, Anthropic) are usable when "signed in" (no API key); every other row is
       // "has a key".
@@ -121,35 +133,80 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         isCodexProvider(p) ? await deps.codexSignedIn()
           : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
             : isXaiProvider(p) ? await deps.xaiSignedIn()
+              : isAntigravityProvider(p) ? !antigravityNativeChatError(resolveModel(modelMap, p), vscode.version) && await deps.antigravitySignedIn()
               : !!(await deps.keyFor(p))] as const),
     );
     const keyed = Object.fromEntries(keyedPairs);
+    const antigravityProvider = deps.providers.find(isAntigravityProvider);
+    let antigravityAccount = deps.antigravityStoredCreds?.();
+    let antigravityTimer: ReturnType<typeof setTimeout> | undefined;
+    const accountModels: Promise<AntigravityModelInfo[]> = antigravityProvider && keyed[antigravityProvider.id]
+      ? Promise.race([
+        (async () => {
+          const creds = await deps.antigravityCreds();
+          if (!creds?.accessToken) return [];
+          antigravityAccount = { refreshToken: creds.refreshToken, projectId: creds.projectId };
+          const models = await fetchAntigravityModelInfos(creds, resolveBaseUrl(antigravityProvider, deps.customBaseUrl()));
+          return models;
+        })().catch(() => []),
+        new Promise<AntigravityModelInfo[]>(resolve => { antigravityTimer = setTimeout(() => resolve([]), 4000); }),
+      ]).finally(() => clearTimeout(antigravityTimer)) : Promise.resolve([]);
     // Pull the real context/output/vision from models.dev. Race a timeout so a cold/slow fetch never
     // stalls the picker — it keeps caching in the background, so the next open is accurate; missing
     // data just falls back to the table/default inside buildChatModelInfos.
-    const catalog = await Promise.race([
+    const [catalog, antigravityModels] = await Promise.all([Promise.race([
       getModelsDevCatalog(),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
-    ]);
+    ]), accountModels]);
+    const antigravityInfo = (id: string) => antigravityModels.find(model => model.id === id);
     // Codex's account catalogue takes precedence over public API metadata for context and vision.
     // Other OAuth providers use models.dev with their existing offline capability fallbacks.
     const codexProvider = deps.providers.find(isCodexProvider);
-    const codexModels = codexProvider && keyed[codexProvider.id]
-      ? (await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) })).models : [];
+    const codexResult = codexProvider && keyed[codexProvider.id]
+      ? await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) }) : undefined;
+    const codexModels = codexResult?.models ?? [];
     const codexInfo = (id: string) => codexModels.find((m) => m.id === id);
+    // Validate after every discovery await, including other providers' catalogues.
+    if (antigravityProvider && deps.antigravityStoredCreds) {
+      const stored = deps.antigravityStoredCreds();
+      if (!stored?.accessToken || stored.refreshToken !== antigravityAccount?.refreshToken || stored.projectId !== antigravityAccount?.projectId) {
+        keyed[antigravityProvider.id] = false;
+      }
+    }
+    const contextOverrides = deps.codexContextWindows?.() ?? {};
     const caps = (provider: Provider, model: string) =>
-      isCodexProvider(provider) ? ({ ...lookupModelsDevCaps(catalog, 'openai', model), ...codexModelCaps(model, codexInfo(model)) })
+      isCodexProvider(provider) ? ({ maxOutput: lookupModelsDevCaps(catalog, 'openai', model)?.maxOutput,
+        ...codexModelCaps(model, codexInfo(model), contextOverrides[model]) })
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
+            : isAntigravityProvider(provider) ? { contextInput: antigravityInfo(model)?.contextWindow,
+              maxOutput: antigravityInfo(model)?.maxOutputTokens ?? antigravityMaxCompletionTokens(model),
+              vision: antigravityInfo(model)?.supportsImages ?? false }
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed,
-      modelMap: deps.modelMap(),
+      modelMap,
       customBaseUrl: deps.customBaseUrl(),
       caps,
       // Label and request resolve effort through the same model metadata.
       effort: deps.effort(),
       codexInfo,
+    }).map(info => {
+      if (antigravityProvider && info.id === antigravityProvider.id) {
+        const meta = antigravityInfo(resolveModel(modelMap, antigravityProvider));
+        return { ...info, tooltip: (meta?.contextWindow
+          ? `Antigravity account catalogue: ${meta.contextWindow} context tokens. `
+          : 'Antigravity context limit unavailable; using a conservative 128000-token fallback. ')
+          + `Native input budget: ${info.maxInputTokens}; output reserve: ${info.maxOutputTokens}.` };
+      }
+      if (!codexProvider || info.id !== codexProvider.id) return info;
+      const id = resolveModel(modelMap, codexProvider), meta = codexInfo(id), override = contextOverrides[id];
+      return { ...info, tooltip: `Codex context: ${info.maxInputTokens + info.maxOutputTokens} total tokens (input + output). `
+        + `Account default: ${meta?.contextWindow ?? 'unknown'}; maximum: ${meta?.maxContextWindow ?? 'unknown'}. `
+        + (typeof override === 'number' && Number.isSafeInteger(override) && override >= 2 ? `Wisp override requested: ${override}, bounded by known account limits. `
+          : meta?.maxContextWindow ? 'Using the account maximum automatically. ' : '')
+        + (meta?.maxContextWindow || meta?.contextWindow ? `Catalogue: ${codexResult?.source ?? 'unavailable'}. ` : 'Conservative fallback; refresh Codex models for account limits. ')
+        + 'Native Codex settings and public API limits are separate.' };
     });
   },
 
@@ -161,12 +218,32 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     if (!provider) return;
     if (isGeminiApiProvider(provider)) throw new Error('Gemini API is not qualified for VS Code chat.');
     const modelId = resolveModel(deps.modelMap(), provider);
+    if (isAntigravityProvider(provider)) {
+      const unsupported = antigravityNativeChatError(modelId, vscode.version);
+      if (unsupported) throw new Error(unsupported);
+    }
 
     const controller = new AbortController();
-    token.onCancellationRequested(() => controller.abort());
+    const cancellation = token.onCancellationRequested(() => controller.abort());
+    try {
+    if (token.isCancellationRequested) return;
+
+    if (isAntigravityProvider(provider)) {
+      try {
+        await provideAntigravityChatResponse({ model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
+          maxOutputTokens: model.maxOutputTokens, thinkingLevel: standardEffortToAntigravity(deps.effort()),
+          messages, options, progress, signal: controller.signal, current: deps.antigravityCreds,
+          stored: deps.antigravityStoredCreds ?? (() => undefined), history: antigravityHistory });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        deps.log('[error] Antigravity native chat failed');
+        throw err;
+      }
+      return;
+    }
 
     // Codex speaks the Responses API, not chat completions — stream it through the dedicated client. Agent
-    // tools are forwarded as strict Responses tools; codexStream yields text fragments live and the
+    // tools retain their client schemas in non-strict Responses mode; codexStream yields text fragments live and the
     // assembled tool calls at the end, which map to text / tool-call parts exactly like the OpenAI path.
     if (isCodexProvider(provider)) {
       const creds = await deps.codexCreds();
@@ -293,14 +370,20 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       deps.log(`[error] chat ${provider.id} ${String(err)}`);
       throw err; // surface real failures to VS Code's chat UI
     }
+    } finally { cancellation.dispose(); }
   },
 
   // No tokenizer dependency: a ~4-chars-per-token heuristic is enough for the picker's budgeting.
   provideTokenCount: async (_model, text) => {
     const str = typeof text === 'string' ? text : normalizeTurn(text).text;
-    return Math.ceil(str.length / 4);
+    const p = deps.providers.find(p => p.id === _model.id);
+    // Encrypted state hides its tokenizer input. Charge bytes conservatively instead of zero tokens.
+    const stateBudget = typeof text !== 'string' && p && isAntigravityProvider(p)
+      ? text.content.reduce((total: number, part) => total + (part instanceof vscode.LanguageModelDataPart && part.mimeType === 'stateful_marker' ? part.data.byteLength : 0), 0) : 0;
+    return Math.ceil(str.length / 4) + stateBudget;
   },
 });
+};
 
 // Register Wisp as the 'wisp' chat-model vendor (matches contributes.languageModelChatProviders in
 // package.json). Returns the Disposable for the caller to push onto context.subscriptions.

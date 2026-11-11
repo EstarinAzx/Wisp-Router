@@ -347,7 +347,7 @@ export const buildChatModelInfos = (
       maxInputTokens,
       maxOutputTokens,
       // Tool calling advertised for EVERY row — VS Code hides non-tool models from the picker entirely,
-      // and it's honest (OpenAI rows forward tools via the chat client, Codex via strict Responses tools).
+      // and it's honest (OpenAI rows forward tools via the chat client, Codex via Responses tools).
       // imageInput from models.dev's modalities (Codex: codexModelCaps), else the id heuristic.
       capabilities: { toolCalling: true, ...((dyn?.vision ?? modelSupportsVision(model)) ? { imageInput: true } : {}) },
     }];

@@ -230,11 +230,29 @@ describe('buildCodexResponsesBody', () => {
 });
 
 describe('toCodexResponsesTools', () => {
+  it('preserves an external tool schema and its optional open-ended params by default', () => {
+    const inputSchema = { type: 'object', properties: {
+      workspaceRoot: { type: 'string' }, method: { type: 'string', enum: ['help', 'textDocument/hover'] },
+      params: { type: 'object', additionalProperties: {} },
+    }, required: ['workspaceRoot', 'method'] };
+    const original = structuredClone(inputSchema);
+    const [tool] = toCodexResponsesTools([{ name: 'mcp_pylance_mcp_s_pylanceLSP', description: 'LSP', inputSchema }]);
+    expect(tool.strict).toBe(false);
+    expect(tool.parameters).toEqual(original);
+    expect(inputSchema).toEqual(original);
+  });
+  it('defines properties for empty objects when strict mode is explicitly requested', () => {
+    const [tool] = toCodexResponsesTools([{ name: 'empty', description: 'Empty object', inputSchema: {
+      type: 'object', properties: { value: { type: 'object' } },
+    } }], true);
+    expect(tool.parameters).toEqual({ type: 'object', additionalProperties: false, required: ['value'],
+      properties: { value: { type: 'object', properties: {}, additionalProperties: false, required: [] } } });
+  });
   // VS Code tool defs → flat Responses function tools (name/description/parameters at top level, unlike
-  // chat completions' nested function object). Codex requires STRICT schemas: every object gets
-  // additionalProperties:false and ALL its property keys listed in required.
+  // chat completions' nested function object). Explicit strict mode closes every object and requires
+  // every key; external tools preserve their original schema by default instead.
   it('maps a tool to a strict Responses function tool', () => {
-    expect(toCodexResponsesTools([{ name: 'readFile', description: 'read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }]))
+    expect(toCodexResponsesTools([{ name: 'readFile', description: 'read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }], true))
       .toEqual([{
         type: 'function', name: 'readFile', description: 'read a file', strict: true,
         parameters: { type: 'object', properties: { path: { type: 'string' } }, additionalProperties: false, required: ['path'] },
@@ -243,7 +261,7 @@ describe('toCodexResponsesTools', () => {
 
   // A tool with no schema still maps — parameters become an empty strict object (required: []).
   it('defaults missing inputSchema to an empty strict object', () => {
-    expect(toCodexResponsesTools([{ name: 'noArgs', description: 'd' }]))
+    expect(toCodexResponsesTools([{ name: 'noArgs', description: 'd' }], true))
       .toEqual([{
         type: 'function', name: 'noArgs', description: 'd', strict: true,
         parameters: { type: 'object', properties: {}, additionalProperties: false, required: [] },
@@ -254,7 +272,7 @@ describe('toCodexResponsesTools', () => {
   it('enforces strict mode on nested object properties', () => {
     const [tool] = toCodexResponsesTools([{ name: 't', description: 'd', inputSchema: {
       type: 'object', properties: { opts: { type: 'object', properties: { deep: { type: 'string' } } } },
-    } }]);
+    } }], true);
     expect(tool.parameters).toEqual({
       type: 'object', additionalProperties: false, required: ['opts'],
       properties: { opts: { type: 'object', additionalProperties: false, required: ['deep'], properties: { deep: { type: 'string' } } } },
@@ -265,7 +283,7 @@ describe('toCodexResponsesTools', () => {
   it('enforces strict mode on array item schemas', () => {
     const [tool] = toCodexResponsesTools([{ name: 't', description: 'd', inputSchema: {
       type: 'object', properties: { list: { type: 'array', items: { type: 'object', properties: { x: { type: 'number' } } } } },
-    } }]);
+    } }], true);
     expect(tool.parameters).toEqual({
       type: 'object', additionalProperties: false, required: ['list'],
       properties: { list: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['x'], properties: { x: { type: 'number' } } } } },
@@ -279,10 +297,10 @@ describe('toCodexResponsesTools', () => {
       type: 'object',
       properties: { answers: { type: 'object', propertyNames: { pattern: '^q' }, patternProperties: { '^q': { type: 'string' } } } },
       minProperties: 1,
-    } }]);
+    } }], true);
     expect(tool.parameters).toEqual({
       type: 'object', additionalProperties: false, required: ['answers'],
-      properties: { answers: { type: 'object', additionalProperties: false, required: [] } },
+      properties: { answers: { type: 'object', properties: {}, additionalProperties: false, required: [] } },
     });
   });
 

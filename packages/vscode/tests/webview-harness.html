@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Wisp synthetic webview check</title>
+<link rel="stylesheet" href="../dist/webview/main.css">
+<style>:root{--vscode-foreground:#ccc;--vscode-descriptionForeground:#b6b6b6;--vscode-font-family:'Segoe UI',sans-serif;--vscode-font-size:13px;--vscode-editor-background:#1f1f1f;--vscode-widget-border:#454545;--vscode-input-background:#313131;--vscode-input-foreground:#ccc;--vscode-button-background:#0078d4;--vscode-button-foreground:#fff;--vscode-button-secondaryBackground:#313131;--vscode-button-secondaryForeground:#ccc;--vscode-textLink-foreground:#4daafc;--vscode-errorForeground:#f48771}body{background:#181818;max-width:400px}</style>
+<div id="root"></div>
+<script>
+const sent = [];
+window.acquireVsCodeApi = () => ({postMessage: message => sent.push(message)});
+const state = { providerId:'antigravity',providers:[{id:'antigravity',label:'Antigravity'},{id:'custom',label:'Custom'}],kind:'antigravity-oauth',signedIn:true,
+  credentialVersion:'account-a',keyIsSet:false,keySource:'none',keyEnv:'',isCustom:false,baseUrl:'https://synthetic.invalid',model:'gemini-3-flash',modelOptions:['gemini-3-flash','gemini-3.1-pro-low'],
+  bridgeRunning:false,bridgeAddress:'http://127.0.0.1:47831',routingFamilies:{},routingAliases:[] };
+const push = message => window.dispatchEvent(new MessageEvent('message',{data:message}));
+const settle = () => new Promise(resolve => setTimeout(resolve, 60));
+const sendState = async changes => {push({type:'state',state:{...state,...changes}});await settle();};
+const check = (condition, message) => {if(!condition)throw Error(message);};
+const button = name => [...document.querySelectorAll('button')].find(b=>b.textContent.trim()===name);
+window.harness = {sent,sendState,run:async()=>{
+  await sendState({});
+  check(button('Sign out') && !button('Sign out').disabled,'Antigravity sign-out control missing');
+  check([...document.querySelectorAll('option')].some(o=>o.value==='gemini-3.1-pro-low'),'Discovered models ignored');
+  button('Sign out').click();check(sent.at(-1).type==='antigravitySignOut','Wrong sign-out action');
+  await sendState({signedIn:false});button('Sign in').click();check(sent.at(-1).type==='antigravitySignIn','Wrong sign-in action');
+  await sendState({signedIn:false,authPending:true});check(button('Sign in').disabled&&button('Sign out').disabled,'Pending account controls not disabled');
+  await sendState({signedIn:false,authError:'Synthetic sign-in failed'});check(document.getElementById('root').textContent.includes('Synthetic sign-in failed'),'Account error missing');
+  await sendState({});
+  document.querySelector('button[title="Refresh model list from the endpoint"]').click();
+  const refresh = sent.at(-1);check(refresh.type==='refreshModels'&&refresh.providerId==='antigravity','Refresh lost provider');
+  push({...refresh,type:'models',ids:['gemini-new']});await settle();
+  check([...document.querySelectorAll('option')].some(o=>o.value==='gemini-new'),'Refresh result ignored');
+  await sendState({credentialVersion:'account-b',modelOptions:['account-b-model']});
+  check([...document.querySelectorAll('option')].some(o=>o.value==='account-b-model')&&!document.getElementById('root').textContent.includes('gemini-new'),'Accepted account A list survived account replacement');
+  push({...refresh,type:'models',ids:['account-a-late-model']});
+  push({...refresh,type:'modelsError',message:'Old account error'});await settle();
+  check(!document.getElementById('root').textContent.includes('account-a-late-model')&&!document.getElementById('root').textContent.includes('Old account error'),'Late account A result replaced B');
+  const provider = document.querySelector('select');provider.value='custom';provider.dispatchEvent(new Event('change',{bubbles:true}));
+  await sendState({providerId:'custom',kind:'openai-chat',isCustom:true,model:'custom-model',modelOptions:undefined,keyIsSet:true,signedIn:false});
+  push({...refresh,type:'modelsError',message:'Stale error'});
+  push({...refresh,type:'models',ids:['stale-model']});await settle();
+  check(!document.getElementById('root').textContent.includes('Stale error')&&!document.getElementById('root').textContent.includes('stale-model'),'Stale provider response rendered');
+  const keyA=sent.at(-1);
+  push({...keyA,type:'models',ids:['key-a-model']});await settle();
+  await sendState({providerId:'custom',credentialVersion:'key-b',kind:'openai-chat',isCustom:true,model:'custom-model',modelOptions:undefined,keyIsSet:true,signedIn:false});
+  check(!document.getElementById('root').textContent.includes('key-a-model'),'Nonempty key replacement retained old list');
+  await sendState({chatUnavailable:'Argon requires Bridge Responses.'});
+  check(document.getElementById('root').textContent.includes('Argon requires Bridge Responses.'),'Unsupported chat explanation missing');
+  await sendState({});return 'PASS: account controls, model options/refresh, provider switch and support boundary';
+}};
+</script><script type="module" src="../dist/webview/main.js"></script></html>

@@ -1,51 +1,49 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-10-14
-tags: [context, active-work, release]
+updated: 2026-11-12
+tags: [context, active-work, vscode, release]
 ---
 
 # Active Work
 
-_Last updated: 2026-10-14 by Codex._
-_Released product source: `9141af08fe95a070c6614f3aa9d06a8afec21671` (`v2.2.7`)._
+_Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
 
 ## Current focus
 
-Wisp terminal/npm **2.2.7** and VS Code companion **1.14.4** are published and installed on the reference operator machine. Delivery and independent review are complete. The original Antigravity cache/effort goal remains open for the unverified behavior below.
+Release Wisp **2.2.10** with VS Code companion **1.14.7** after the user passed the native-chat eyeball checks. Runtime repairs and independent reviews are complete. Release packaging and local verification passed; PR #232 integration and publication are in progress. The current status and exact revisions/run IDs are recorded in `.claude/vscode-parity/release-2.2.10.json`.
 
-This is the repository's current project baton. Start with [[pick-up]]; older local `wisp/` notes and dated investigation handoffs are historical snapshots. Detailed task evidence stays in Traycer, identified below, rather than becoming a second project entry point.
+**Workspace guard:** work in the primary checkout on local `main`. If elsewhere, locate `refs/heads/main` with `git worktree list --porcelain`, then read that checkout's `.context/pick-up.md`. This is the only current baton. Preserved `wisp/` notes and the retained old worktree are historical, not separate queues.
 
-## State
+## Work contract
 
-- **Delivered:** [PR #228](https://github.com/EstarinAzx/Wisp-Router/pull/228) merged; [release v2.2.7](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.7) published. Companion 1.14.4 ships the same shared Bridge changes; Wisp Slot is unchanged.
-- **Changes:** eligible Antigravity tiered targets expose Low/Medium/High, and Responses preserves the selected effort. The experimental `wisp antigravity-compat on|off|status` option defaults off. See the [release notes](../docs/releases/v2.2.7.md) for the accepted reminder-priority/omission tradeoff and limits.
-- **Verified delivery:** four native tag builds and packaged smokes, all five GitHub asset digests, all five npm tarball integrities/payloads, the Windows download fallback, installed npm/VSIX bytes and isolated package behavior passed. Independent delivery review found no actionable defects.
-- **Reference runtime at delivery:** terminal 2.2.7/companion 1.14.4 installed; Desktop integration and client fallback off, no persistent Bridge running. Auth/settings and original research were preserved. This is an observation from 2026-10-13 UTC, not a command to change another installation or evidence of its current runtime.
-- **Open acceptance:** actual Desktop picker/selection, real target effort/allocation, meaningful fallback cache benefit/historical plateau repair and actual VS Code host activation remain unverified.
-- **Automation:** the release relay stopped at that acceptance boundary after leg 15. No release job, reviewer or provider experiment remains assigned.
+- **Authority:** khitarashi, 2026-11-12: "okay eyeball passed. so can we release this now? and also can we address tehse uncommeted shit". This authorizes scoped commits, PR integration, release publication and non-destructive Source Control cleanup. Installation and replacement of running clients remain separate.
+- **Release scope:** `docs/releases/v2.2.10.md`, terminal/npm2.2.10, companion1.14.7, Slot unchanged1.7.5. Native Antigravity accounts/discovery, generic text/chat state, dynamic limits, Codex maximum context and MCP schema preservation. Existing Bridge qualification and Desktop protocol5 remain unchanged.
+- **Owner:** root chat `8f60fde8-74fa-49f0-98e5-788163a75924`, primary checkout; owns VS Code fix coordination and this release. Predecessor ownership transfer is complete in `.claude/vscode-parity/handoff-to-main/state.json`. No relay is active.
+- **Integration:** reuse [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232), branch `fix/vscode-provider-parity`. Local main includes additional fixes beyond the existing PR head27ee22d: publish the complete reviewed local head to that branch before merging. Require successful release-build checks, merge with a merge commit (not squash), then fast-forward primary main and tag the merged revision. Do not reset/rebase away local work or force-push main.
+- **Review policy:** independent scoped reviews plus one regression-tested correction pass. No persistent CodeRabbit opt-in; the old audit checkpoint remains closed at1/3 with47-file coverage. Existing GitHub PR app checks are not a new local review loop.
+- **Native acceptance:** user reported basic Argon and Carbon chat working, confirmed GPT872K display, then passed a Codex greeting after the Pylance schema fix. No agent-issued live generation probes. Full-window requests, actual Pylance dynamic-key invocation, all model/tool combinations and interactive compaction remain unqualified.
+- **Source validation:** core2081/TUI201 (896 assertions), core/TUI typechecks and extension build passed. A concurrent release-preparation run timed out in `authLifecycle.test.ts` Antigravity callback cleanup: separate test files share fixed OAuth ports. The isolated62-test suite passed; core files now run serially and all2081 passed again. Production auth code is unchanged.
+- **Package validation:** local VSIX1.14.7 manifest and compiled payloads match the build. Compiled Windows2.2.10 passed launcher/Responses and signed-Desktop smoke checks in isolated homes. Four-platform CI and registry verification still gate publication completion.
+- **Evidence:** `.claude/vscode-parity/release-2.2.10/` owns package/check logs; `dynamic-models-review.md`, `codex-context-plan.md` and `codex-tool-schema-plan.md` record code review and RED/GREEN evidence. Final review agents `67c108af-1e8e-40f2-abce-b9ad3f5e3433` (GPT context) and `2e197152-7ac9-4166-bb0e-dddcf7bd4c01` (MCP schemas) returned no actionable findings. No review reply is pending.
+- **Cleanup:** all233 pre-existing untracked files are preserved. Local `.git/info/exclude` now hides `/wisp/` and `/docs/Screenshot 2026-10-13 114007.png`; neither is release source or published. The preservation manifest remains in `.claude/vscode-parity/main-before-handoff/`. All tracked implementation/release changes are scoped for commit.
+- **Client boundaries:** preserve real settings/auth/provider selection, permissions, hook trust and running clients. Keep the old worktree until the user separately authorizes removal. One earlier test-profile askpass socket resisted cleanup; no permission/process workaround was used.
 
 ## Pick up here
 
-Work from upstream `main` and this baton for the next explicitly scoped task. Publication/install need no repeat; never move the published tag or rerun old diagnostic scripts as a default next step.
+Read `.claude/vscode-parity/release-2.2.10.json` before any release action. Reconcile the recorded PR head, merge commit, tag and workflow state with GitHub; never create or publish the same release twice. Finish authorized publication, verify GitHub assets/npm, and leave primary main clean and synchronized. Then wait for the user; do not install or resume old provider experiments automatically.
 
-All **eight provider experiments are CLOSED**: 21 generation requests, 8 refreshes, 1 metadata request and 1 count request; 336000 prompt/86016 output reservations. Known reported prompt totals 62993 plus unknown consumption; full output is unknown. The latest effort check ended at Low HTTP 429, with Medium/High unsent; the earlier Claude fallback comparison ended with SAFETY. Causes, actual target acceptance and cache benefit are not established. Do not retry, reconstruct/resubmit, change hosts/instructions/caps, relax guards or create a replacement allowance from these old records.
+## Implementation boundaries
 
-Actual UI checks remain deferred to an allowed observation path. Future provider acceptance needs a separately scoped authorization. Preserve the settled opt-in tradeoff; do not ask to approve it again. Preserve current credentials/settings, uncommitted research and old evidence; inspect fresh workspace/runtime identity before any state change.
-
-## Evidence
-
-- [Release notes](../docs/releases/v2.2.7.md), [native tag workflow](https://github.com/EstarinAzx/Wisp-Router/actions/runs/38477827141) and [merged source](https://github.com/EstarinAzx/Wisp-Router/commit/9141af08fe95a070c6614f3aa9d06a8afec21671).
-- Detailed external records belong to Traycer task `1702a7c7-a431-43c2-ab5f-79d9cf189643`. Within its artifacts, read `release-227/publication/index.md` and `release-227/publication/review/index.md` for verified delivery; `release-227/handoff/index.md` retains the stopped task checkpoint.
-- Within the same task, `release-227/instruction-contract/index.md` records the settled opt-in decision; `effort-candidate/`, `effort-acceptance/` and `live-client-comparison/` under `release-227/` retain bounded acceptance results and their reviews. These are task artifact identifiers, not repository paths. A fresh clone can use the public release notes; connected agents can locate the detailed records through Traycer.
-
-## Skills for next session
-
-Use the project's existing preset pick-up/context workflow to read this baton. Load implementation, debugging or verification skills only for the newly assigned work; reading this note does not resume a closed experiment.
+- Antigravity native chat requires VS Code1.145.3+. One adapter handles discovered text/chat IDs, including Argon and Carbon. Context/output/image-input capabilities come from account metadata. Classic encrypted packets preserve original tool/reasoning state; Local uses32 checkpoints/16MiB and needs a new chat after reload/eviction. Image-generation output and Antigravity Inquire remain unsupported.
+- Native Codex uses the account maximum automatically, with the known default as fallback. `wisp.codexContextWindows` can request a smaller exact-model budget but cannot exceed that ceiling. No native Codex config import/mutation or blanket public-API window.
+- Native Codex/Grok tools preserve client/MCP schemas with explicit `strict:false`; optional fields and dynamic maps survive. Bridge callers keep their explicit schema policy. Tool execution/permissions remain with VS Code.
+- Earlier Wisp2.2.9/companion1.14.6 publication is complete; do not repeat it. Slot1.7.5 is unchanged. Held historical issues remain in [[release-follow-ups]].
 
 ## Related
 
 - [[pick-up]]
 - [[overview]]
+- [[flows]]
 - [[decisions]]
 - [[release-follow-ups]]

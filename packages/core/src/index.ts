@@ -28,6 +28,8 @@ export * from './codexDesktop';
 export * from './anthropicClient';
 export * from './xaiClient';
 export * from './antigravityClient';
+export { parseAntigravityNativeResult } from './antigravityResponses';
+export { sealGeminiReplay, openGeminiReplay } from './geminiResponses';
 export * from './codexAuth';
 export * from './anthropicAuth';
 export * from './xaiAuth';

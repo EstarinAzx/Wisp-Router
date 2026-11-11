@@ -193,7 +193,8 @@ test('Antigravity rejects an account changed during failed project hydration', a
   auth.signOut();
   response.resolve(new Response('offline', { status: 503 }));
   expect(await pending).toBeInstanceOf(AuthStateChangedError);
-  expect(store.read()).toEqual({});
+  expect(store.read()?.accessToken).toBeUndefined();
+  expect(store.read()?.refreshToken).toBeUndefined();
 });
 
 describe.each(['codex', 'anthropic', 'antigravity', 'xai'] as const)('%s browser callback cleanup', provider => {

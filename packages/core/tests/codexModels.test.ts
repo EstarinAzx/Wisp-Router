@@ -72,9 +72,35 @@ describe('Codex model metadata', () => {
     const noReasoning = parseCodexModels({ models: [row('gpt-6-next', { supported_reasoning_levels: [] })] })[0];
     expect(codexReasoning(noReasoning.id, 'max', noReasoning)).toBeUndefined();
   });
-  it('uses the served context window and modalities, with no generation-based guesses', () => {
-    expect(codexModelCaps(info().id, info())).toEqual({ contextInput: 345_000, vision: false });
+  it('uses the served maximum context and modalities, with no generation-based guesses', () => {
+    expect(codexModelCaps(info().id, info())).toEqual({ contextInput: 999_000, vision: false });
     expect(codexModelCaps('gpt-6-next')).toEqual({});
+  });
+  it('uses the maximum automatically while retaining the default and bounding explicit overrides', () => {
+    const model = parseCodexModels({ models: [row('gpt-6-astra', { context_window: 272000, max_context_window: 872000 })] })[0];
+    expect(model).toMatchObject({ contextWindow: 272000, maxContextWindow: 872000 });
+    expect(codexModelCaps(model.id, model).contextInput).toBe(872000);
+    expect(codexModelCaps(model.id, model, 1000000).contextInput).toBe(872000);
+    expect(codexModelCaps(model.id, model, 512000).contextInput).toBe(512000);
+    expect(codexModelCaps(model.id, model, 128000).contextInput).toBe(128000);
+  });
+  it('ignores invalid overrides and still uses the discovered maximum', () => {
+    const model = info();
+    for (const override of [null, 0, 1, -1, NaN, Infinity, 1.2, '1000000', {}]) {
+      expect(codexModelCaps(model.id, model, override).contextInput).toBe(999000);
+    }
+  });
+  it('uses a known maximum when the catalogue has no client default', () => {
+    const model = parseCodexModels({ models: [row('future-gpt', { context_window: undefined, max_context_window: 872000 })] })[0];
+    expect(codexModelCaps(model.id, model).contextInput).toBe(872000);
+  });
+  it('rejects invalid overrides and never expands a stale catalogue with no maximum', () => {
+    const model = parseCodexModels({ models: [row('gpt-6-astra', { context_window: 272000, max_context_window: undefined })] })[0];
+    for (const override of [undefined, 0, -1, NaN, Infinity, 1.2, '1000000', {}, 1000000]) {
+      expect(codexModelCaps(model.id, model, override).contextInput).toBe(272000);
+    }
+    expect(codexModelCaps('another-model', model, 1000000)).toEqual({});
+    expect(codexModelCaps('manual-model', undefined, 1000000)).toEqual({});
   });
   it('persists a future effort and keeps it off unrelated providers', () => {
     expect(parseWispConfig('{"effort":"future-depth"}').effort).toBe('future-depth');
@@ -90,6 +116,11 @@ describe('Codex model metadata', () => {
 });
 
 describe('Codex model discovery and persistence', () => {
+  it('retains the maximum through the account-scoped disk cache', async () => {
+    const h = harness(); await h.catalog.get(args);
+    const offline = new CodexModelCatalog(() => h.dir, async () => { throw new Error('offline'); }, h.now);
+    expect((await offline.get(args)).models[0]).toMatchObject({ contextWindow: 345000, maxContextWindow: 999000 });
+  });
   it('authenticates only the catalogue request, and uses OpenAI package metadata for the client version', async () => {
     const h = harness(); const result = await h.catalog.get(args);
     expect(result.source).toBe('live');

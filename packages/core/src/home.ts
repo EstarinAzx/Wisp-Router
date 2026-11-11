@@ -126,7 +126,7 @@ const XAI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expires
 const KIMI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number' } as const;
 // #188: projectId is the one field no other kind has — the Cloud Code project every envelope carries. The
 // allowlist is also what keeps the reference's per-email `accounts` map out: spec #185 stores ONE account.
-const ANTIGRAVITY_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', projectId: 'string' } as const;
+const ANTIGRAVITY_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', projectId: 'string', signOutId: 'string' } as const;
 
 // ----------------------------- parseWispConfig ----------------------------- //
 

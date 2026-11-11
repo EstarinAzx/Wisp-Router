@@ -635,6 +635,22 @@ describe('normalizeAntigravityFunctionResponses', () => {
 });
 
 describe('validateAntigravityFunctionCallPairing', () => {
+  it.each([['unknown-a', 'unknown-b'], ['a', 'a'], ['a ', 'b']])('rejects equal counts with mismatched or duplicate result ids %s / %s', (a, b) => {
+    const payload = { request: { contents: [
+      { role: 'model', parts: ['a', 'b'].map(id => ({ functionCall: { id, name: 'read', args: {} } })) },
+      { role: 'model', parts: [a, b].map(id => ({ functionResponse: { id, name: 'read', response: {} } })) },
+    ] } };
+    expect(validateAntigravityFunctionCallPairing(payload)).toBeDefined();
+  });
+  it('retains name matching for legacy calls without original ids', () => {
+    const payload = { request: { contents: [
+      { role: 'model', parts: [{ functionCall: { name: 'read', args: {} } }, { functionCall: { name: 'list', args: {} } }] },
+      { role: 'model', parts: [{ functionResponse: { name: 'list', response: {} } }, { functionResponse: { name: 'read', response: {} } }] },
+    ] } };
+    expect(validateAntigravityFunctionCallPairing(payload)).toBeUndefined();
+    payload.request.contents[1].parts[1].functionResponse!.name = 'list';
+    expect(validateAntigravityFunctionCallPairing(payload)).toBeDefined();
+  });
   it('accepts a clean call/response turn pair', () => {
     const payload = { request: { contents: [
       { role: 'model', parts: [{ functionCall: { id: 'c1', name: 'read', args: {} } }] },
