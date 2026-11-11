@@ -59,8 +59,16 @@ exports.run = async () => {
     assert.equal(text, 'Synthetic continuation complete.');
     assert.deepEqual(requests[1].request.contents[1].parts, nativeParts);
     assert.equal(requests[1].request.contents[2].parts[0].functionResponse.id, 'native-host-call');
+    let refused = false;
+    try {
+      const invalid = await model.sendRequest([...input, restored, vscode.LanguageModelChatMessage.User([
+        new vscode.LanguageModelToolResultPart('native-host-call ', [new vscode.LanguageModelTextPart('wrong identity')]),
+      ])], options, cancellation.token);
+      for await (const _part of invalid.stream) assert.fail('Invalid continuation emitted output');
+    } catch (error) { assert.match(String(error), /Argon/); refused = true; }
+    assert(refused, 'Unknown result identity must be refused');
     assert.equal(requests.length, 2);
     fs.writeFileSync(path.join(home, 'receipt.json'), JSON.stringify({ passed: true, vscode: vscode.version,
-      model: model.id, requests: requests.length, originalPartsRestored: true, providerNetwork: false }, null, 2));
+      model: model.id, requests: requests.length, originalPartsRestored: true, invalidResultRefused: true, providerNetwork: false }, null, 2));
   } finally { globalThis.fetch = originalFetch; cancellation.dispose(); }
 };

@@ -746,39 +746,47 @@ export const validateAntigravityFunctionCallPairing = (envelope: unknown): strin
   const contents = (envelope as Json)?.request?.contents;
   if (!Array.isArray(contents)) return undefined;
 
-  let pending = 0;
+  let pending: Json[] = [];
   for (const [index, content] of contents.entries()) {
     const parts = isObj(content) ? content.parts : undefined;
     if (!Array.isArray(parts)) {
-      if (pending > 0) return `contents[${index}]: content appears before ${pending} pending functionResponse part(s)`;
+      if (pending.length > 0) return `contents[${index}]: content appears before ${pending.length} pending functionResponse part(s)`;
       continue;
     }
 
     const calls: Json[] = [];
-    let responses = 0;
+    const responses: Json[] = [];
     for (const [partIndex, part] of parts.entries()) {
       if (!isObj(part)) continue;
       if (isObj(part.functionCall)) {
         if (!text(part.functionCall.name)) return `contents[${index}].parts[${partIndex}]: missing functionCall.name`;
         calls.push(part.functionCall);
       }
-      if (isObj(part.functionResponse)) responses += 1;
+      if (isObj(part.functionResponse)) responses.push(part.functionResponse);
     }
 
-    if (calls.length > 0 && responses > 0) return `contents[${index}]: functionCall and functionResponse parts must not be interleaved in the same content`;
+    if (calls.length > 0 && responses.length > 0) return `contents[${index}]: functionCall and functionResponse parts must not be interleaved in the same content`;
     if (calls.length > 0) {
-      if (pending > 0) return `contents[${index}]: functionCall appears before ${pending} pending functionResponse part(s)`;
-      pending = calls.length;
+      if (pending.length > 0) return `contents[${index}]: functionCall appears before ${pending.length} pending functionResponse part(s)`;
+      pending = calls;
       continue;
     }
-    if (responses === 0) {
-      if (pending > 0) return `contents[${index}]: content appears before ${pending} pending functionResponse part(s)`;
+    if (responses.length === 0) {
+      if (pending.length > 0) return `contents[${index}]: content appears before ${pending.length} pending functionResponse part(s)`;
       continue;
     }
-    if (responses !== pending) return `contents[${index}]: ${responses} functionResponse part(s) answer ${pending} pending functionCall(s)`;
-    pending = 0;
+    if (responses.length !== pending.length) return `contents[${index}]: ${responses.length} functionResponse part(s) answer ${pending.length} pending functionCall(s)`;
+    const used = new Set<number>();
+    for (const call of pending) {
+      const id = typeof call.id === 'string' ? call.id : '';
+      const match = responses.findIndex((response, i) => !used.has(i)
+        && (id ? response.id === id : text(response.name) === text(call.name)));
+      if (match < 0) return `contents[${index}]: functionResponse does not match a pending functionCall id or name`;
+      used.add(match);
+    }
+    pending = [];
   }
-  return pending > 0 ? `contents: ${pending} functionCall(s) left unanswered` : undefined;
+  return pending.length > 0 ? `contents: ${pending.length} functionCall(s) left unanswered` : undefined;
 };
 
 // ----------------------------- The 429 body classifier (parsing only, no state) ----------------------------- //

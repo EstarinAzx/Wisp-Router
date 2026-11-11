@@ -144,6 +144,13 @@ describe('Argon native VS Code chat', () => {
       new vscode.LanguageModelToolResultPart('original-a', [text('A')]))])).rejects.toThrow(/Argon/i);
     expect(requests).toHaveLength(1); expect(h.output).toEqual([]);
   });
+  it.each([['unknown-a', 'unknown-b'], ['original-a', 'original-a'], ['original-a ', 'original-b']])('refuses same-count results with mismatched ids %s / %s before transport', async (a, b) => {
+    const h = setup(); next = result(callParts()); const parts = await h.send();
+    const refreshed = h.refreshed.mock.calls.length;
+    await expect(h.send([...firstMessages(), persistedAssistant(parts), message(1,
+      new vscode.LanguageModelToolResultPart(a, [text('A')]), new vscode.LanguageModelToolResultPart(b, [text('B')]))])).rejects.toThrow(/Argon/i);
+    expect(requests).toHaveLength(1); expect(h.output).toEqual([]); expect(h.refreshed.mock.calls.length).toBe(refreshed);
+  });
   it.each(['truncation', 'unknown tool', 'missing id', 'duplicate id', 'missing usage', 'oversized state'])('refuses %s before exposing executable output', async kind => {
     const h = setup(); next = result(callParts());
     if (kind === 'truncation') next.response.candidates[0].finishReason = 'MAX_TOKENS';
