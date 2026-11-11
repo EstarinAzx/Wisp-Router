@@ -100,7 +100,7 @@ describe('native VS Code Antigravity chat', () => {
     expect(contents[1].parts[0].functionCall).toMatchObject({ id: 'native-call-1', name: 'read_file', args: { path: 'a.ts' } });
     expect(contents[2].parts[0].functionResponse).toMatchObject({ id: 'native-call-1', name: 'read_file' });
   });
-  it.each(['gemini-4-argon-low', 'gemini-4-argon', 'gemini-3.1-flash-image', 'unqualified-model'])('hides and refuses unsupported %s before network', async model => {
+  it.each(['gemini-4-argon', 'gemini-3.1-flash-image', 'unqualified-model'])('hides and refuses unsupported %s before network', async model => {
     const { provider, send } = setup(model);
     expect(await provider.provideLanguageModelChatInformation()).toEqual([]);
     await expect(send()).rejects.toThrow(/native chat/i); expect(requests).toHaveLength(0);

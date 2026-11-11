@@ -1,4 +1,5 @@
 // VS Code is the external boundary; provider/extension/core implementations stay real in these tests.
+export const version = '1.145.3';
 export const testing = { commands: new Map<string, (...args: any[]) => any>(), panel: undefined as any,
   chat: undefined as any, logs: [] as string[], notices: [] as string[], settings: {} as Record<string, unknown> };
 const disposable = () => ({ dispose() {} });
@@ -34,5 +35,5 @@ export class LanguageModelTextPart { constructor(public value: string) {} }
 export class LanguageModelToolCallPart { constructor(public callId: string, public name: string, public input: object) {} }
 export class LanguageModelToolResultPart { constructor(public callId: string, public content: unknown[]) {} }
 export class LanguageModelDataPart { constructor(public data: Uint8Array, public mimeType: string) {} }
-export const LanguageModelChatMessageRole = { User: 1, Assistant: 2 };
+export const LanguageModelChatMessageRole = { User: 1, Assistant: 2, System: 3 };
 export const LanguageModelChatToolMode = { Auto: 1, Required: 2 };

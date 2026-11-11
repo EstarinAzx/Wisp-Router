@@ -55,7 +55,7 @@ const scope = (p: Preflight, context: GeminiReplayContext): Buffer => Buffer.fro
   version: 1, provider: p.providerId, endpoint: p.baseUrl, model: p.model, alias: p.parsed.model, session: p.session,
   lifetime: context.lifetime, credentialBinding: context.credentialBinding, hoisting: p.hoisting,
 }));
-const resultOf = (value: unknown) => {
+export const parseAntigravityNativeResult = (value: unknown) => {
   const outer = object(value), result = object(outer.response ?? outer);
   check(result.modelVersion === 'gemini-4-argon' && Array.isArray(result.candidates) && result.candidates.length === 1);
   const candidate = object(result.candidates[0]), content = object(candidate.content), usage = object(result.usageMetadata);
@@ -75,7 +75,7 @@ const resultOf = (value: unknown) => {
     usageMetadata: { promptTokenCount: prompt as number, candidatesTokenCount: candidateTokens as number,
       thoughtsTokenCount: thoughts as number, cachedContentTokenCount: cached as number } };
 };
-type NativeResult = ReturnType<typeof resultOf>;
+type NativeResult = ReturnType<typeof parseAntigravityNativeResult>;
 const visible = (result: NativeResult, p: Preflight, id: string) => {
   const encoder = createResponsesEncoder(p.parsed, id);
   for (const part of result.candidates[0].content.parts) {
@@ -104,7 +104,7 @@ export const prepareAntigravityReplay = (p: Preflight, context: GeminiReplayCont
       try { payload = object(openGeminiReplay(item.encrypted_content.slice(PREFIX.length), context, scope(p, context))); }
       catch { return fail(); }
       check(Object.keys(payload).every(key => ['v', 'binding', 'result'].includes(key)) && payload.v === 1 && payload.binding === binding(p, p.input.slice(0, i)));
-      const native = resultOf(payload.result), expected = visible(native, p, 'replay').output;
+      const native = parseAntigravityNativeResult(payload.result), expected = visible(native, p, 'replay').output;
       check(canonical(p.input.slice(i + 1, i + 1 + expected.length).map(metadata)) === canonical(expected.map(metadata)));
       states.push(native); i += expected.length;
     } else check(item.role !== 'assistant' && !['function_call', 'custom_tool_call', 'tool_search_call'].includes(item.type));
@@ -127,7 +127,7 @@ export const prepareAntigravityReplay = (p: Preflight, context: GeminiReplayCont
 };
 
 export const finishAntigravityResponses = (p: ReturnType<typeof prepareAntigravityReplay>, value: unknown, id: string) => {
-  const result = resultOf(value), response = visible(result, p, id);
+  const result = parseAntigravityNativeResult(value), response = visible(result, p, id);
   check(p.request.maxOutputTokens === undefined || response.usage.output_tokens <= p.request.maxOutputTokens);
   const used = new Set(p.request.messages.flatMap(turn => turn.toolCalls ?? []).map(call => call.id));
   check(response.output.every((item: Item) => !item.call_id || !used.has(item.call_id)));

@@ -37,8 +37,9 @@ import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
-import { isAntigravityProvider, antigravityStream, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds } from '@wisp/core';
+import { isAntigravityProvider, isAntigravityArgonModel, antigravityStream, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds } from '@wisp/core';
 import { antigravityNativeChatError } from './nativeChatSupport';
+import { provideArgonChatResponse } from './nativeArgonChat';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -66,6 +67,7 @@ export type ChatProviderDeps = {
   xaiCreds: () => Promise<XaiCreds | undefined>;
   antigravitySignedIn: () => Promise<boolean>;
   antigravityCreds: () => Promise<AntigravityCreds | undefined>;
+  antigravityStoredCreds?: () => AntigravityCreds | undefined;
   onDidChangeModels?: vscode.Event<void>;
   log: (message: string) => void;
 };
@@ -129,7 +131,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         isCodexProvider(p) ? await deps.codexSignedIn()
           : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
             : isXaiProvider(p) ? await deps.xaiSignedIn()
-              : isAntigravityProvider(p) ? !antigravityNativeChatError(resolveModel(modelMap, p)) && await deps.antigravitySignedIn()
+              : isAntigravityProvider(p) ? !antigravityNativeChatError(resolveModel(modelMap, p), vscode.version) && await deps.antigravitySignedIn()
               : !!(await deps.keyFor(p))] as const),
     );
     const keyed = Object.fromEntries(keyedPairs);
@@ -153,7 +155,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         ...codexModelCaps(model, codexInfo(model), contextOverrides[model]) })
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
-            : isAntigravityProvider(provider) ? { maxOutput: antigravityMaxCompletionTokens(model), vision: model.startsWith('gemini-') || model.startsWith('claude-') }
+            : isAntigravityProvider(provider) ? { maxOutput: antigravityMaxCompletionTokens(model), vision: !isAntigravityArgonModel(model) && (model.startsWith('gemini-') || model.startsWith('claude-')) }
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
     return buildChatModelInfos(deps.providers.filter(p => !isGeminiApiProvider(p)), {
       keyed,
@@ -183,7 +185,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     if (isGeminiApiProvider(provider)) throw new Error('Gemini API is not qualified for VS Code chat.');
     const modelId = resolveModel(deps.modelMap(), provider);
     if (isAntigravityProvider(provider)) {
-      const unsupported = antigravityNativeChatError(modelId);
+      const unsupported = antigravityNativeChatError(modelId, vscode.version);
       if (unsupported) throw new Error(unsupported);
     }
 
@@ -194,6 +196,12 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
 
     if (isAntigravityProvider(provider)) {
       try {
+        if (isAntigravityArgonModel(modelId)) {
+          await provideArgonChatResponse({ model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
+            maxOutputTokens: model.maxOutputTokens, messages, options, progress, signal: controller.signal,
+            current: deps.antigravityCreds, stored: deps.antigravityStoredCreds ?? (() => undefined) });
+          return;
+        }
         const creds = await deps.antigravityCreds();
         if (controller.signal.aborted) return;
         if (!creds?.accessToken) throw new Error('Sign in to Antigravity before using native chat.');
@@ -357,7 +365,11 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
   // No tokenizer dependency: a ~4-chars-per-token heuristic is enough for the picker's budgeting.
   provideTokenCount: async (_model, text) => {
     const str = typeof text === 'string' ? text : normalizeTurn(text).text;
-    return Math.ceil(str.length / 4);
+    const p = deps.providers.find(p => p.id === _model.id);
+    // Encrypted state hides its tokenizer input. Charge bytes conservatively instead of zero tokens.
+    const stateBudget = typeof text !== 'string' && p && isAntigravityProvider(p) && isAntigravityArgonModel(resolveModel(deps.modelMap(), p))
+      ? text.content.reduce((total: number, part) => total + (part instanceof vscode.LanguageModelDataPart && part.mimeType === 'stateful_marker' ? part.data.byteLength : 0), 0) : 0;
+    return Math.ceil(str.length / 4) + stateBudget;
   },
 });
 

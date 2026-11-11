@@ -129,9 +129,11 @@ requires callback port `51121`; an occupied port fails rather than moving the ca
 
 The model dropdown consumes OAuth discovery and offers manual refresh and model entry. Native chat
 supports the shared catalogue's known text models with streaming, tools and tool-result continuation;
-account availability still depends on the service. Argon, image-output and unqualified model IDs remain
-out of the native picker, with a reason in the panel. Argon's encrypted replay remains on qualified
-Bridge Responses routes. Antigravity Inquire is not supported. See [details](../../docs/vscode-provider-parity.md).
+account availability still depends on the service. Argon low/medium/high also support native text and
+tools on VS Code 1.145.3+, with encrypted conversation replay and complete-response validation.
+Image-output and other unqualified IDs remain out of the native picker, with a reason in the panel.
+Argon needs a new chat after an account/tier change or if Copilot drops required history state.
+Antigravity Inquire is not supported. See [details and validation limits](../../docs/vscode-provider-parity.md).
 
 ### Custom
 

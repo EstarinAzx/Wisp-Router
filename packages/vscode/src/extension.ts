@@ -467,7 +467,7 @@ const getState = async (): Promise<PanelState> => {
     signedIn,
     authPending: isAntigravityProvider(p) ? antigravityAuthPending : undefined,
     authError: isAntigravityProvider(p) ? antigravityAuthError : undefined,
-    chatUnavailable: isAntigravityProvider(p) ? antigravityNativeChatError(model) : undefined,
+    chatUnavailable: isAntigravityProvider(p) ? antigravityNativeChatError(model, vscode.version) : undefined,
     // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
     account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
     // Codex and Antigravity use their own discovery calls; the other OAuth kinds use models.dev.
@@ -1202,6 +1202,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
       onDidChangeModels: chatModelsChanged.event,
       antigravitySignedIn: () => antigravityAuth.isSignedIn(),
       antigravityCreds: () => antigravityAuth.current(),
+      antigravityStoredCreds: () => home.readAuth().antigravity,
       providers: PROVIDERS,
       modelMap: () => home.readConfig().models ?? {},
       customBaseUrl: () => home.readConfig().customBaseUrl ?? '',

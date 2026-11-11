@@ -25,13 +25,33 @@ reply is labelled and its tool calls are not executed. The initial supported set
 availability. New discovered IDs still appear in the side panel, with an explanation if native chat
 has not qualified them. Inquire is a separate editor command and remains unavailable for Antigravity.
 
-Argon and image-output models are not advertised or dispatched by native chat. Argon's qualified
-Bridge Responses adapter preserves encrypted native parts, thought signatures, original IDs and
-conversation/account bindings. The installed VS Code API accepts `LanguageModelDataPart` in both
-request and response types, but does not specify that Copilot preserves arbitrary opaque parts across
-persistence, regeneration and compaction. Therefore those types alone are insufficient evidence to
-enable Argon. Qualification would need an isolated host test of that complete roundtrip and replay
-validation; no real-account request was used for this change.
+Argon `gemini-4-argon-low`, `gemini-4-argon-medium` and `gemini-4-argon-high` are available in native
+Copilot chat on VS Code 1.145.3 or newer. Choose the tier in Wisp's model dropdown, then reopen the
+native chat picker. This adapter supports text and tools; image input/output is not advertised.
+Argon replies are buffered until the complete native response is validated, before any tools are
+handed to VS Code. Other unknown models, including Carbon, still require separate qualification.
+
+Each Argon assistant turn carries an AES-GCM encrypted packet in Copilot's `stateful_marker` data
+part. It contains the original model parts, thought signatures and tool IDs, bound to the account,
+endpoint, exact tier and Copilot conversation identity. The account's refresh token supplies secret key
+material with a separate native-chat domain label; no Bridge start or Bridge secret is needed.
+Restored assistant text and tool calls must match the authenticated native parts before transport.
+System instructions stay system instructions, and positioned mid-conversation system turns are refused
+rather than silently moved. Credential changes during generation suppress delivery.
+
+The carrier is a pinned Copilot compatibility contract, not a promise about arbitrary custom MIME
+parts. Inspected source at VS Code commit `dcd3ad6e368fbe19d03f37054a40dbaf40d676f4`:
+[response and request conversion](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/vscode-node/extChatEndpoint.ts),
+[marker encoding](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/common/statefulMarkerContainer.tsx),
+and [persisted tool rounds](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/extension/prompt/common/toolCallRound.ts).
+Those source functions were exercised with synthetic rounds, and an isolated VS Code 1.145.3 host
+passed advertisement, actual `vscode.lm` transport, JSON-restored encrypted state and tool continuation.
+
+Copilot deliberately removes old markers when its summary generation changes. A summary-only request
+can start a new chain; retained assistant history without its state is refused with a new-chat message.
+Changing accounts or tiers also requires a new chat. Packets are limited to 64 KiB before encryption,
+and encrypted bytes count conservatively toward the estimated token budget. Live provider generations
+and interactive Copilot compaction remain untested; all generation tests intercept provider I/O.
 
 ## Codex context
 
@@ -62,7 +82,8 @@ lists 1,050,000 tokens for the API model; it does not establish that total for a
 
 ## Synthetic checks
 
-Core Vitest includes `vscodePanel.test.ts`, `vscodeExtension.test.ts` and `vscodeChat.test.ts`: the actual
+Core Vitest includes `vscodePanel.test.ts`, `vscodeExtension.test.ts`, `vscodeChat.test.ts` and
+`vscodeArgon.test.ts`: the actual
 extension registration and host dispatch, real transport payloads with intercepted fetch, temporary
 Wisp stores, and account/context regression tests. The external VS Code API is a test double.
 
@@ -70,3 +91,12 @@ After `bun run compile`, serve `packages/vscode` on loopback and open `tests/web
 Run `await window.harness.run()` in its browser console. It mounts the built Preact app and checks
 account controls/pending/errors, discovery/refresh, provider switching and the unsupported-model hint.
 It uses synthetic messages only. No live account, installed extension or running client is modified.
+
+`packages/vscode/tests/argon-host.cjs` is an additional real extension-host check. Launch it through
+VS Code's `--extensionTestsPath` with this package as `--extensionDevelopmentPath`, separate empty
+`--user-data-dir`/`--extensions-dir` directories, and a temporary `WISP_HOME`. The test refuses to run
+without `argon-host-test.txt` containing `synthetic-only` and the exact synthetic credential fixture
+declared at its top. Set the temporary config to provider `antigravity` and model
+`gemini-4-argon-high`; disable the built-in Copilot extension in that test process. It invokes Wisp's
+real registered model through `vscode.lm`, intercepts every provider fetch and writes `receipt.json`.
+It never invokes a real tool or changes an installed Wisp extension.
