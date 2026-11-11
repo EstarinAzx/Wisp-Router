@@ -6,7 +6,7 @@
 const sent = [];
 window.acquireVsCodeApi = () => ({postMessage: message => sent.push(message)});
 const state = { providerId:'antigravity',providers:[{id:'antigravity',label:'Antigravity'},{id:'custom',label:'Custom'}],kind:'antigravity-oauth',signedIn:true,
-  keyIsSet:false,keySource:'none',keyEnv:'',isCustom:false,baseUrl:'https://synthetic.invalid',model:'gemini-3-flash',modelOptions:['gemini-3-flash','gemini-3.1-pro-low'],
+  credentialVersion:'account-a',keyIsSet:false,keySource:'none',keyEnv:'',isCustom:false,baseUrl:'https://synthetic.invalid',model:'gemini-3-flash',modelOptions:['gemini-3-flash','gemini-3.1-pro-low'],
   bridgeRunning:false,bridgeAddress:'http://127.0.0.1:47831',routingFamilies:{},routingAliases:[] };
 const push = message => window.dispatchEvent(new MessageEvent('message',{data:message}));
 const settle = () => new Promise(resolve => setTimeout(resolve, 60));
@@ -24,13 +24,22 @@ window.harness = {sent,sendState,run:async()=>{
   await sendState({});
   document.querySelector('button[title="Refresh model list from the endpoint"]').click();
   const refresh = sent.at(-1);check(refresh.type==='refreshModels'&&refresh.providerId==='antigravity','Refresh lost provider');
-  push({type:'models',providerId:'antigravity',requestId:refresh.requestId,ids:['gemini-new']});await settle();
+  push({...refresh,type:'models',ids:['gemini-new']});await settle();
   check([...document.querySelectorAll('option')].some(o=>o.value==='gemini-new'),'Refresh result ignored');
+  await sendState({credentialVersion:'account-b',modelOptions:['account-b-model']});
+  check([...document.querySelectorAll('option')].some(o=>o.value==='account-b-model')&&!document.getElementById('root').textContent.includes('gemini-new'),'Accepted account A list survived account replacement');
+  push({...refresh,type:'models',ids:['account-a-late-model']});
+  push({...refresh,type:'modelsError',message:'Old account error'});await settle();
+  check(!document.getElementById('root').textContent.includes('account-a-late-model')&&!document.getElementById('root').textContent.includes('Old account error'),'Late account A result replaced B');
   const provider = document.querySelector('select');provider.value='custom';provider.dispatchEvent(new Event('change',{bubbles:true}));
   await sendState({providerId:'custom',kind:'openai-chat',isCustom:true,model:'custom-model',modelOptions:undefined,keyIsSet:true,signedIn:false});
-  push({type:'modelsError',providerId:'antigravity',requestId:refresh.requestId,message:'Stale error'});
-  push({type:'models',providerId:'antigravity',requestId:refresh.requestId,ids:['stale-model']});await settle();
+  push({...refresh,type:'modelsError',message:'Stale error'});
+  push({...refresh,type:'models',ids:['stale-model']});await settle();
   check(!document.getElementById('root').textContent.includes('Stale error')&&!document.getElementById('root').textContent.includes('stale-model'),'Stale provider response rendered');
+  const keyA=sent.at(-1);
+  push({...keyA,type:'models',ids:['key-a-model']});await settle();
+  await sendState({providerId:'custom',credentialVersion:'key-b',kind:'openai-chat',isCustom:true,model:'custom-model',modelOptions:undefined,keyIsSet:true,signedIn:false});
+  check(!document.getElementById('root').textContent.includes('key-a-model'),'Nonempty key replacement retained old list');
   await sendState({chatUnavailable:'Argon requires Bridge Responses.'});
   check(document.getElementById('root').textContent.includes('Argon requires Bridge Responses.'),'Unsupported chat explanation missing');
   await sendState({});return 'PASS: account controls, model options/refresh, provider switch and support boundary';

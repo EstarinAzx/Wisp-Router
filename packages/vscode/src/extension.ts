@@ -22,7 +22,7 @@ import { readDesktopNativeModels, readDesktopAntigravityHoisting } from '@wisp/c
  */
 
 import * as vscode from 'vscode';
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import OpenAI from 'openai';
 import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvider';
 import {
@@ -75,6 +75,11 @@ let statusBar: vscode.StatusBarItem;
 
 // The Wisp home store (~/.wisp/) — config.json + auth.json, shared with the TUI (ADR-0002).
 let home: WispHome;
+const credentialVersionKey = randomBytes(32);
+// Process-local HMAC prevents credential fingerprints (including weak keys) being exposed to the webview.
+const credentialVersion = (): string => createHmac('sha256', credentialVersionKey)
+  .update(JSON.stringify([home.readAuth(), PROVIDERS.map(p => p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined)]))
+  .digest('hex');
 
 // Reuse one client; rebuild only when key/baseURL change (construction is local, no network).
 let cachedClient: { key: string; baseURL: string; client: OpenAI } | undefined;
@@ -289,16 +294,18 @@ const fetchModelIds = async (providerId = activeProvider().id): Promise<string[]
 // against the same 4s ceiling as the models.dev fetches so a slow upstream can never stall panel open;
 // signed out, timeout, empty, or error all fall back to the static table — never a throw.
 const antigravityModelIds = async (p: Provider): Promise<string[]> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const creds = await antigravityAuth.current();
-    if (creds?.accessToken) {
-      const live = await Promise.race([
-        fetchAntigravityModels(creds, resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '')),
-        new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 4000)),
-      ]);
-      if (live.length) return live;
-    }
+    const live = await Promise.race([
+      (async () => {
+        const creds = await antigravityAuth.current();
+        return creds?.accessToken ? fetchAntigravityModels(creds, resolveBaseUrl(p, '')) : [];
+      })(),
+      new Promise<string[]>(resolve => { timer = setTimeout(() => resolve([]), 4000); }),
+    ]);
+    if (live.length) return live;
   } catch { /* static fallback below */ }
+  finally { clearTimeout(timer); }
   return oauthModelOptions(p, undefined) ?? [];
 };
 
@@ -425,6 +432,7 @@ const getState = async (): Promise<PanelState> => {
   const p = activeProvider();
   const config = home.readConfig();
   const model = resolveModel(config.models ?? {}, p);
+  const version = credentialVersion();
   const stored = isGeminiApiProvider(p) ? !!home.geminiReplayContext() : home.readAuth().keys?.[resolveKeyId(p)]?.trim();
   const keySource = stored ? 'stored' : p.apiKeyEnv && process.env[p.apiKeyEnv] ? 'env' : 'none';
   // The OAuth Providers (Codex, Anthropic) have no API key — the panel shows sign-in state instead.
@@ -452,6 +460,7 @@ const getState = async (): Promise<PanelState> => {
     model,
     baseUrl: resolveBaseUrl(p, config.customBaseUrl ?? ''),
     providerId: p.id,
+    credentialVersion: version,
     providers: PROVIDERS.map((r) => ({ id: r.id, label: r.label })), // drives the panel dropdown
     isCustom: p.id === CUSTOM_ID,
     kind: p.kind ?? 'openai-chat',
@@ -1085,6 +1094,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
   });
 
   panel = new WispPanelProvider(context.extensionUri, {
+    credentialVersion,
     getState,
     getActivity: () => inFlight > 0, // current Activity for the panel's initial sync on 'ready'
     storeApiKey,

@@ -15,6 +15,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AntigravityAuth, fetchAntigravityProject } from '../src/antigravityAuth';
 import type { AntigravityCreds } from '../src/catalog';
 import { AuthStateChangedError } from '../src/homeStore';
+import { WispHome } from '../src/homeStore';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const memStore = (initial?: AntigravityCreds) => {
   let creds = initial;
@@ -165,6 +169,33 @@ describe('AntigravityAuth.signIn', () => {
 
 describe('Antigravity sign-in ownership', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it.each(['manager', 'legacy writer'])('preserves repeated sign-out from an existing tombstone by another %s', async writer => {
+    const dir = mkdtempSync(join(tmpdir(), 'wisp-signout-'));
+    const home = new WispHome(dir), otherHome = new WispHome(dir);
+    home.writeAuth({ antigravity: {}, keys: { custom: 'preserved' } });
+    const store = (h: WispHome) => ({ read: () => h.readAuth().antigravity,
+      write: (creds: AntigravityCreds, expected?: AntigravityCreds | null) => {
+        h.writeAuth({ antigravity: creds }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected ?? undefined) });
+      } });
+    const other = new AntigravityAuth(store(otherHome), async () => false, () => {});
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: any, init: any) => {
+      if (String(url).startsWith('http://localhost:')) return realFetch(url, init);
+      if (String(url).includes('/token')) return Response.json({ access_token: 'late', refresh_token: 'late-r', expires_in: 3600 });
+      if (writer === 'manager') other.signOut(); else otherHome.writeAuth({ antigravity: {} });
+      return Response.json({ cloudaicompanionProject: 'p' });
+    });
+    const auth = new AntigravityAuth(store(home), async url => {
+      const authorize = new URL(url), callback = new URL(authorize.searchParams.get('redirect_uri')!);
+      callback.searchParams.set('code', 'test'); callback.searchParams.set('state', authorize.searchParams.get('state')!);
+      await fetch(callback); return true;
+    }, () => {});
+    try {
+      await expect(auth.signIn()).rejects.toThrow(AuthStateChangedError);
+      expect(await auth.isSignedIn()).toBe(false);
+      expect(home.readAuth().keys?.custom).toBe('preserved');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
   it('fails promptly when the system browser cannot open and releases its callback port', async () => {
     vi.useFakeTimers();
     const open = vi.fn(async () => false);
@@ -373,7 +404,9 @@ describe('AntigravityAuth — token lifecycle', () => {
   it('signs out to a tombstone that survives a restart', () => {
     const store = memStore({ accessToken: 'a', refreshToken: '1//rt', expiresAt: Date.now(), projectId: 'p-1' });
     new AntigravityAuth(store, async () => true, () => {}).signOut();
-    expect(store.read()).toEqual({});
+    expect(store.read()?.accessToken).toBeUndefined();
+    expect(store.read()?.refreshToken).toBeUndefined();
+    expect(store.read()?.projectId).toBeUndefined();
   });
 
   it('answers isSignedIn from the store alone — no refresh round trip', async () => {

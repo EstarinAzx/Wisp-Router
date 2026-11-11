@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 // ----------------------------- Types & channel ----------------------------- //
 
 type State = {
+  credentialVersion: string;
   keyIsSet: boolean;
   keySource: 'stored' | 'env' | 'none';
   keyEnv: string;
@@ -56,9 +57,9 @@ const FAMILY_KEYS: FamilyKey[] = ['opus', 'sonnet', 'haiku', 'fable'];
 
 type InMsg =
   | { type: 'state'; state: State }
-  | { type: 'models'; providerId: string; requestId: number; ids: string[] }
-  | { type: 'modelsError'; providerId: string; requestId: number; message: string }
-  | { type: 'providerModels'; providerId: string; ids: string[] } // a Routing-map row's list (#53); [] = unavailable
+  | { type: 'models'; providerId: string; requestId: number; credentialVersion: string; ids: string[] }
+  | { type: 'modelsError'; providerId: string; requestId: number; credentialVersion: string; message: string }
+  | { type: 'providerModels'; providerId: string; credentialVersion: string; ids: string[] } // a Routing-map row's list (#53); [] = unavailable
   | { type: 'activity'; thinking: boolean };
 
 const vscode = acquireVsCodeApi();
@@ -82,7 +83,7 @@ export const App = () => {
   const [aliasDraft, setAliasDraft] = useState({ name: '', providerId: '', model: '' });
   // Where the current models list came from — used to drop it when Provider/endpoint/credentials
   // change. Keyed on providerId too so a switch refetches even if two rows shared a base URL.
-  const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean; signedIn?: boolean } | undefined>(undefined);
+  const modelsOrigin = useRef<{ providerId?: string; baseUrl: string; keyIsSet: boolean; signedIn?: boolean; credentialVersion: string } | undefined>(undefined);
   const modelRequest = useRef(0);
   // Per-Provider model lists for the Routing-map rows (#53) — one cache entry serves every row that
   // picked that Provider; [] means "asked, unavailable" → the row falls back to free text.
@@ -90,14 +91,14 @@ export const App = () => {
   const requestedProviders = useRef(new Set<string>());
   const refreshModels = (providerId?: string) => {
     setModelsError('');
-    vscode.postMessage({ type: 'refreshModels', providerId, requestId: ++modelRequest.current });
+    vscode.postMessage({ type: 'refreshModels', providerId, requestId: ++modelRequest.current, credentialVersion: modelsOrigin.current?.credentialVersion });
   };
 
   // Reuse lists during the panel session, with an explicit refresh for newly released models.
   const ensureProviderModels = (id: string, refresh = false) => {
     if (!id || (!refresh && requestedProviders.current.has(id))) return;
     requestedProviders.current.add(id);
-    vscode.postMessage({ type: 'fetchProviderModels', value: id, refresh });
+    vscode.postMessage({ type: 'fetchProviderModels', value: id, refresh, credentialVersion: modelsOrigin.current?.credentialVersion });
   };
 
   useEffect(() => {
@@ -108,11 +109,12 @@ export const App = () => {
         // offering ids the new endpoint may not serve.
         const prev = modelsOrigin.current;
         const newOrigin = !prev || prev.providerId !== msg.state.providerId || prev.baseUrl !== msg.state.baseUrl
-          || prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn;
+          || prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn || prev.credentialVersion !== msg.state.credentialVersion;
         if (newOrigin) { setModels(undefined); setModelsError(''); modelRequest.current++; }
         // Key presence changed → the row caches (including cached empties from a key-less fetch) are
         // stale; drop them so the next row pick refetches with the new credentials (#53).
-        if (prev && (prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn)) {
+        const credentialsChanged = !!prev && prev.credentialVersion !== msg.state.credentialVersion;
+        if (prev && (prev.keyIsSet !== msg.state.keyIsSet || prev.signedIn !== msg.state.signedIn || credentialsChanged)) {
           setProviderModels({});
           requestedProviders.current.clear();
         }
@@ -120,7 +122,7 @@ export const App = () => {
         // list once so the dropdown fills on its own. Without this the user only ever sees the
         // configured model until they discover the manual ↻. Gated on origin change so it can't loop
         // on an empty result or re-fire on unrelated config pushes (model changes).
-        modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet, signedIn: msg.state.signedIn };
+        modelsOrigin.current = { providerId: msg.state.providerId, baseUrl: msg.state.baseUrl, keyIsSet: msg.state.keyIsSet, signedIn: msg.state.signedIn, credentialVersion: msg.state.credentialVersion };
         setState(msg.state);
         // Seed the Routing map drafts from the FIRST state only (functional update — the [] effect
         // closure never sees fresh routeDrafts); later pushes leave in-progress row edits alone.
@@ -133,15 +135,15 @@ export const App = () => {
         }
         // First state: fetch lists for the Providers the saved Family rows already reference, so
         // their dropdowns fill on open without a re-pick (#53).
-        if (!prev) {
+        if (!prev || credentialsChanged) {
           FAMILY_KEYS.forEach((k) => ensureProviderModels(msg.state.routingFamilies?.[k]?.providerId ?? ''));
         }
       }
-      if (msg.type === 'models' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current) {
+      if (msg.type === 'models' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current && msg.credentialVersion === modelsOrigin.current.credentialVersion) {
         setModels(msg.ids); setModelsError('');
       }
-      if (msg.type === 'providerModels') setProviderModels((cur) => ({ ...cur, [msg.providerId]: msg.ids }));
-      if (msg.type === 'modelsError' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current) setModelsError(msg.message);
+      if (msg.type === 'providerModels' && msg.credentialVersion === modelsOrigin.current?.credentialVersion) setProviderModels((cur) => ({ ...cur, [msg.providerId]: msg.ids }));
+      if (msg.type === 'modelsError' && msg.providerId === modelsOrigin.current?.providerId && msg.requestId === modelRequest.current && msg.credentialVersion === modelsOrigin.current.credentialVersion) setModelsError(msg.message);
       if (msg.type === 'activity') setThinking(msg.thinking);
     };
     window.addEventListener('message', onMessage);
@@ -265,7 +267,7 @@ export const App = () => {
               const value = e.currentTarget.value;
               // Hide old account controls until the host confirms the new provider's kind and state.
               modelRequest.current++;
-              modelsOrigin.current = { providerId: value, baseUrl: '', keyIsSet: false };
+              modelsOrigin.current = { providerId: value, baseUrl: '', keyIsSet: false, credentialVersion: state.credentialVersion };
               setModels(undefined); setModelsError(''); setState(undefined);
               vscode.postMessage({ type: 'selectProvider', value });
             }}

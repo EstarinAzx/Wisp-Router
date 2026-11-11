@@ -56,6 +56,7 @@ export type AntigravityCreds = {
   refreshToken?: string;
   expiresAt?: number;   // epoch ms; absent when the token response carried no expires_in
   projectId?: string;   // cloudaicompanionProject, bootstrapped at sign-in (never hardcoded)
+  signOutId?: string;   // unique tombstone generation so another sign-out invalidates pending sign-in
 };
 
 // Whether a catalog row is the Antigravity backend. Absent kind == 'openai-chat', so false for every

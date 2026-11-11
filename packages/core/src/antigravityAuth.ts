@@ -27,6 +27,7 @@
  */
 
 import { createServer } from 'http';
+import { randomUUID } from 'crypto';
 import type { AddressInfo } from 'net';
 import { AuthStateChangedError } from './homeStore';
 import {
@@ -291,8 +292,14 @@ export class AntigravityAuth {
   signIn = async (): Promise<AntigravityCreds> => {
     if (this.signingIn) throw new Error('Antigravity sign-in is already in progress.');
     this.signingIn = true;
-    const snapshot = this.store.read();
     try {
+      let snapshot = this.store.read();
+      // Upgrade legacy empty tombstones before waiting: even an older client's {} sign-out must differ.
+      if (snapshot && Object.keys(snapshot).length === 0) {
+        const marked = { signOutId: randomUUID() };
+        this.store.write(marked, snapshot);
+        snapshot = marked;
+      }
       const creds = await runAntigravityOAuth(this.openExternal);
       const projectId = creds.accessToken ? await fetchAntigravityProject(creds.accessToken) : undefined;
       const next = { ...creds, ...(projectId ? { projectId } : {}) };
@@ -306,7 +313,7 @@ export class AntigravityAuth {
   // Sign out by writing a TOMBSTONE rather than deleting the field — a present-but-bearer-less blob reads as
   // "signed out" (isAntigravitySignedIn === false) and survives a restart. The project id goes too: it
   // identifies the account that just left, not the install.
-  signOut = (): void => this.store.write({});
+  signOut = (): void => this.store.write({ signOutId: randomUUID() });
 
   private currentInFlight: Promise<AntigravityCreds> | undefined;
 

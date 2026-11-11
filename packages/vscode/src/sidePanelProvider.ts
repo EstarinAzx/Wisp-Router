@@ -30,6 +30,7 @@ import type { FamilyKey, Target } from '@wisp/core';
 // ----------------------------- Types ----------------------------- //
 
 export type PanelState = {
+  credentialVersion: string;
   keyIsSet: boolean;
   keySource: 'stored' | 'env' | 'none';
   keyEnv: string; // active Provider's env-var name, so the env hint names the right var ('' = none)
@@ -61,6 +62,7 @@ export type PanelState = {
 export const NO_KEY_MESSAGE = 'No API key set.';
 
 export type PanelHost = {
+  credentialVersion: () => string;
   getState: () => Promise<PanelState>;
   getActivity: () => boolean; // true = a completion request is in flight (Thinking)
   storeApiKey: (value: string) => Promise<void>;
@@ -145,7 +147,7 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
 
   // ----------------------------- Message routing ----------------------------- //
 
-  private onMessage = async (msg: { type?: string; value?: unknown; refresh?: boolean; providerId?: string; requestId?: number }): Promise<void> => {
+  private onMessage = async (msg: { type?: string; value?: unknown; refresh?: boolean; providerId?: string; requestId?: number; credentialVersion?: string }): Promise<void> => {
     try {
       switch (msg?.type) {
         case 'ready':
@@ -170,16 +172,20 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           return;
         case 'refreshModels': {
           if (typeof msg.providerId !== 'string' || !Number.isSafeInteger(msg.requestId)) return;
+          if (msg.credentialVersion !== this.host.credentialVersion()) { void this.postState(); return; }
           const ids = await this.host.fetchModelIds(msg.providerId);
-          void this.view?.webview.postMessage({ type: 'models', providerId: msg.providerId, requestId: msg.requestId, ids });
+          if (msg.credentialVersion !== this.host.credentialVersion()) { void this.postState(); return; }
+          void this.view?.webview.postMessage({ type: 'models', providerId: msg.providerId, requestId: msg.requestId, credentialVersion: msg.credentialVersion, ids });
           return;
         }
         case 'fetchProviderModels': {
           // A Routing-map row's list (#53). Failures answer empty ids, never an error message —
           // the row silently falls back to free text (AC: no error spam).
           if (typeof msg.value !== 'string' || !msg.value) return;
+          if (msg.credentialVersion !== this.host.credentialVersion()) { void this.postState(); return; }
           const ids = await this.host.fetchProviderModelIds(msg.value, msg.refresh === true).catch(() => []);
-          void this.view?.webview.postMessage({ type: 'providerModels', providerId: msg.value, ids });
+          if (msg.credentialVersion !== this.host.credentialVersion()) { void this.postState(); return; }
+          void this.view?.webview.postMessage({ type: 'providerModels', providerId: msg.value, credentialVersion: msg.credentialVersion, ids });
           return;
         }
         case 'codexSignIn':
@@ -255,7 +261,8 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       if (msg?.type === 'refreshModels') {
-        void this.view?.webview.postMessage({ type: 'modelsError', providerId: msg.providerId, requestId: msg.requestId, message: sanitizeError(err) });
+        if (msg.credentialVersion !== this.host.credentialVersion()) { void this.postState(); return; }
+        void this.view?.webview.postMessage({ type: 'modelsError', providerId: msg.providerId, requestId: msg.requestId, credentialVersion: msg.credentialVersion, message: sanitizeError(err) });
         return;
       }
       // A failed mutation fires no config event, so nothing would re-sync the controlled

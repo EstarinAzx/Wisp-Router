@@ -6,11 +6,16 @@ The account controls and command-palette sign-in/out use the same core OAuth man
 store as the terminal. One flow per manager is allowed; the registered loopback port is fixed at 51121.
 A concurrent flow in another process fails on the port bind. A sign-out or account replacement while
 sign-in is pending invalidates the result instead of letting it overwrite the newer store state.
+Sign-out writes a unique tombstone generation. Legacy empty tombstones are marked before browser
+sign-in begins, so repeated sign-outs, including an older client's empty tombstone, invalidate the flow.
 
-The panel consumes the OAuth-discovered model list. Automatic loading has a four-second fallback to
+The panel consumes the OAuth-discovered model list. Automatic loading, including token refresh and
+project preparation, has a four-second fallback to
 the shared catalogue. Explicit refresh uses refreshed credentials and surfaces discovery failures;
 manual IDs and prior options remain available. Model results are correlated with their provider and
-request, and older state snapshots are discarded after a newer request.
+request plus an opaque credential version, and older state snapshots are discarded after a newer request.
+Account or nonempty key replacement clears accepted lists and routing caches, even when the signed-in
+boolean stays true. A process-local HMAC versions credentials without exposing them to the webview.
 
 Native chat adapts the shared Cloud Code stream: text, supported image inputs, tool definitions,
 required tool mode and tool results. Original tool-call IDs survive continuation. A missing ID is an
