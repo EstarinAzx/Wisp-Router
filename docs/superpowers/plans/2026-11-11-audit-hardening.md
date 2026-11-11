@@ -51,11 +51,11 @@
 
 **Interfaces:** Add a synchronous guarded config mutation operation (for example `updateConfig(update: (current: WispConfig) => WispConfig): WispConfig`) if it is the smallest complete solution. Make ordinary `writeConfig` use the same guard. Async routing validation must commit against a checked current snapshot or recompute its pure edit under the guard; no await inside the file lock.
 
-- [ ] Port the audit's deferred credential-check race into a regression: a second successful alias write must survive, or the stale first edit must fail rather than claim success.
-- [ ] Cover independent family/alias edits, snapshots/revert, preservation of unrelated config fields, busy-lock handling and malformed/unreadable files. Search all nested read-modify-write callers and migrate those exposed to the same lost-update mechanism.
-- [ ] Add a replay test where a whitespace-padded stored Bridge secret authenticates and derives the same replay identity as its trimmed value.
-- [ ] Observe RED, implement the guarded config changes, and normalize the secret in `WispHome.antigravityReplayContext` without weakening replay identity validation.
-- [ ] Run core and affected TUI tests/typechecks, independently review the shared-write boundary, then commit.
+- [x] Port the audit's deferred credential-check race into a regression: a second successful alias write must survive, or the stale first edit must fail rather than claim success.
+- [x] Cover independent family/alias edits, snapshots/revert, preservation of unrelated config fields, busy-lock handling and malformed/unreadable files. Search all nested read-modify-write callers and migrate those exposed to the same lost-update mechanism.
+- [x] Add a replay test where a whitespace-padded stored Bridge secret authenticates and derives the same replay identity as its trimmed value.
+- [x] Observe RED, implement the guarded config changes, and normalize the secret in `WispHome.antigravityReplayContext` without weakening replay identity validation.
+- [x] Run core and affected TUI tests/typechecks, independently review the shared-write boundary, then commit.
 
 ## Task 3 — Stream cancellation and replay (findings 1, 6, 7, 15)
 
@@ -86,20 +86,20 @@
 
 **Interfaces:** Preserve the operator's production path/ancestor checks. Canonicalize only the temporary-parent comparisons used by synthetic fixtures. Keep the existing span command but make its execution safe and its exit status reliable.
 
-- [ ] BEFORE running the span script again, intercept its native discovery seam and isolate all stores. Its previous fetch stub did not cover `execFile`.
-- [ ] Add checks for current routing-screen navigation and nonzero exit on capture failure. Observe RED safely with native processes blocked.
-- [ ] Add canonical/linked-temp-parent controls and cleanup assertions; observe RED without reading or writing real Wisp home.
-- [ ] Fix fixture creation, synthetic-entry validation and cleanup consistently; preserve rejection of untrusted ancestor links.
-- [ ] Repair span navigation and failure handling. Only then capture and review the current baseline; verify repeat capture passes without `--update` and an intentional mismatch fails.
-- [ ] Run relevant suites, document Windows-only platform evidence, review and commit.
+- [x] BEFORE running the span script again, intercept its native discovery seam and isolate all stores. Its previous fetch stub did not cover `execFile`.
+- [x] Add checks for current routing-screen navigation and nonzero exit on capture failure. Observe RED safely with native processes blocked.
+- [x] Add canonical/linked-temp-parent controls and cleanup assertions; observe RED without reading or writing real Wisp home.
+- [x] Fix fixture creation, synthetic-entry validation and cleanup consistently; preserve rejection of untrusted ancestor links.
+- [x] Repair span navigation and failure handling. Only then capture and review the current baseline; verify repeat capture passes without `--update` and an intentional mismatch fails.
+- [x] Run relevant suites, document Windows-only platform evidence, review and commit.
 
 ## Task 6 — Current docs and historical formatting (findings 14, 17)
 
 **Files:** `packages/vscode/README.md`, `CONTEXT.md`, `docs/codex-wisp.md`, `packages/{tui,vscode}/CHANGELOG.md`, `docs/investigations/2.2.8-argon-api.md`.
 
-- [ ] Reconcile current companion version, auth-file storage, default Provider, both Bridge hosts and npm source-template versions against manifests/source. Search connected current sections for the same contradictory claim.
-- [ ] Restore corrupted changelog separators and escape the two literal table pipes; preserve historical content and dates.
-- [ ] Check links, table shape and `git diff --check`; use no implementation-mirroring tests for prose-only repairs. Commit.
+- [x] Reconcile current companion version, auth-file storage, default Provider, both Bridge hosts and npm source-template versions against manifests/source. Search connected current sections for the same contradictory claim.
+- [x] Restore corrupted changelog separators and escape the two literal table pipes; preserve historical content and dates.
+- [x] Check links, table shape and `git diff --check`; use no implementation-mirroring tests for prose-only repairs. Commit.
 
 ## Task 7 — Integrated verification and CodeRabbit
 
