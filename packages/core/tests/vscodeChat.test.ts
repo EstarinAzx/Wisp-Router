@@ -53,6 +53,67 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
+describe('native provider usage reporting', () => {
+  const event = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+  const cases = [
+    ['codex', 'gpt-6-astra', 20], ['anthropic', 'claude-sonnet-4-6', 10], ['xai', 'grok-4.5', 20],
+  ] as const;
+  const sendUsage = async (id: string, model: string, usage: 'valid' | 'missing' | 'invalid' | 'zero', toolOnly = false) => {
+    vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
+    const creds = { accessToken: 'synthetic-token', accountId: 'synthetic-account' };
+    const { provider } = setup('', { providers: [PROVIDERS.find(p => p.id === id)!], modelMap: () => ({ [id]: model }),
+      codexCreds: async () => creds, anthropicCreds: async () => creds, xaiCreds: async () => creds });
+    const count = usage === 'invalid' ? -1 : usage === 'zero' ? 0 : 10;
+    const wireUsage = usage === 'missing' ? undefined : { input_tokens: usage === 'zero' ? 0 : 100, output_tokens: count,
+      input_tokens_details: { cached_tokens: usage === 'zero' ? 0 : 20 } };
+    const openingUsage = usage === 'missing' ? undefined : { input_tokens: usage === 'zero' ? 0 : 70,
+      cache_creation_input_tokens: usage === 'zero' ? 0 : 20, cache_read_input_tokens: usage === 'zero' ? 0 : 10,
+      output_tokens: 0 };
+    const output = toolOnly ? [{ type: 'function_call', call_id: 'usage-call', name: 'read_file', arguments: '{}' }]
+      : [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }];
+    const stream = id === 'anthropic'
+      ? event('message_start', { message: { usage: openingUsage } })
+        + (toolOnly ? event('content_block_start', { index: 0, content_block: { type: 'tool_use', id: 'usage-call', name: 'read_file' } })
+          + event('content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } })
+          + event('content_block_stop', { index: 0 })
+          : event('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'OK' } }))
+        + event('message_delta', { delta: { stop_reason: toolOnly ? 'tool_use' : 'end_turn' },
+          usage: usage === 'missing' ? undefined : { output_tokens: count } }) + event('message_stop', {})
+      : (toolOnly ? event('response.output_item.added', { item: output[0] }) : '')
+        + event('response.completed', { response: { output, usage: wireUsage } });
+    vi.stubGlobal('fetch', async (url: unknown) => /\/(responses|messages)(\?|$)/.test(String(url))
+      ? new Response(stream) : Response.json({}));
+    const parts: any[] = [];
+    await provider.provideLanguageModelChatResponse({ id }, [user(text('hello'))], { toolMode: 1 },
+      { report: (part: any) => parts.push(part) }, token());
+    return { parts, usages: parts.filter(p => p instanceof vscode.LanguageModelDataPart && p.mimeType === 'usage')
+      .map(p => JSON.parse(Buffer.from(p.data).toString())) };
+  };
+  it.each(cases)('%s reports full prompt usage including cache without double-counting', async (id, model, cached) => {
+    const { parts, usages } = await sendUsage(id, model, 'valid');
+    expect(parts.some(p => p instanceof vscode.LanguageModelTextPart && p.value === 'OK')).toBe(true);
+    expect(usages.at(-1)).toEqual({ prompt_tokens: 100, completion_tokens: 10, total_tokens: 110,
+      prompt_tokens_details: { cached_tokens: cached } });
+  });
+  it.each(cases)('%s reports usage for a tool-only reply', async (id, model) => {
+    const { parts, usages } = await sendUsage(id, model, 'valid', true);
+    expect(parts.some(p => p instanceof vscode.LanguageModelToolCallPart && p.callId === 'usage-call')).toBe(true);
+    expect(usages.at(-1)).toMatchObject({ prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 });
+  });
+  it.each(cases)('%s does not fabricate usage when the provider omits it', async (id, model) => {
+    expect((await sendUsage(id, model, 'missing')).usages).toEqual([]);
+  });
+  it.each(cases)('%s preserves a real zero usage report', async (id, model) => {
+    expect((await sendUsage(id, model, 'zero')).usages.at(-1)).toEqual({ prompt_tokens: 0, completion_tokens: 0,
+      total_tokens: 0, prompt_tokens_details: { cached_tokens: 0 } });
+  });
+  it.each(cases)('%s never emits malformed negative usage', async (id, model) => {
+    const { parts, usages } = await sendUsage(id, model, 'invalid');
+    expect(parts.some(p => p instanceof vscode.LanguageModelTextPart)).toBe(true);
+    expect(usages.every(u => u.prompt_tokens >= 0 && u.completion_tokens >= 0 && u.total_tokens >= 0)).toBe(true);
+  });
+});
+
 it('shares native conversation diagnostics with external readers without storing chat content', async () => {
   const home = mkdtempSync(join(tmpdir(), 'wisp-native-logs-'));
   try {

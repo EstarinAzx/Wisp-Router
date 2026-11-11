@@ -9,9 +9,9 @@ tags: [context, pick-up]
 
 Use the primary checkout on local `main`; [[active-work]] is the current baton. Historical notes and the old worktree are not queues.
 
-**Wisp2.2.11 / companion1.14.8 is published and verified; no active work.** Workflow43115208900 passed; GitHub assets, downloaded Windows/VSIX and published npm shell/Windows checks passed. npm latest is2.2.11; the Linux optional package returned404 and uses the existing GitHub-download fallback. Read [[active-work]] and local `.claude/wisp-2.2.11/publication-receipt.json` for exact evidence and limits. Client installation/restart remains outside scope.
+**Native VS Code usage fix is complete locally and unreleased.** Codex/Anthropic/Grok usage reporting, cached-token accounting and Anthropic split updates are verified.33 provider/2135 core tests, types/build, six synthetic real-host requests and user GPT5% screenshot passed. Read [[active-work]] and local `.claude/context-usage-diagnosis/final-receipt.json`; preserve the uncommitted reviewed diff. The user explicitly said not to publish another release.
 
-CodeRabbit checkpoints passed: logging4/5 (user extended cap), Copilot1/3, release-prep1/3. No pending review or worker. Preserve qualification limits and review budgets; do not repeat implementation or reopen the completed preparation relay.
+CodeRabbit native-vscode-usage passed1/3,5/5 files,0 findings; no pending review/worker. Prior2.2.11 checkpoints stay closed: logging4/5, Copilot1/3, release-prep1/3. Published2.2.11 remains unchanged. No automatic commit/push/release or relay restart.
 
 ## Related
 

@@ -24,7 +24,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { SessionLogger } from '@wisp/core';
+import type { BridgeUsage, SessionLogger } from '@wisp/core';
 import OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildChatModelInfos, lookupModelsDevCaps,
@@ -75,6 +75,18 @@ export type ChatProviderDeps = {
 };
 
 // ----------------------------- Message mapping ----------------------------- //
+
+const reportUsage = (progress: vscode.Progress<vscode.LanguageModelResponsePart>, usage: BridgeUsage) => {
+  // Bridge counts exclude cached input; Copilot expects the entire prompt, including both cache tiers.
+  const prompt = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+  const total = prompt + usage.output_tokens;
+  if (![usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens, usage.output_tokens, prompt, total]
+    .every(count => Number.isSafeInteger(count) && count >= 0)) return;
+  progress.report(new vscode.LanguageModelDataPart(Buffer.from(JSON.stringify({
+    prompt_tokens: prompt, completion_tokens: usage.output_tokens, total_tokens: total,
+    prompt_tokens_details: { cached_tokens: usage.cache_read_input_tokens },
+  })), 'usage'));
+};
 
 // Pull the text out of a tool result's content parts — only text parts are forwarded to the backend.
 const toolResultText = (parts: readonly unknown[]): string =>
@@ -259,8 +271,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       try {
         for await (const ev of codexStream({ creds, baseUrl, model: modelId, messages: toCodexMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
-          // #165: usage events are Bridge-only (VS Code does its own accounting) — skip them explicitly
-          // rather than let "not text" fall through as "must be a tool call".
+          if (ev.type === 'usage') { reportUsage(progress, ev.usage); continue; }
           if (ev.type !== 'toolCall') continue;
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
           let input: object = {};
@@ -292,10 +303,8 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
           // the Bridge renders a truncation as the reply's stop_reason, but a vscode chat part has no
           // such channel — so here the reason stays visible prose, or a cut-short turn would end in silence.
           if (ev.type === 'truncation') { progress.report(new vscode.LanguageModelTextPart(`\n\n_[Response truncated: ${ev.reason}]_`)); continue; }
+          if (ev.type === 'usage') { reportUsage(progress, ev.usage); continue; }
           // Thinking passthrough events have no vscode chat part — dropped here (Anthropic-door-only fidelity).
-          if (ev.type !== 'toolCall') continue;
-          // #165: usage events are Bridge-only (VS Code does its own accounting) — skip them explicitly
-          // rather than let "not text" fall through as "must be a tool call".
           if (ev.type !== 'toolCall') continue;
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
           let input: object = {};
@@ -321,8 +330,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       try {
         for await (const ev of xaiStream({ creds, baseUrl, model: modelId, messages: toCodexMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
-          // #165: usage events are Bridge-only (VS Code does its own accounting) — skip them explicitly
-          // rather than let "not text" fall through as "must be a tool call".
+          if (ev.type === 'usage') { reportUsage(progress, ev.usage); continue; }
           if (ev.type !== 'toolCall') continue;
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.
           let input: object = {};

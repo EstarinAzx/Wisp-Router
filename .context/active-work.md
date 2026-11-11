@@ -8,24 +8,26 @@ tags: [context, active-work, session-logs, vscode]
 # Active Work
 
 _Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Tested product commit: 5fdcc7fb9824bf29d2a8ce016624555b155586aa. Published tag v2.2.11: e831d803f6d1baf829e84a527dec75ccaabe88a4; product bytes unchanged. Exact publication evidence: local `.claude/wisp-2.2.11/publication-receipt.json`._
+_Current fix: uncommitted changes on main, baseline31b0ab8d9d55eb4c2407c3eb60ffad2a8a52fdb1. Published v2.2.11 remains unchanged at e831d803f6d1baf829e84a527dec75ccaabe88a4._
 
 ## Current focus
 
-Wisp **2.2.11** is published on [GitHub](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.11) and npm (`latest=2.2.11`), with companion **1.14.8** attached as a VSIX. khitarashi authorized publication with **"release now"** on2026-11-12. Workflow [43115208900](https://github.com/EstarinAzx/Wisp-Router/actions/runs/43115208900) passed all five jobs; downloaded Windows/VSIX and published npm checks passed. No active release work remains. Real-client installation/restart remains outside scope.
+Native VS Code usage reporting for **Codex, Anthropic and Grok is fixed locally and verified**, following khitarashi's2026-11-12 request. The rebuilt development host reports usage; the user's GPT-6 Astra screenshot shows5% instead of0%. Changes remain uncommitted/unreleased; no version bump, tag, publication or installed-client replacement. Published Wisp2.2.11 / companion1.14.8 remains the prior release.
 
 ## Work contract
 
-- **Authority:** khitarashi, 2026-11-12, root4cbf4b5f-18e7-4f99-84e1-31a6607f68cc: full autonomous engineering, CodeRabbit ON, root relays, primary checkout only/no worktrees, integrate main and leave release-ready in a fresh ownership-transferred main chat. Approval excerpt/spec links: local `.claude/relay/wisp-2.2.11.body.md`.
-- **Requirements:** `docs/superpowers/specs/2026-11-12-session-logs-copilot-design.md`; plan `docs/superpowers/plans/2026-11-12-session-logs-copilot.md`. Completed units stay complete.
-- **Execution:** final root `515709ef-f87f-4124-ac93-05ff3491aba1`, relay leg5. Local `.claude/relay/wisp-2.2.11.traycer.json` owns terminal status; the accepted root has unchanged GUI settings and the same primary checkout. No further implementation leg.
-- **Review:** [[review-policy]] on. Single budget ledger is the relay body: logging **passed4/5**, Copilot **passed1/3**, release-prep **passed1/3**. User explicitly extended only the logging cap3->5 for the stale-heading fix in rootcb1a1fa4 on2026-11-12. No pending review or unresolved blocker. Source/instruction manifests and dispositions: `review-3/`, `heading-review-4/`, `copilot-review-1/`, `release-review-1/` under local `.claude/wisp-2.2.11/`. Reuse matching reviews; never reset budgets.
-- **Integration:** versioned context/docs; ignored local evidence/relay. Main integration complete. Publication/tagging now authorized by "release now"; actual-client installation/restart, historical cleanup and worktrees remain outside scope.
-- **Evidence:** local `.claude/wisp-2.2.11/final-readiness-receipt.json` records fresh acceptance; `unit{1,2,3}-receipt.json` retain implementation evidence. Final checks `heading-fix-checks.json`, packages `release-package-receipt.json` / `heading-fix-package.json`, CI `release-ci-final.json`, content identity `release-final-review-coverage.json`. Only the three recorded context/plan status files differ from tested source.
-- **Pending:** none. Both publication/registry watchers exited0. Local `.claude/wisp-2.2.11/publication-receipt.json` records verified publication and registry limitations. No worker or review is pending.
-- **Checkpoint:** all three units and fresh-root acceptance complete. Source5fdcc7f passed local gates and four-platform CI, then merged unchanged. Fresh verification matched all50 product/doc paths and review instructions, both package hashes and the clean VSIX bundle; unchanged suites/reviews were reused, not rerun.
+- **Authority:** khitarashi,2026-11-12 in root515709ef: "Fix native VS Code usage reporting for Codex, Anthropic and Grok, add regression coverage, and verify it in the dev host. Don't publish another release yet." Prior primary-checkout/no-worktree and auth/settings preservation remain.
+- **Requirements/plan:** local `.claude/context-usage-diagnosis/work.md`; forward real native usage, preserve cached prompt accounting, merge Anthropic partial snapshots, verify regressions and host behavior.
+- **Execution:** root515709ef, inline in primary checkout. Prior2.2.11 relay stays stopped/completed; this is separate unreleased work.
+- **Review:** [[review-policy]] on. New checkpoint native-vscode-usage **passed1/3**, all5 files covered,0 findings, current hashes match; ledger/dispositions in local `.claude/context-usage-diagnosis/work.md` and `review-1/`. Native ExitCode capture was null; completed NDJSON and shell0 retained honestly. Prior release ledger remains closed: logging4/5, Copilot1/3, release-prep1/3 under `.claude/relay/wisp-2.2.11.body.md`.
+- **Integration:** five product/test files remain local on main; `usage-host.cjs` is staged, other edits unstaged. Versioned baton updated; local evidence ignored. No commit/push/publication performed for this fix.
+- **Evidence:** local `.claude/context-usage-diagnosis/`: red.log, green.log, core.log, checks.json, host-receipt.json, review-1/manifest.json/events.ndjson/dispositions.json and final-receipt.json. Published release evidence remains `.claude/wisp-2.2.11/publication-receipt.json`.
+- **Pending:** none. Core/build, synthetic host and CodeRabbit shells finished. Interactive development host intentionally remains open.
+- **Checkpoint:** fix complete locally:33 provider tests,2135 full core tests, types/build, six real-extension-host API requests across three providers, user visual GPT5% confirmation and CodeRabbit5/5. Live Anthropic/Grok UI meters were not separately tested.
 
 ## Verified state
+
+- **Current local fix:** native adapter emits Copilot `usage` data parts for Codex/Anthropic/Grok; prompt usage includes uncached input plus cache creation/read once, with cached-read detail. Missing usage stays absent; invalid numeric counts are not emitted. Anthropic opening input/cache and final output-only updates merge correctly. Tool-only replies and actual zero counts are covered. Below is historical2.2.11 release evidence, not a claim that the current fix is published.
 
 - Shared bounded per-session logs across CLI/TUI/VS Code, lifecycle-only serve stdout, safe request attribution and interleaved multi-process regressions. `docs/session-logs.md` owns behavior/limits.
 - Both actual Copilot SDK/Agent Host failures reproduced and corrected: authenticated encrypted reasoning preserves state when response-ID markers disappear; exact-model Claude OTHER is accepted only for well-formed native tool calls. Replay/tool-ID/account/conversation guards remain enforced.
@@ -43,7 +45,7 @@ All disposable test hosts stopped and temporary Wisp credential copies removed. 
 
 ## Pick up here
 
-No active work. Release2.2.11 / companion1.14.8 is published and verified; do not republish, move the tag, restart the completed relay or repeat unchanged reviews. Installation/restart requires a separate user request. Preserve the qualification limits and review budgets above. The user also reported a basic visual Carbon-high Copilot smoke pass in the development host; screenshots do not establish additional tool-continuation qualification.
+No implementation work remains for the native usage fix; preserve the reviewed local diff and await the user's next request. Do not publish, move the2.2.11 tag, restart the old relay or repeat unchanged reviews. Review the final receipt/current source hashes before integrating. The user confirmed the GPT development-host meter at5%; no live Anthropic/Grok meter claim. Prior Carbon smoke and published-release limits remain historical evidence.
 
 ## Related
 

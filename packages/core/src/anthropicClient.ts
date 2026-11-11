@@ -241,21 +241,22 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   // backend emitted it. The old assemble-at-end fold survives only as the dropped-socket fallback below.
   const openTools = new Map<number, AssembledToolCall>();
   let toolCount = 0;
-  let responsesUsageFields: Record<string, unknown> = {};
+  let usageFields: Record<string, unknown> = {};
   for await (const block of sseBlocks(res.body)) {
     const ev = parseSseBlock(block);
     if (!ev) continue;
     if (ev.event === 'error') throw new Error(ev.data?.error?.message ?? 'Anthropic response failed');
     // Usage rides on message_start (initial input/cache) and message_delta (final counts). Yield it but
     // don't consume the event — message_delta still needs its stop_reason read below.
+    const raw = ev.event === 'message_start' ? ev.data?.message?.usage : ev.event === 'message_delta' ? ev.data?.usage : undefined;
+    const hasUsage = raw && typeof raw === 'object' && !Array.isArray(raw);
+    if (hasUsage) usageFields = { ...usageFields, ...raw };
     if (args.strictCompletion) {
-      const raw = ev.event === 'message_start' ? ev.data?.message?.usage : ev.event === 'message_delta' ? ev.data?.usage : undefined;
-      if (raw && typeof raw === 'object' && !Array.isArray(raw)) responsesUsageFields = { ...responsesUsageFields, ...raw };
       // The opening snapshot is not final output usage. A missing final update must stay missing.
-      if (ev.event === 'message_start') delete responsesUsageFields.output_tokens;
-      if (ev.event === 'message_delta') responsesUsageFields.output_tokens = raw?.output_tokens;
+      if (ev.event === 'message_start') delete usageFields.output_tokens;
+      if (ev.event === 'message_delta') usageFields.output_tokens = raw?.output_tokens;
     }
-    const usage = args.strictCompletion ? undefined : anthropicUsage(ev);
+    const usage = args.strictCompletion || !hasUsage ? undefined : anthropicUsage({ event: 'message_delta', data: { usage: usageFields } });
     if (usage) yield { type: 'usage', usage };
     // #156: the same message_start carries the message id + server cache diagnosis — yielded alongside
     // usage so the Bridge can chain previous_message_id and log the authoritative miss reason.
@@ -307,7 +308,7 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   }
   if (args.strictCompletion && (!sawTerminal || openTools.size)) throw new Error('Anthropic stream ended before completion');
   if (args.strictCompletion) {
-    const usage = anthropicUsage({ event: 'message_delta', data: { usage: responsesUsageFields } }, true);
+    const usage = anthropicUsage({ event: 'message_delta', data: { usage: usageFields } }, true);
     if (usage) yield { type: 'usage', usage };
   }
   // Dropped-socket fallback: a tool block whose stop frame never arrived still folds at stream end.
