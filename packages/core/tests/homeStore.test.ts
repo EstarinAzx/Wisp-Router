@@ -19,6 +19,9 @@ import { join } from 'path';
 import { WispHome, wispHomeDir } from '../src/homeStore';
 import { CodexAuth } from '../src/codexAuth';
 import { AnthropicAuth } from '../src/anthropicAuth';
+import { XaiAuth } from '../src/xaiAuth';
+import { KimiAuth } from '../src/kimiAuth';
+import type { CodexCreds } from '../src/catalog';
 
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -32,14 +35,21 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 // The sandbox path points at a subdir that does NOT exist yet — creation on demand is part of the contract.
 const home = () => new WispHome(join(dir, '.wisp'));
 
-describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisition', provider => {
+const renewalManager = (provider: 'codex' | 'anthropic' | 'xai' | 'kimi', h: WispHome) => {
+  const store = { read: () => h.readAuth()[provider], write: (c: CodexCreds, expected?: string) => {
+    h.writeAuth({ [provider]: c }, expected === undefined ? undefined : { provider, snapshot: expected });
+  } };
+  if (provider === 'kimi') return new KimiAuth(store, () => {});
+  const constructors = { codex: CodexAuth, anthropic: AnthropicAuth, xai: XaiAuth };
+  return new constructors[provider](store, async () => false, () => {});
+};
+
+describe.each(['codex', 'anthropic', 'xai', 'kimi'] as const)('%s renewal at auth lock acquisition', provider => {
   test.each([false, true])('preserves normal renewal and unrelated writes (disk failure: %s)', async diskFailure => {
     const h = home();
     const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
-    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
-    const manager = provider === 'codex'
-      ? new CodexAuth({ read: () => h.readAuth().codex, write: (c, expected?: string) => { h.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
-      : new AnthropicAuth({ read: () => h.readAuth().anthropic, write: (c, expected?: string) => { h.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, tokenEndpoint: 'https://auth.x.ai/token' } });
+    const manager = renewalManager(provider, h);
     vi.stubGlobal('fetch', async () => {
       home().writeAuth({ bridgeSecret: 'sibling-write' });
       return Response.json({ access_token: 'fixture-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 });
@@ -62,10 +72,8 @@ describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisit
   test.each(['signout', 'replacement', 'removal'])('preserves a concurrent %s and returns no old-account credentials', async change => {
     const a = home(), b = home();
     const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
-    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
-    const manager = provider === 'codex'
-      ? new CodexAuth({ read: () => a.readAuth().codex, write: (c, expected?: string) => { a.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
-      : new AnthropicAuth({ read: () => a.readAuth().anthropic, write: (c, expected?: string) => { a.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, tokenEndpoint: 'https://auth.x.ai/token' } });
+    const manager = renewalManager(provider, a);
     let changed = false, preserved = '';
     const open = fs.openSync;
     // The second real store writes after the manager's last read, just before the first gets the lock.

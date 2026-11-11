@@ -151,14 +151,16 @@ const runAntigravityOAuth = async (openExternal: (url: string) => PromiseLike<bo
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
   const { code, close } = await startCallbackServer(state);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await openExternal(buildAuthorizeUrl(challenge, state));
     const authCode = await Promise.race([
       code,
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Antigravity sign-in timed out.')), OAUTH_TIMEOUT_MS)),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('Antigravity sign-in timed out.')), OAUTH_TIMEOUT_MS); }),
     ]);
     return exchangeCode(authCode, verifier, Date.now());
   } finally {
+    clearTimeout(timer);
     close();
   }
 };
@@ -250,6 +252,9 @@ export class AntigravityAuth {
     } catch (err) {
       this.log(`[antigravity] token refresh error: ${String(err)}`);
       return retained;
+    } finally {
+      // Failed grants must not hand a signed-out or replaced account back to the caller either.
+      if (JSON.stringify(this.store.read()) !== JSON.stringify(fresh)) throw new AuthStateChangedError();
     }
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
@@ -265,8 +270,10 @@ export class AntigravityAuth {
   // Bootstrap the project id when the bundle has none (#188: "re-fetch if absent"). Signed-out bundles are
   // skipped — there is no bearer to ask with. A failure leaves the bundle as-is; the next call retries.
   private withProject = async (creds: AntigravityCreds, snapshot: AntigravityCreds): Promise<AntigravityCreds> => {
+    if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
     if (creds.projectId || !creds.accessToken) return creds;
     const projectId = await fetchAntigravityProject(creds.accessToken);
+    if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
     if (!projectId) return creds;
     const next = { ...creds, projectId };
     try { this.store.write(next, snapshot); }
@@ -292,13 +299,19 @@ export class AntigravityAuth {
   // identifies the account that just left, not the install.
   signOut = (): void => this.store.write({});
 
+  private currentInFlight: Promise<AntigravityCreds> | undefined;
+
   // The credentials to use right now: the stored bundle, refreshed if near expiry, with the project id
   // bootstrapped if it is missing. undefined = not signed in.
   current = async (): Promise<AntigravityCreds | undefined> => {
     const creds = this.store.read();
     if (!creds) return undefined;
-    const current = await this.refreshIfNeeded(creds);
-    return this.withProject(current.creds, current.snapshot);
+    if ((!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) && (creds.projectId || !creds.accessToken)) return creds;
+    // Share project hydration too: two continuations must not write against the same old snapshot.
+    this.currentInFlight ??= this.refreshIfNeeded(creds)
+      .then(current => this.withProject(current.creds, current.snapshot))
+      .finally(() => { this.currentInFlight = undefined; });
+    return this.currentInFlight;
   };
 
   // Cheap signed-in check for UI/usability — read-only (no refresh or bootstrap round-trip).

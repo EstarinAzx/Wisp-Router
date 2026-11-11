@@ -991,12 +991,12 @@ export const activate = (context: vscode.ExtensionContext): void => {
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Grok (xAI) token lifecycle — same injection as Codex/Anthropic.
   xaiAuth = new XaiAuth(
-    { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
+    { read: () => home.readAuth().xai, write: (c, expected) => { home.writeAuth({ xai: c }, expected === undefined ? undefined : { provider: 'xai', snapshot: expected }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Kimi token lifecycle (#170) — no openExternal: the device flow is driven from `wisp`, and this face only
   // reads/refreshes the resulting bundle to produce a bearer.
   kimiAuth = new KimiAuth(
-    { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
+    { read: () => home.readAuth().kimi, write: (c, expected) => { home.writeAuth({ kimi: c }, expected === undefined ? undefined : { provider: 'kimi', snapshot: expected }); } },
     (m) => output.appendLine(m));
   // Antigravity token lifecycle (#189) — like Kimi, the sign-in itself is driven from `wisp`; this face
   // holds the manager only so the Bridge can REFRESH the stored bundle and bootstrap the Cloud Code

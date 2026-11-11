@@ -21,6 +21,7 @@
  * classifier builds its messages from the server's error fields alone.
  */
 
+import { AuthStateChangedError } from './homeStore';
 import {
   type KimiCreds, type KimiDeviceAuthorization, type KimiPollOutcome,
   parseDeviceAuthorization, classifyDevicePoll, nextPollIntervalMs,
@@ -95,7 +96,8 @@ const pollOnce = async (deviceCode: string, now: number, signal?: AbortSignal): 
 // Codex/Grok managers the two states behave the same — the distinction is kept for store symmetry.)
 export type KimiCredsStore = {
   read: () => KimiCreds | undefined;
-  write: (creds: KimiCreds) => void;
+  // A supplied snapshot must be compared under the host's auth write lock.
+  write: (creds: KimiCreds, expected?: string) => void;
 };
 
 // What the face shows the user while the device flow waits: where to go and what to type.
@@ -161,13 +163,15 @@ export class KimiAuth {
   // non-fatal — keep the existing creds and let the live call surface a 401.
   private refreshIfNeeded = async (creds: KimiCreds): Promise<KimiCreds> => {
     if (!creds.refreshToken || !shouldRefreshKimiToken(creds, Date.now())) return creds;
-    this.refreshInFlight ??= this.runRefresh(creds).finally(() => { this.refreshInFlight = undefined; });
+    this.refreshInFlight ??= this.runRefresh().finally(() => { this.refreshInFlight = undefined; });
     return this.refreshInFlight;
   };
 
-  private runRefresh = async (creds: KimiCreds): Promise<KimiCreds> => {
-    const fresh = this.store.read() ?? creds;
+  private runRefresh = async (): Promise<KimiCreds> => {
+    const fresh = this.store.read();
+    if (!fresh) throw new AuthStateChangedError();
     if (!shouldRefreshKimiToken(fresh, Date.now()) || !fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: KimiCreds;
     try {
       const res = await fetch(KIMI_TOKEN_ENDPOINT, {
@@ -184,10 +188,16 @@ export class KimiAuth {
     } catch (err) {
       this.log(`[kimi] token refresh error: ${String(err)}`);
       return fresh;
+    } finally {
+      // Failed grants must not hand a signed-out or replaced account back to the caller either.
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
     }
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json write
     // must not discard the new bundle — keep using it in memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[kimi] token persist error: ${String(err)}`); }
+    try { this.store.write(next, beforeRefresh); } catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      this.log(`[kimi] token persist error: ${String(err)}`);
+    }
     return next;
   };
 
