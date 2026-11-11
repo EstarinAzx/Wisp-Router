@@ -22,6 +22,9 @@ import { AnthropicAuth } from '../src/anthropicAuth';
 import { XaiAuth } from '../src/xaiAuth';
 import { KimiAuth } from '../src/kimiAuth';
 import type { CodexCreds } from '../src/catalog';
+import { createAntigravityReplayContext } from '../src/antigravity';
+import { EMPTY_ROUTING_MAP, withAlias, withFamilyRoute } from '../src/routing';
+import { PROVIDERS } from '../src/catalog';
 
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -238,6 +241,114 @@ describe('status read/write', () => {
 // ----------------------------- read/write config ----------------------------- //
 
 describe('config read/write', () => {
+  test('ordinary patches exclude a competing writer until the atomic swap completes', () => {
+    const a = home(), b = home();
+    a.writeConfig({ provider: 'groq' });
+    const rename = fs.renameSync;
+    let competingError: unknown;
+    let attempted = false;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (!attempted && String(to).endsWith('config.json')) {
+        attempted = true;
+        try { b.writeConfig({ effort: 'high' }); } catch (error) { competingError = error; }
+      }
+      rename(from, to);
+    });
+    try { a.writeConfig({ provider: 'codex' }); } finally { spy.mockRestore(); }
+    expect(String(competingError)).toMatch(/busy/i);
+    b.writeConfig({ effort: 'high' });
+    expect(a.readConfig()).toEqual({ provider: 'codex', effort: 'high' });
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('nested edits read under the guard and preserve a sibling family, alias and unknown fields', () => {
+    const a = home(), b = home();
+    a.writeConfig({});
+    writeFileSync(join(dir, '.wisp', 'config.json'), JSON.stringify({ future: 'keep', bridge: { port: 4242, future: true } }));
+    const open = fs.openSync;
+    let injected = false;
+    const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      if (!injected && String(args[0]).endsWith('config.lock')) {
+        injected = true;
+        b.updateConfig(cfg => ({ ...cfg, routing: withFamilyRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, 'opus', { providerId: 'codex', model: 'sibling' })! }));
+      }
+      return open(...args);
+    });
+    try {
+      a.updateConfig(cfg => ({ ...cfg, routing: withAlias(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, 'first', { providerId: 'codex', model: 'first' })! }));
+    } finally { spy.mockRestore(); }
+    expect(injected).toBe(true);
+    expect(a.readConfig()).toEqual({ future: 'keep', bridge: { port: 4242, future: true }, routing: {
+      families: { opus: { providerId: 'codex', model: 'sibling' } }, aliases: [{ name: 'first', target: { providerId: 'codex', model: 'first' } }],
+    } });
+  });
+
+  test('busy config locks refuse both mutation paths without stealing the lock', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), lock = join(dir, '.wisp', 'config.lock');
+    const before = readFileSync(path, 'utf8');
+    writeFileSync(lock, 'other writer');
+    expect(() => h.writeConfig({ effort: 'high' })).toThrow(/busy/i);
+    expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow(/busy/i);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(readFileSync(lock, 'utf8')).toBe('other writer');
+  });
+
+  test('a refused mutation writes nothing and conditional seeding leaves an existing store intact', () => {
+    const h = home();
+    expect(h.updateConfig(() => undefined)).toEqual({});
+    expect(h.configExists()).toBe(false);
+    expect(readdirSync(join(dir, '.wisp'))).toEqual([]);
+    h.updateConfig(() => h.configExists() ? undefined : { provider: 'groq' });
+    const before = readFileSync(join(dir, '.wisp', 'config.json'), 'utf8');
+    h.updateConfig(() => h.configExists() ? undefined : { provider: 'codex' });
+    expect(readFileSync(join(dir, '.wisp', 'config.json'), 'utf8')).toBe(before);
+  });
+
+  test('unreadable config is not mistaken for an absent file', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), before = readFileSync(path, 'utf8');
+    const read = fs.readFileSync;
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((...args: any[]) => {
+      if (String(args[0]) === path) throw Object.assign(new Error('fixture denied'), { code: 'EACCES' });
+      return (read as any)(...args);
+    });
+    try { expect(() => h.writeConfig({ effort: 'high' })).toThrow(/denied/); }
+    finally { spy.mockRestore(); }
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('failed callbacks, corrupt stores and failed swaps preserve bytes and release the config guard', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), before = readFileSync(path, 'utf8');
+    expect(() => h.updateConfig(() => { throw Error('refused'); })).toThrow('refused');
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw Error('fixture disk full'); });
+    try { expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow('fixture disk full'); }
+    finally { spy.mockRestore(); }
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    writeFileSync(path, '{broken');
+    expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow(/config.json/);
+    expect(readFileSync(path, 'utf8')).toBe('{broken');
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('replay identity uses the same trimmed Bridge secret as authentication', () => {
+    const h = home();
+    const creds = { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', projectId: 'example-project-1' };
+    h.writeAuth({ antigravity: creds, bridgeSecret: '  synthetic-bridge \n' });
+    const expected = createAntigravityReplayContext(creds, 'synthetic-bridge');
+    expect(h.antigravityReplayContext()).toEqual(expected);
+    h.writeAuth({ bridgeSecret: 'other-secret' });
+    expect(h.antigravityReplayContext()).not.toEqual(expected);
+    h.writeAuth({ bridgeSecret: ' \n' });
+    expect(h.antigravityReplayContext()).toBeUndefined();
+  });
+
   test('malformed routing containers cannot fall back or erase explicit Codex bindings (#216)', () => {
     const h = home();
     h.writeConfig({});

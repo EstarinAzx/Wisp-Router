@@ -84,7 +84,7 @@ const parseObject = (raw: string | undefined | null): Record<string, unknown> | 
 // hand-edit typo, valid JSON that is not an object). Reading them alike is fine. Writing them alike is the
 // data loss — the store layer merges that `{}` with the next patch and puts it back over the file, so the
 // second case erases contents we already admitted we did not understand. This is the bit the parsers throw
-// away, kept as its own pure predicate so `homeStore.merge` can refuse exactly that case and nothing else.
+// away, kept as its own pure predicate so the store's guarded writes can refuse that case.
 export const isUnusableStore = (raw: string | undefined | null): boolean =>
   !!raw?.trim() && parseObject(raw) === undefined;
 

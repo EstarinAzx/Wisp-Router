@@ -330,7 +330,7 @@ const refreshCopilotModelEnv = (): void => {
 // event, so re-push the panel state explicitly — the pattern for every mutation below.
 const setModel = async (id: string): Promise<void> => {
   const p = activeProvider();
-  home.writeConfig({ models: { ...home.readConfig().models, [p.id]: id } });
+  home.updateConfig(cfg => ({ ...cfg, models: { ...cfg.models, [p.id]: id } }));
   cachedClient = undefined;
   refreshCopilotModelEnv();
   void panel?.postState();
@@ -351,9 +351,10 @@ const setEffort = async (effort: EffortLevel): Promise<void> => {
 // call picks the change up with no restart. The edit itself is core's pure withFamilyRoute (#65);
 // its refusal (dangling Provider id from a malformed webview message) persists nothing.
 const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Promise<void> => {
-  const next = withFamilyRoute(activeRoutingMap(), PROVIDERS, family, target);
-  if (!next) return;
-  home.writeConfig({ routing: next });
+  home.updateConfig(cfg => {
+    const next = withFamilyRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, family, target);
+    return next ? { ...cfg, routing: next } : undefined;
+  });
   void panel?.postState();
 };
 
@@ -362,27 +363,28 @@ const setFamilyRoute = async (family: FamilyKey, target: Target | undefined): Pr
 // shadows a Provider id (the resolver checks ids first, so a shadowing alias would be silently
 // unreachable).
 const setAlias = async (name: string, target: Target): Promise<void> => {
-  const next = withAlias(activeRoutingMap(), PROVIDERS, name, target);
-  if (!next) return;
-  home.writeConfig({ routing: next });
+  home.updateConfig(cfg => {
+    const next = withAlias(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, name, target);
+    return next ? { ...cfg, routing: next } : undefined;
+  });
   void panel?.postState();
 };
 
 // Panel toggle for the alias picker rows' model-id suffix (#52). The Bridge reads it live per list request.
 const setAliasPickerShowsModel = async (on: boolean): Promise<void> => {
-  home.writeConfig({ bridge: { ...home.readConfig().bridge, aliasPickerShowsModel: on } });
+  home.updateConfig(cfg => ({ ...cfg, bridge: { ...cfg.bridge, aliasPickerShowsModel: on } }));
   void panel?.postState();
 };
 
 // Panel toggle for the alias-only models list (#67). Same live-read contract as the toggle above.
 const setAliasOnlyModels = async (on: boolean): Promise<void> => {
-  home.writeConfig({ bridge: { ...home.readConfig().bridge, aliasOnlyModels: on } });
+  home.updateConfig(cfg => ({ ...cfg, bridge: { ...cfg.bridge, aliasOnlyModels: on } }));
   void panel?.postState();
 };
 
 // Remove one Alias row by name (#52). Unknown names are a no-op (core's withoutAlias, #65).
 const removeAlias = async (name: string): Promise<void> => {
-  home.writeConfig({ routing: withoutAlias(activeRoutingMap(), name) });
+  home.updateConfig(cfg => ({ ...cfg, routing: withoutAlias(cfg.routing ?? EMPTY_ROUTING_MAP, name) }));
   void panel?.postState();
 };
 
@@ -520,7 +522,7 @@ const migrateToWispHome = async (): Promise<void> => {
     // enforcement died with their package.json registration — a merged read would let a repo's
     // .vscode/settings.json seed provider/baseUrl into config.json permanently.
     const userValue = <T>(key: string): T | undefined => cfg().inspect<T>(key)?.globalValue;
-    home.writeConfig(seedConfigFromVsCode({
+    home.updateConfig(() => home.configExists() ? undefined : seedConfigFromVsCode({
       provider: userValue<string>('provider'),
       models: globalState.get<Record<string, string>>(MODEL_MAP_KEY),
       effort: globalState.get<EffortLevel>(EFFORT_KEY),

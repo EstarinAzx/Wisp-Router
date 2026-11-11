@@ -48,7 +48,11 @@ export const runRoutingCli = async (args: string[]): Promise<number> => {
     return 0;
   }
   const result = await runRoutingCommand(args, map, PROVIDERS, hasCredentials);
-  if (result.nextMap) home.writeConfig({ routing: result.nextMap });
+  if (result.nextMap) home.updateConfig(current => {
+    // Credential checks may yield; never replace routing changed by another successful writer.
+    if (JSON.stringify(current.routing ?? EMPTY_ROUTING_MAP) !== JSON.stringify(map)) throw new Error('Routing changed during validation; retry the command.');
+    return { ...current, routing: result.nextMap };
+  });
   for (const line of result.lines) console.log(line);
   return result.exitCode;
 };

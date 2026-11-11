@@ -105,8 +105,7 @@ const menuRows = (p: Provider): Array<{ name: string; description: string; value
 ];
 
 const saveModel = (p: Provider, model: string): void => {
-  const cfg = home.readConfig();
-  home.writeConfig({ models: { ...cfg.models, [p.id]: model } });
+  home.updateConfig(cfg => ({ ...cfg, models: { ...cfg.models, [p.id]: model } }));
 };
 
 // ----------------------------------------- Model lists ----------------------------------------- //
@@ -171,9 +170,11 @@ export const ProviderMenuScreen = ({ provider, onDone, onSetKey, onSignIn, onSig
       onSelect={(_i, opt) => {
         switch (opt?.value) {
           case 'active':
-            home.writeConfig({ provider: provider.id });
-            // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
-            onDone(`Active Provider → ${provider.label} — tip: name it in /routing for a clean /model list.`);
+            try {
+              home.writeConfig({ provider: provider.id });
+              // Post-selection nudge (#81): teach the clean-list path at the moment it matters.
+              onDone(`Active Provider → ${provider.label} — tip: name it in /routing for a clean /model list.`);
+            } catch (error) { onDone(String(error)); }
             return;
           case 'set-key': onSetKey(); return;
           case 'remove-key':
@@ -248,8 +249,8 @@ export const ModelPickScreen = ({ provider, options, onDone, onManual, onRefresh
         if (!opt) return;
         if (opt.value === ' manual') { onManual(); return; }
         if (opt.value === ' refresh') { onRefresh(); return; }
-        saveModel(provider, opt.value as string);
-        onDone(`${provider.label} model → ${opt.value}`);
+        try { saveModel(provider, opt.value as string); onDone(`${provider.label} model → ${opt.value}`); }
+        catch (error) { onDone(String(error)); }
       }}
     />
   </box>
@@ -266,7 +267,10 @@ export const ModelFreeScreen = ({ provider, onDone }: {
       placeholder={provider.defaultModel || 'model id'}
       onSubmit={onSubmitText((value) => {
         const id = value.trim();
-        if (id) { saveModel(provider, id); onDone(`${provider.label} model → ${id}`); }
+        if (id) {
+          try { saveModel(provider, id); onDone(`${provider.label} model → ${id}`); }
+          catch (error) { onDone(String(error)); }
+        }
         else onDone('Empty — model unchanged.');
       })}
     />
@@ -332,8 +336,8 @@ export const EffortPickScreen = ({ onDone, options, current }: { onDone: (messag
       }))}
       onSelect={(_i, opt) => {
         if (!opt) return;
-        home.writeConfig({ effort: opt.value as EffortLevel });
-        onDone(`Effort → ${opt.value}`);
+        try { home.writeConfig({ effort: opt.value as EffortLevel }); onDone(`Effort → ${opt.value}`); }
+        catch (error) { onDone(String(error)); }
       }}
     />
   </box>
