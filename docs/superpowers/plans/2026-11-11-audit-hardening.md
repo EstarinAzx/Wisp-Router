@@ -35,13 +35,13 @@
 
 **Interfaces:** Preserve public `current`, `signIn`, `signOut` behavior. Extend the existing optional expected-credential snapshot write contract to Grok/Kimi and wire it through both hosts. Keep one in-flight refresh per manager; do not hold the file write lock during network I/O.
 
-- [ ] Add regression cases for pending Kimi/Grok refresh followed by sign-out and account replacement. Assert the tombstone/new bundle survives and stale credentials are not returned.
-- [ ] Add concurrent-current cases for Codex, Claude, Antigravity and Grok: one grant per manager; both callers get the valid result. Include failed grant and later retry, and account replacement while callers share the pending promise.
-- [ ] Add malformed 200 refresh cases for Claude/Grok: `{}`, blank/wrong-typed tokens and invalid expiry preserve the original usable bundle and retry eligibility.
-- [ ] Add success/rejected-callback cases proving each of the four browser OAuth flows clears its five-minute timeout. Intercept provider requests and clean up loopback resources.
-- [ ] Run the selected tests and retain genuine RED output.
-- [ ] Implement the smallest shared-guard/in-flight/validation/timer corrections. Search every store adapter before changing its signature. Preserve successful rotation when only an ordinary disk write fails, without accepting a concurrent sign-out.
-- [ ] Run affected tests, core suite and core/TUI/extension typechecks; record any failure by name. Independently review the auth changes, address findings and commit this unit.
+- [x] Add regression cases for pending Kimi/Grok refresh followed by sign-out and account replacement. Assert the tombstone/new bundle survives and stale credentials are not returned.
+- [x] Add concurrent-current cases for Codex, Claude, Antigravity and Grok: one grant per manager; both callers get the valid result. Include failed grant and later retry, and account replacement while callers share the pending promise.
+- [x] Add malformed 200 refresh cases for Claude/Grok: `{}`, blank/wrong-typed tokens and invalid expiry preserve the original usable bundle and retry eligibility.
+- [x] Add success/rejected-callback cases proving each of the four browser OAuth flows clears its five-minute timeout. Intercept provider requests and clean up loopback resources.
+- [x] Run the selected tests and retain genuine RED output.
+- [x] Implement the smallest shared-guard/in-flight/validation/timer corrections. Search every store adapter before changing its signature. Preserve successful rotation when only an ordinary disk write fails, without accepting a concurrent sign-out.
+- [x] Run affected tests, core suite and core/TUI/extension typechecks; record any failure by name. Independently review the auth changes, address findings and commit this unit.
 
 ## Task 2 — Shared configuration and replay identity (findings 3, 11)
 
@@ -63,11 +63,11 @@
 
 **Interfaces:** Keep Bridge protocols unchanged. Use guarded response-close cancellation. Preserve original assistant blocks through the existing `NormalizedTurn.rawContent` sidecar. Keep the shared `sseBlocks` generator API.
 
-- [ ] Add actual local-HTTP disconnect regressions for Chat Completions and Messages before upstream headers and after the first SSE token; assert upstream signal and cleanup behavior.
-- [ ] Add an advisor regression that serializes the next Anthropic request and checks signed/empty/redacted thinking, text and original tool-call order.
-- [ ] Add early-break and upstream-error reader cleanup regressions, plus a normally exhausted control. Include a nonsettling/rejected cancel callback so cleanup cannot strand the caller.
-- [ ] Add Gemini usage cases: absent, output-only, cached-only and complete totals. Incomplete provider observations must not become malformed Responses usage; public Gemini enrollment remains disabled.
-- [ ] Observe RED, implement minimal shared fixes, run the focused cases and complete core suite, review and commit.
+- [x] Add actual local-HTTP disconnect regressions for Chat Completions and Messages before upstream headers and after the first SSE token; assert upstream signal and cleanup behavior.
+- [x] Add an advisor regression that serializes the next Anthropic request and checks signed/empty/redacted thinking, text and original tool-call order.
+- [x] Add early-break and upstream-error reader cleanup regressions, plus a normally exhausted control. Include a nonsettling/rejected cancel callback so cleanup cannot strand the caller.
+- [x] Add Gemini usage cases: absent, output-only, cached-only and complete totals. Incomplete provider observations must not become malformed Responses usage; public Gemini enrollment remains disabled.
+- [x] Observe RED, implement minimal shared fixes, run the focused cases and complete core suite, review and commit.
 
 ## Task 4 — Model discovery and explicit TUI commands (findings 8, 9, 10)
 
@@ -75,10 +75,10 @@
 
 **Interfaces:** Keep model-discovery APIs and fallback semantics. Bound the shared catalog fetch/body operation and caller cancellation without introducing a new service. Use the correct provider dispatch or explicit unsupported result for `/test`.
 
-- [ ] Add a stalled catalog/body regression proving fallback occurs within the chosen bounded deadline; preserve the initiating signal and verify an already-aborted later caller settles promptly.
-- [ ] Add real-App command coverage for `/key xai`: it must direct to OAuth and never save `keys.xai`.
-- [ ] Add `/test antigravity` and alias cases with synthetic credentials: qualified non-Argon models use the Antigravity client; unqualified Argon tests refuse before transport instead of falling into Chat Completions.
-- [ ] Observe RED, implement the smallest repairs, then run focused and complete TUI/core tests and relevant typechecks. Commit.
+- [x] Add a stalled catalog/body regression proving fallback occurs within the chosen bounded deadline; preserve the initiating signal and verify an already-aborted later caller settles promptly.
+- [x] Add real-App command coverage for `/key xai`: it must direct to OAuth and never save `keys.xai`.
+- [x] Add `/test antigravity` and alias cases with synthetic credentials: qualified non-Argon models use the Antigravity client; unqualified Argon tests refuse before transport instead of falling into Chat Completions.
+- [x] Observe RED, implement the smallest repairs, then run focused and complete TUI/core tests and relevant typechecks. Commit.
 
 ## Task 5 — Hermetic verification tools (findings 12, 13)
 
