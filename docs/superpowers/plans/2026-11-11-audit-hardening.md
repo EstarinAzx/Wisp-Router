@@ -106,10 +106,12 @@
 - [x] Map every finding 1–17 to its changed files and verification evidence. No unchecked item is silently dropped because it is minor or dormant.
 - [x] With pinned Bun and process-local PATH, run root `bun run test`, `bun test packages/tui/tests`, core typecheck, TUI compile, root `bun run compile`, `node plugins/slot/statusline/check.js`, and the repaired hermetic span check.
 - [x] Get an independent whole-diff review of the integrated branch. Preserve actual failures and qualified platform limits.
-- [ ] Run CodeRabbit on the actual fix-branch diff against the recorded audit base, after local checks. Use the single checkpoint in the execution brief; initial plus at most two follow-ups, never paid credits without approval. Record complete coverage/outcome and validate each finding before acting.
-- [ ] Apply justified in-scope follow-ups and rerun affected checks/review within budget. Exhausted budget or auth/quota blockers stay explicit; do not label them a pass.
-- [ ] Commit the final verified state and push the fix branch. Do not merge, tag, publish or install a release.
-- [ ] Produce the final changeset walkthrough and concise user report: commits, all 17 dispositions, tests, CodeRabbit outcome and remaining platform/live acceptance limits.
+- [x] Run CodeRabbit on the actual fix-branch diff against the recorded audit base, after local checks. Use the single checkpoint in the execution brief; initial plus at most two follow-ups, never paid credits without approval. Record complete coverage/outcome and validate each finding before acting.
+- [x] Apply justified in-scope follow-ups and rerun affected checks/review within budget. Exhausted budget or auth/quota blockers stay explicit; do not label them a pass.
+- [x] Commit the final verified state and push the fix branch. Do not merge, tag, publish or install a release.
+- [x] Produce the final changeset walkthrough and concise user report: commits, all 17 dispositions, tests, CodeRabbit outcome and remaining platform/live acceptance limits.
+
+**Final source verification (2026-11-11):** `e1df97c15cce34244a0a559f0b71f7fc82ab654c` passed 1,975 core tests, 201 TUI tests (896 assertions), core/TUI typechecks, extension/webview build, Slot statusline checks and all 34 hermetic span captures. The fresh independent 47-file review found one persistence-error identity race; 14 RED cases reproduced it, five catch-path checks fixed it, and 132 focused tests plus all integrated checks passed. CodeRabbit then completed the actual 47-file diff from `2f2dabe87fc7a67a48d2ddae57547caa4d7b97e6` with 0 issues (run 1/3, exit 0, complete coverage), and the verified source was pushed to `origin/fix/audit-hardening`. Final plan-only bookkeeping does not alter that tested source. The Traycer walkthrough `changeset-walkthroughs/audit-hardening` contains all 17 dispositions. Evidence remains Windows/synthetic/local-loopback only; earlier ENOSPC, launch-PATH failure, intermittent Bridge-log test failure and React act warnings are retained in the execution evidence. No release, merge, installation, live provider or native-client acceptance is claimed.
 
 ## Execution order and ownership
 
