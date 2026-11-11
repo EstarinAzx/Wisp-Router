@@ -2,7 +2,7 @@
 
 **Experimental Desktop bridge:** ChatGPT Desktop (Codex) can use Wisp aliases alongside native models. See the [README preview](https://github.com/EstarinAzx/Wisp-Router#chatgpt-desktop-codex-bridge--experimental). Compatibility varies by Provider and model; verification boundaries are described below.
 
-**Companion 1.14.5:** the extension-hosted Bridge implements terminal 2.2.8's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
+**Companion 1.14.6:** the extension-hosted Bridge implements terminal 2.2.9's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 
 Update the terminal setup command and serving Bridge together; older protocols are refused. A protocol-3 setup needs journaled disable then enable for voice settings. Antigravity `gemini-3.8-flash-tiered` and the exact `gemini-4-argon-low`, `gemini-4-argon-medium` and `gemini-4-argon-high` targets are qualified under explicit compatibility: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Strict mode and other Antigravity targets remain excluded. Native context limits still apply. See the [2.2.8 release evidence and limits](../../docs/releases/v2.2.8.md) for Desktop and extension-host acceptance. Coordinate any installation/reload around active clients; keep the current working Bridge running until a handover is explicitly arranged. Slot is unchanged.
 
@@ -18,7 +18,7 @@ Wisp is a **BYOK model router** for the Copilot harness, registering your own ba
 
 Net: run Copilot's chat / agent / edit experience — and Claude Code's — on the model access you already pay for.
 
-- **Version:** 1.14.5
+- **Version:** 1.14.6
 - **Requires:** VS Code 1.104+
 - **Repo:** [github.com/EstarinAzx/Wisp-Router](https://github.com/EstarinAzx/Wisp-Router)
 - **Not on the Marketplace** — install from a `.vsix` release or from source (see [Install](#install)).

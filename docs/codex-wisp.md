@@ -2,7 +2,7 @@
 
 For persistent signed-in desktop configuration, see [Codex desktop integration](codex-desktop.md). The launcher below remains available with its child-only configuration.
 
-Current source versions are terminal **2.2.8** and companion **1.14.5**. Picker Aliases and
+Current source versions are terminal **2.2.9** and companion **1.14.6**. Picker Aliases and
 exact Codex model routes were introduced in terminal 2.1.5 / companion 1.13.8; `codex-wisp`
 itself was introduced in 2.1.4. The historical release-preparation evidence below does not
 establish the installed version. Older installed packages do not gain new behavior automatically.
@@ -216,7 +216,7 @@ The optional npm directory must come from `npm pack`, with the matching unpacked
 package under `node_modules/@tsd47216/wisp-router-<platform>-<arch>`. Stage copies of the npm
 templates, stamp both package versions and every optional dependency to the terminal version,
 and put the compiled binary in the platform package's `bin/` before packing. The checked-in npm
-source templates currently contain `2.2.8`, including every platform optional dependency in the
+source templates currently contain `2.2.9`, including every platform optional dependency in the
 thin shell. The release workflow stamps the tag version into those manifests and dependency pins
 before packing. The check copies artifacts outside the repository, empties the child PATH,
 and verifies launcher failures, existing commands, the compiled Responses route, config/auth
