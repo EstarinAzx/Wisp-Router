@@ -3,6 +3,13 @@
 import { describe, it, expect } from 'vitest';
 import { parseSlash, suggestSlash, completeSlash, SLASH_COMMANDS, type SlashCommandDef } from '../src/slash';
 
+it('opens the session picker through both log commands and completes the discoverable form', () => {
+  expect(parseSlash('/show logs')).toEqual({ command: 'show-log', args: [] });
+  expect(parseSlash('/show-log')).toEqual({ command: 'show-log', args: [] });
+  expect(completeSlash('/show', 0)).toBe('/show ');
+  expect(parseSlash('/show something-else')?.command).toBe('show');
+});
+
 it('completes quota without running it and preserves explicit refresh arguments', () => {
   expect(completeSlash('/quo', 0)).toBe('/quota ');
   expect(parseSlash('/quota refresh codex')).toEqual({ command: 'quota', args: ['refresh', 'codex'] });

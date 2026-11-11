@@ -35,7 +35,7 @@ import { getModelsDevCatalog } from '@wisp/core';
 import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type RoutingMap, type FamilyKey, type Target } from '@wisp/core';
 import { registerWispChatProvider } from './chatProvider';
 import { antigravityNativeChatError } from './nativeChatSupport';
-import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
+import { createBridgeServer, createSessionLogger, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { CodexAuth, AnthropicAuth, XaiAuth } from '@wisp/core';
 import { codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
@@ -1162,6 +1162,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
     aliasOnlyModels,
     port: bridgePort,
     accessSecret: () => bridgeSecret,
+    sessionLog: createSessionLogger('vscode-bridge'),
     log: (m) => output.appendLine(m),
     // #171: the statusline snapshot — same store, same file, whichever face hosts the Bridge.
     recordStatus: (status) => home.writeStatus(status),
@@ -1225,6 +1226,7 @@ export const activate = (context: vscode.ExtensionContext): void => {
       // bundle for the streaming Responses call.
       xaiSignedIn: () => xaiAuth.isSignedIn(),
       xaiCreds: () => xaiAuth.current(),
+      sessionLog: createSessionLogger('vscode-chat'),
       log: (m) => output.appendLine(m),
     }),
     // Single sync point for store changes made OUTSIDE this window's own helpers — another VS Code

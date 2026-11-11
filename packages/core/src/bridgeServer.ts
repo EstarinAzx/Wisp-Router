@@ -23,6 +23,8 @@
  */
 
 import * as http from 'http';
+import { AsyncLocalStorage } from 'async_hooks';
+import type { SessionLogger, SessionLogProtocol, SessionRequestLog } from './sessionLog';
 import * as crypto from 'crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import OpenAI from 'openai';
@@ -129,6 +131,7 @@ export type BridgeDeps = {
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
+  sessionLog?: SessionLogger;
   // #171: persist the statusline snapshot after a bridged turn (the face writes ~/.wisp/status.json). OPTIONAL
   // — a host that omits it simply produces no live statusline, never an error, and the Bridge never reads it
   // back: this is write-only telemetry consumed by an out-of-process script.
@@ -303,6 +306,15 @@ const buildCompletion = (meta: ChunkMeta, text: string, calls: { id: string; nam
 // command (and slice #38's panel toggle) drive the exact same server; OFF until start() is called.
 export const createBridgeServer = (deps: BridgeDeps) => {
   let server: http.Server | undefined;
+  const requestContext = new AsyncLocalStorage<{ res: http.ServerResponse; log?: SessionRequestLog; failed?: boolean; baseRouteLogged?: boolean }>();
+  const beginLog = (protocol: SessionLogProtocol, identity?: unknown): void => {
+    const context = requestContext.getStore();
+    if (!context || context.log || !deps.sessionLog) return;
+    context.log = deps.sessionLog.begin(protocol, identity);
+    const finish = () => context.log?.finish(!context.res.writableFinished ? 'cancel'
+      : context.failed || context.res.statusCode >= 400 ? 'error' : 'complete', context.res.statusCode);
+    context.res.once('finish', finish); context.res.once('close', finish);
+  };
 
   // The usable-Provider descriptors both doors' discovery lists derive from. Keyed = has a key; the OAuth rows
   // (Codex #39, Anthropic #40) are usable when signed in. caps is omitted: the list only needs ids/labels, so
@@ -360,6 +372,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const direct = resolveRoute(deps.routingMap(), deps.providers, deps.activeProviderId(), requestedModel);
     const route = withCooldownFallback(direct, requestedModel, deps.providers, cooldowns.cooling, isAnthropicProvider);
     if (route) {
+      const context = requestContext.getStore();
+      if (context?.log && !context.baseRouteLogged) {
+        context.log.event('route', { provider: route.provider.id, model: route.pinnedModel ?? resolveModel(deps.modelMap(), route.provider) });
+        context.baseRouteLogged = true; // Advisor sub-calls must not replace the answering chat's route.
+      }
       const fellBack = direct && route.provider.id !== direct.provider.id;
       deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}${fellBack ? ` (cooldown fallback: ${direct.provider.id} limited until ${new Date(cooldowns.coolingUntil(direct.provider.id) ?? 0).toISOString()} #161)` : ''}`);
     }
@@ -626,6 +643,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
           : antigravity?.retryable ?? (!executor.classify(err) && isTransientProviderError(message));
         if (controller.signal.aborted || n >= MAX_PROVIDER_ATTEMPTS || !retryable) throw err;
         const wait = Math.max(retryDelayMs(n, Math.random), antigravity?.retryAfterMs ?? 0);
+        requestContext.getStore()?.log?.event('retry', { provider: provider.id, attempt: n + 1 });
         deps.log(`[bridge] provider ${provider.id} transient failure — retrying in ${Math.round(wait)}ms (attempt ${n + 1}/${MAX_PROVIDER_ATTEMPTS}): ${redact ? 'desktop upstream error' : message} (#168)`);
         await sleep(wait, undefined, { signal: controller.signal });
         controller.signal.throwIfAborted();
@@ -648,6 +666,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     signedDesktop = false,
   ): void => {
     if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+    const context = requestContext.getStore();
+    if (context) { context.failed = true; context.log?.event('error', { provider: provider.id }); }
     if (signedDesktop) {
       const failure = desktopUpstreamFailure(err);
       deps.log(`[bridge] desktop upstream HTTP ${failure.status} code=${failure.code}`);
@@ -672,6 +692,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // Provider's record opens the upstream as BridgeStreamEvents → render back through bridge.ts's SSE emitters
   // (or one chat.completion object when stream:false). Kinds differ only inside their record's open().
   const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    beginLog('chat');
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     let body: unknown;
@@ -738,6 +759,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   };
 
   const handleResponses = async (req: http.IncomingMessage, res: http.ServerResponse, signedDesktop = false): Promise<void> => {
+    const identity = req.headers.session_id;
+    beginLog('responses', typeof identity === 'string' && /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(identity) ? identity.toLowerCase() : undefined);
     // IncomingMessage.close also fires when reading the body finishes. Only the response socket closing
     // before end is cancellation; install this before reading or resolving any upstream credentials.
     const controller = new AbortController();
@@ -1018,9 +1041,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     let body: unknown;
-    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
+    try { body = JSON.parse(await readBody(req)); } catch { beginLog('messages'); return sendError(res, 400, 'request body is not valid JSON'); }
 
     const parsed = parseAnthropicMessagesRequest(body as Parameters<typeof parseAnthropicMessagesRequest>[0]);
+    beginLog('messages', parsed.sessionId);
     // #145: system turns ride in `turns` now — a body with ONLY those still has no conversation to send
     // (the build would hoist them and ship an empty messages array upstream; fail loud here instead).
     if (!parsed.turns.some((t) => t.role !== 'system')) return sendError(res, 400, 'no messages to send');
@@ -1246,9 +1270,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     new Promise((resolve, reject) => {
       if (server) return resolve();
       const s = http.createServer((req, res) => {
-        handle(req, res).catch((err) => {
-          deps.log(`[bridge] unhandled ${String(err)}`);
-          if (res.headersSent) res.end(); else sendError(res, 500, 'internal error');
+        requestContext.run({ res }, () => {
+          handle(req, res).catch((err) => {
+            const context = requestContext.getStore();
+            if (context) { context.failed = true; context.log?.event('error'); }
+            deps.log(`[bridge] unhandled ${String(err)}`);
+            if (res.headersSent) res.end(); else sendError(res, 500, 'internal error');
+          });
         });
       });
       s.on('upgrade', (req, socket, head) => {
@@ -1259,10 +1287,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         catch { rejectVoiceUpgrade(socket, 502); }
       });
       s.on('error', (err) => { server = undefined; reject(err); });
-      s.listen(deps.port(), '127.0.0.1', () => { server = s; deps.log(`[bridge] listening on 127.0.0.1:${deps.port()}`); resolve(); });
+      s.listen(deps.port(), '127.0.0.1', () => { server = s; deps.sessionLog?.lifecycle('start'); deps.log(`[bridge] listening on 127.0.0.1:${deps.port()}`); resolve(); });
     });
 
-  const stop = (): void => { for (const call of voiceCalls) call.abort(); voiceCalls.clear(); for (const socket of voiceSockets) socket.destroy(); voiceSockets.clear(); if (server) { server.close(); server = undefined; deps.log('[bridge] stopped'); } };
+  const stop = (): void => { for (const call of voiceCalls) call.abort(); voiceCalls.clear(); for (const socket of voiceSockets) socket.destroy(); voiceSockets.clear(); if (server) { server.close(); server = undefined; deps.sessionLog?.lifecycle('stop'); deps.log('[bridge] stopped'); } };
 
   // dispose === stop, so the handle drops straight onto context.subscriptions and closes on deactivate.
   return { start, stop, isRunning: () => !!server, dispose: stop };

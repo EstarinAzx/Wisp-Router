@@ -6,12 +6,12 @@ Grok proxy requests reuse the caller's validated session UUID from Responses hea
 
 ## Antigravity records
 
-When a Bridge built with these changes runs, its normal `bridge.log` gains two JSON records per accepted Antigravity request:
+The internal diagnostic callback can emit two JSON records per accepted Antigravity request during controlled instrumentation:
 
 - `[bridge] antigravity cache-request`: generated `requestId`, model, `sessionHash`, `systemHash`, `toolsHash`, `configHash`, full `contentsHash`, content count and `contentHashes`.
 - `[bridge] antigravity cache-usage`: the same `requestId`, `ended` and the actual normalized `usage`, or `null` when unavailable.
 
-The log is in the Wisp home, normally `~/.wisp/bridge.log`; `WISP_HOME` overrides that directory. Host-attempt lines include the same request ID, so daily/production fallback remains distinguishable. A failure before a response opens has request/host records but no usage record.
+These free-form callbacks are not persisted by the new [session logger](session-logs.md). Legacy `bridge.log` files remain readable with a text editor but no longer receive new traffic. A controlled callback capture can correlate host-attempt lines by request ID, so daily/production fallback remains distinguishable. A failure before a response opens has request/host records but no usage record.
 
 Fingerprints describe the final outbound payload. They use a random, process-local HMAC key that is never logged. They compare equal within one process, change after restart, and reveal no raw prompt, tool definition, image, credential, project ID or upstream session ID. Only the first 128 contents have individual fingerprints; `contentsHash` covers the entire history.
 

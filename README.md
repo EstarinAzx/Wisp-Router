@@ -75,6 +75,8 @@ Press **Esc** to close the panel and keep the Bridge running. **`/bridge off`** 
 
 If you prefer a terminal without the interface, run **`wisp serve`** instead. It hosts the same Bridge until you press **Ctrl+C**.
 
+Inspect traffic separately with **`wisp logs`**, then **`wisp log <session-id> -f`**. In the TUI, **`/show logs`** opens the same session picker, including chats handled by VS Code. See [session logging](docs/session-logs.md) for identity, privacy and retention limits.
+
 ## ChatGPT Desktop (Codex) bridge — experimental
 
 Wisp now brings your configured models into the signed-in Desktop model picker. Keep your native Codex models and add aliases for external models alongside them. Here's **Grok 4.7** selected through Wisp:
@@ -92,7 +94,7 @@ Native models keep their capabilities and ChatGPT sign-in. Voice uses your exist
 <details>
 <summary><strong>Try the Desktop bridge</strong></summary>
 
-Use terminal **2.2.10** with a matching Bridge, or companion VSIX **1.14.7** when VS Code hosts it. You'll also need an independently installed native Codex CLI. Read the [Desktop setup and rollback guide](docs/codex-desktop.md) first, especially if you already have custom Codex configuration or other clients sharing `CODEX_HOME`.
+Use terminal **2.2.11** with a matching Bridge, or companion VSIX **1.14.8** when VS Code hosts it. You'll also need an independently installed native Codex CLI. Read the [Desktop setup and rollback guide](docs/codex-desktop.md) first, especially if you already have custom Codex configuration or other clients sharing `CODEX_HOME`.
 
 With the Bridge running, use **`/gpt-desktop on`** in Wisp and restart Desktop. To turn routing off, use **`/gpt-desktop off`** and restart Desktop again. Neither command starts or stops the Bridge. Use fresh chats when switching to external models.
 

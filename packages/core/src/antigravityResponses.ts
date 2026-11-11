@@ -55,19 +55,27 @@ const scope = (p: Preflight, context: GeminiReplayContext): Buffer => Buffer.fro
   version: 1, provider: p.providerId, endpoint: p.baseUrl, model: p.model, alias: p.parsed.model, session: p.session,
   lifetime: context.lifetime, credentialBinding: context.credentialBinding, hoisting: p.hoisting,
 }));
-export const parseAntigravityNativeResult = (value: unknown, expectedModelVersion?: string) => {
+export const parseAntigravityNativeResult = (value: unknown, expectedModelVersion?: string, nativeModel?: string) => {
   const outer = object(value), result = object(outer.response ?? outer);
   check(expectedModelVersion === undefined || result.modelVersion === expectedModelVersion);
   check((result.modelVersion === undefined || (typeof result.modelVersion === 'string' && result.modelVersion.trim()))
     && Array.isArray(result.candidates) && result.candidates.length === 1);
   const candidate = object(result.candidates[0]), content = object(candidate.content), usage = object(result.usageMetadata);
-  check(candidate.finishReason === 'STOP' && content.role === 'model' && Array.isArray(content.parts) && content.parts.length);
+  check(content.role === 'model' && Array.isArray(content.parts) && content.parts.length);
   check(content.parts.every((part: unknown) => {
     const p = object(part);
     return p.functionResponse === undefined && p.inlineData === undefined && p.fileData === undefined
       && (p.thought === undefined || typeof p.thought === 'boolean')
       && (p.thoughtSignature === undefined || typeof p.thoughtSignature === 'string');
   }));
+  // Cloud Code ends Claude tool-use turns with OTHER; all other ambiguous stops stay rejected.
+  const calls = content.parts.filter((part: Item) => part.functionCall !== undefined);
+  check(candidate.finishReason === 'STOP' || (candidate.finishReason === 'OTHER'
+    && nativeModel?.startsWith('claude-') && result.modelVersion === nativeModel && calls.length > 0
+    && calls.every((part: Item) => {
+      const call = object(part.functionCall);
+      return typeof call.id === 'string' && !!call.id && typeof call.name === 'string' && !!call.name && !!object(call.args ?? {});
+    })));
   const prompt = usage.promptTokenCount, candidateTokens = usage.candidatesTokenCount,
     thoughts = usage.thoughtsTokenCount ?? 0, cached = usage.cachedContentTokenCount ?? 0;
   check([prompt, candidateTokens, thoughts, cached, prompt + candidateTokens + thoughts].every(n => Number.isSafeInteger(n) && n >= 0));

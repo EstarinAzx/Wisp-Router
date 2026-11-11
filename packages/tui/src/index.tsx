@@ -38,9 +38,9 @@ if (process.argv[2] === '--version') {
 } else if (process.argv[2] === 'snapshot') {
   const { runSnapshotCli } = await import('./snapshotCli');
   process.exitCode = runSnapshotCli(process.argv.slice(3));
-} else if (process.argv[2] === 'log') {
+} else if (process.argv[2] === 'log' || process.argv[2] === 'logs') {
   const { runLogCli } = await import('./bridgeLog');
-  process.exitCode = runLogCli(process.argv.slice(3));
+  process.exitCode = runLogCli(process.argv.slice(3), process.argv[2] === 'logs');
 } else if (process.argv[2] === 'providers') {
   const { runProvidersCli } = await import('./discoveryCli');
   process.exitCode = runProvidersCli();

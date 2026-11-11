@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { spawn } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { createServer } from 'net';
+import { createSessionLogger, listLogSessions, readSessionLog } from '@wisp/core';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
@@ -307,7 +308,7 @@ test('TUI Codex saved rows remain editable and clear/Esc return to Codex', () =>
   expect(result.code).toBe(0);
 });
 
-test('the TUI Bridge persists its log once it starts, preserving the previous run', () => {
+test('the TUI Bridge writes its own host stream and preserves legacy logs', () => {
   writeFileSync(join(home, 'config.json'), JSON.stringify({ bridge: { port: 0 } }));
   writeFileSync(join(home, 'bridge.log'), 'previous run\n');
   const result = run(['--eval', `
@@ -322,11 +323,10 @@ test('the TUI Bridge persists its log once it starts, preserving the previous ru
   `]);
   expect(result.code).toBe(0);
   expect(result.err).toBe('');
-  const log = readFileSync(join(home, 'bridge.log'), 'utf8');
-  expect(log).toContain('[bridge] listening');
-  expect(log).toContain('[bridge] stopped');
-  expect(log.match(/\[bridge\] listening/g)?.length).toBe(1);
-  expect(readFileSync(join(home, 'bridge.log.1'), 'utf8')).toBe('previous run\n');
+  expect(readFileSync(join(home, 'bridge.log'), 'utf8')).toBe('previous run\n');
+  const hosts = listLogSessions(home, true);
+  expect(hosts).toHaveLength(1);
+  expect(readSessionLog(hosts[0].id, home).map(e => e.event)).toEqual(['start', 'stop']);
 });
 
 test('a serve port collision leaves the active and previous logs intact', async () => {
@@ -354,61 +354,36 @@ const waitFor = async (ready: () => boolean) => {
   expect(ready()).toBe(true);
 };
 
-const followAcrossRotation = async (replacement: string, gapMs = 0) => {
-  const path = join(home, 'bridge.log');
-  writeFileSync(path, 'before\n');
-  const child = spawn(process.execPath, [entry, 'log', '-f'], {
+test.each([0, 650])('log -f follows a selected session across rotation, including a %sms gap', async gapMs => {
+  const request = createSessionLogger('vscode-chat', home).begin('native', 'follow-me');
+  request.finish('complete');
+  const path = join(home, 'sessions', `${request.id}.jsonl`);
+  const last = readSessionLog(request.id, home).at(-1)!;
+  const child = spawn(process.execPath, [entry, 'log', request.id, '--follow'], {
     cwd: root, env: { ...process.env, WISP_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let out = '';
-  let err = '';
-  child.stdout.on('data', (chunk) => { out += chunk; });
-  child.stderr.on('data', (chunk) => { err += chunk; });
-  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  let out = '', err = '';
+  child.stdout.on('data', chunk => { out += chunk; });
+  child.stderr.on('data', chunk => { err += chunk; });
+  const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
   try {
-    await waitFor(() => out.includes('before\n') || child.exitCode !== null);
+    await waitFor(() => out.includes('] complete') || child.exitCode !== null);
     expect(child.exitCode).toBe(null);
     renameSync(path, `${path}.1`);
-    // Keep the rotation gap open for two 300ms polls, so a missing-file crash cannot hide between ticks.
-    if (gapMs) await new Promise((resolve) => setTimeout(resolve, gapMs));
-    writeFileSync(path, replacement);
-    await waitFor(() => out.includes(replacement) || child.exitCode !== null);
-    expect(err).toBe('');
-    expect(child.exitCode).toBe(null);
-    expect(out).toContain(replacement);
-    expect(out.match(/before\n/g)?.length).toBe(1);
-  } finally {
-    child.kill();
-    await closed;
+    if (gapMs) await new Promise(resolve => setTimeout(resolve, gapMs));
+    writeFileSync(path, JSON.stringify({ ...last, sequence: last.sequence + 1, event: 'retry', attempt: 2 }) + '\n');
+    await waitFor(() => out.includes('attempt=2') || child.exitCode !== null);
+    expect(err).toBe(''); expect(child.exitCode).toBe(null);
+    expect(out.match(/\] complete/g)?.length).toBe(1);
+    expect(out).toContain('] retry attempt=2');
+  } finally { child.kill(); await closed; }
+});
+
+test('logs and bare log are renderer-free session lists without store writes', () => {
+  for (const command of ['log', 'logs']) {
+    const result = run([entry, command]);
+    expect(result.code).toBe(0); expect(result.err).toBe('');
+    expect(result.out).toContain('No recent chat sessions');
+    expect(readdirSync(home)).toEqual([]);
   }
-};
-
-test.each(['after!\n', 'after is longer\n'])('log -f reads a replacement file from the beginning: %s', async (replacement) => {
-  await followAcrossRotation(replacement);
-});
-
-test('log -f survives the missing-file gap during rotation', async () => {
-  await followAcrossRotation('after!\n', 650);
-});
-
-test.each([false, true])('log -f notices startup rotation without a later append (deferred: %s)', (deferred) => {
-  writeFileSync(join(home, 'bridge.log'), 'before\n');
-  const result = run(['--eval', `
-    import { renameSync, writeFileSync } from 'fs';
-    import { join } from 'path';
-    import { runLogCli } from './packages/tui/src/bridgeLog';
-    const path = join(process.env.WISP_HOME, 'bridge.log');
-    const rotate = () => { renameSync(path, path + '.1'); writeFileSync(path, 'after!\\n'); };
-    const write = process.stdout.write.bind(process.stdout);
-    process.stdout.write = (chunk, ...args) => {
-      const result = write(chunk, ...args);
-      if (String(chunk) === 'before\\n') ${deferred ? 'queueMicrotask(rotate)' : 'rotate()'};
-      return result;
-    };
-    runLogCli(['-f']);
-    setTimeout(() => process.exit(0), 1000);
-  `]);
-  expect(result.code).toBe(0);
-  expect(result.err).toBe('');
-  expect(result.out).toContain('before\nafter!\n');
 });

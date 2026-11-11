@@ -15,7 +15,7 @@ import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from '
 // ----------------------------- Run ----------------------------- //
 
 export const runServe = async (): Promise<void> => {
-  // The shared host persists engine lines. This banner carries the access SECRET and stays terminal-only.
+  // The shared host persists safe session events; this private banner stays terminal-only.
   const bridge = createTuiBridge(console.log);
   try {
     await bridge.start();
@@ -34,6 +34,7 @@ export const runServe = async (): Promise<void> => {
   console.log(`  Anthropic door: ${bridgeAddress()}  (Claude Code: ANTHROPIC_BASE_URL)`);
   console.log(`  Access secret:  ${ensureBridgeSecret()}`);
   console.log('');
+  console.log('  Logs: wisp logs, then wisp log <session-id> -f');
   console.log('  Ctrl+C to stop.');
 
   const shutdown = (): void => { bridge.stop(); process.exit(0); };

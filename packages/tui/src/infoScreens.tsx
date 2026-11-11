@@ -1,30 +1,12 @@
 // ---------------- infoScreens.tsx — the info Screens: /bridge facts + /help list + /show-log tail ---------------- //
 
-/*
- * Depends on:
- *   - react: useState/useEffect — LogScreen re-renders per pushed line while open (#122).
- *   - @wisp/core: SLASH_COMMANDS — /help renders FROM the shared registry (#82).
- *   - ./theme: ACCENT/DIM/PANEL/SELECT_COLORS — the shared look.
- *   - ./widgets: wrapWords — hand-wrapped panel copy.
- *   - ./logBuffer: RingLog — the Bridge log the Log Screen tails (#122).
- *
- * Data shapes:
- *   - BridgeScreen + HelpScreen are pure: BridgeScreen renders the 'bridge' Mode payload
- *     (address + secret frozen at bind time — ensureBridgeSecret's disk write must not live
- *     in JSX), HelpScreen takes only its close callback. LogScreen subscribes to the ring.
- *     The shell keeps the /bridge starter and Esc routing.
- *
- * Extracted from app.tsx with #119.
- */
+// Session screens poll the shared core store, including external hosts.
 
 import { useEffect, useState } from 'react';
-import { SLASH_COMMANDS } from '@wisp/core';
+import { SLASH_COMMANDS, listLogSessions, readSessionLog, formatSessionLog } from '@wisp/core';
 import { ACCENT, DIM, LOG_ROUTE, PANEL, PLUGIN_NUDGE, SELECT_COLORS } from './theme';
 import { wrapWords, SELECT_MOUSE } from './widgets';
-import type { RingLog } from './logBuffer';
-
-// Model-swap lines from bridgeServer's resolveRoute log — colour only these in /show-log.
-export const isRouteLogLine = (line: string): boolean => line.startsWith('[bridge] route ');
+import { sessionLabel, sessionDetail } from './bridgeLog';
 
 // Shared command output: hand-wrap before scrolling so narrow terminals retain every line.
 export const InfoScreen = ({ title, lines, cols, maxRows, pending }: { title: string; lines: string[]; cols: number; maxRows: number; pending?: boolean }) => {
@@ -93,29 +75,42 @@ export const BridgeScreen = ({ address, secret, cols }: { address: string; secre
 // The Bridge log tail (#122) — scrollbox stickyScroll gives auto-follow with scroll-to-pause
 // and a mouse-draggable native scrollbar; no SELECT_MOUSE needed (that's the <select> shim).
 // Long lines are hand-wrapped (opentui wrapMode overlays siblings) so model ids don't clip.
-export const LogScreen = ({ log, running, cols }: { log: RingLog; running: boolean; cols: number }) => {
-  // subscribe → tick: one re-render per pushed line while the Screen is open
-  const [, setTick] = useState(0);
-  useEffect(() => log.subscribe(() => setTick((t) => t + 1)), [log]);
-  const lines = log.lines();
+export const SessionListScreen = ({ onSelect }: { onSelect: (id: string) => void }) => {
+  const [sessions, setSessions] = useState(() => listLogSessions());
+  useEffect(() => { const timer = setInterval(() => setSessions(listLogSessions()), 1000); return () => clearInterval(timer); }, []);
+  return <box {...PANEL} title="Chat sessions" marginTop={1} padding={1} flexDirection="column">
+    <text wrapMode="none" fg={DIM}>Recent activity · last 30 minutes · all Wisp hosts</text>
+    {sessions.length ? <select focused {...SELECT_COLORS} {...SELECT_MOUSE}
+      height={Math.min(sessions.length * 2, 12)} showSelectionIndicator={false} showScrollIndicator
+      options={sessions.map(session => ({ name: sessionLabel(session), description: sessionDetail(session), value: session.id }))}
+      onSelect={(_, option) => { if (option?.value) onSelect(String(option.value)); }} />
+      : <text wrapMode="none" fg={DIM}>No recent chat sessions.</text>}
+    <text wrapMode="none" fg={DIM}>Enter opens · Esc closes · IDs are copyable</text>
+  </box>;
+};
+
+export const LogScreen = ({ id, cols }: { id: string; cols: number }) => {
+  const [entries, setEntries] = useState(() => readSessionLog(id));
+  useEffect(() => { setEntries(readSessionLog(id)); const timer = setInterval(() => setEntries(readSessionLog(id)), 500); return () => clearInterval(timer); }, [id]);
+  const lines = entries.filter(entry => entry.event !== 'heartbeat').slice(-200);
   // -2 = the panel's inner padding (same as BridgeScreen blurb wrap).
   const width = Math.max(cols - 2, 20);
   return (
-    <box {...PANEL} title="Bridge log" marginTop={1} padding={1} flexDirection="column">
+    <box {...PANEL} title="Session log" marginTop={1} padding={1} flexDirection="column">
       <text wrapMode="none" flexShrink={0}>
-        {running ? <span fg="#4ade80">● bridge up</span> : <span fg={DIM}>○ bridge not running — /bridge starts it</span>}
+        {id}
       </text>
       <scrollbox height={16} marginTop={1} stickyScroll stickyStart="bottom" scrollY>
         {lines.length === 0
-          ? <text wrapMode="none" fg={DIM}>{running ? 'No traffic yet.' : 'Nothing logged yet.'}</text>
-          : lines.flatMap((l, i) => {
-              const fg = isRouteLogLine(l) ? LOG_ROUTE : DIM;
-              return wrapWords(l, width).map((w, j) => (
-                <text key={`${i}-${j}`} wrapMode="none" flexShrink={0} fg={fg}>{w}</text>
+          ? <text wrapMode="none" fg={DIM}>Session unavailable or pruned.</text>
+          : lines.flatMap(entry => {
+              const fg = entry.event === 'route' ? LOG_ROUTE : DIM;
+              return wrapWords(formatSessionLog(entry), width).map((w, j) => (
+                <text key={`${entry.sequence}-${j}`} wrapMode="none" flexShrink={0} fg={fg}>{w}</text>
               ));
             })}
       </scrollbox>
-      <text wrapMode="none" fg={DIM} marginTop={1}>Esc closes — scroll up pauses follow, bottom resumes · buffer keeps collecting</text>
+      <text wrapMode="none" fg={DIM} marginTop={1}>Latest 200 events · Esc returns · scroll up pauses follow, bottom resumes</text>
     </box>
   );
 };

@@ -41,3 +41,4 @@ export * from './status';
 export * from './quota';
 export * from './quotaClient';
 export * from './slash';
+export * from './sessionLog';

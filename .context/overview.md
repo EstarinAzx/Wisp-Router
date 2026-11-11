@@ -11,6 +11,8 @@ tags: [context, overview]
 
 Detailed task receipts remain in Traycer; the current baton gives their identifiers and public release links. Historical decisions and investigation notes retain their original dates and are not instructions to restart completed or closed work.
 
+Project review policy: [[review-policy]] (CodeRabbit mode on, khitarashi's 2026-11-12 instruction). Current checkpoint scope and budgets are linked from [[active-work]].
+
 **Project:** wisp
 **One-liner:** Wisp is a model router with a terminal UI, a shared local Bridge, Claude/Codex launchers and a VS Code companion. See the root README for current user-facing behavior and `CONTEXT.md` for domain terminology. The layout below is a navigation map; versioned history belongs in changelogs and [[decisions]].
 
@@ -57,6 +59,8 @@ See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
 - Arrow functions by default (project `CLAUDE.md` rule); regular `function` only where `this`/hoisting/generators require it.
 - Source files follow an "elucidate" house style: a title banner, a file-top `Depends on / Data shapes` block, section banners, and sparse why-comments. Match it when editing any `packages/*/src` file.
 - API keys/OAuth tokens are **never** in VS Code settings — they live in owner-only `~/.wisp/auth.json` (ADR-0002, #59; retired SecretStorage) with per-provider env fallbacks (`OPENCODE_API_KEY`, …).
+
+Shared session diagnostics live in `packages/core/src/sessionLog.ts`; the CLI and TUI read the same filesystem store without starting a Bridge. Native VS Code and both Bridge hosts write safe events. See `docs/session-logs.md` for identities, retention and operational limits.
 
 ## Map
 

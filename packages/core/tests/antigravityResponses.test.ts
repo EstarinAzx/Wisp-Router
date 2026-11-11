@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { antigravityStreamEvents, buildAntigravityRequestBody, hoistAntigravityDesktopInstructions, validateAntigravityFunctionCallPairing } from '../src/antigravity';
 import { createResponsesEncoder, parseDesktopResponsesRequest, parseResponsesRequest } from '../src/bridgeResponses';
+import { parseAntigravityNativeResult } from '../src/antigravityResponses';
+
+it('keeps the default Responses validator strict about ambiguous terminal reasons', () => {
+  const result = { modelVersion: 'claude-opus-5-5-high', candidates: [{ finishReason: 'OTHER', content: { role: 'model',
+    parts: [{ functionCall: { id: 'original', name: 'read_file', args: {} } }] } }],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } };
+  expect(() => parseAntigravityNativeResult(result)).toThrow();
+  expect(() => parseAntigravityNativeResult(result, 'gemini-4-argon')).toThrow();
+});
 
 it('projects the retained Desktop declaration topology onto the Antigravity wire', () => {
   // Reuse codexDesktop.test.ts's sanitized captured topology, not a new capture or upstream acceptance.

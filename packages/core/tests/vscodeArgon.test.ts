@@ -58,7 +58,8 @@ const setup = (model = 'gemini-4-argon-high') => {
     signOut: () => { creds = {}; }, renew: () => { creds = { ...creds, accessToken: 'renewed-access' }; } };
 };
 // Copilot stores the marker string separately, then reconstructs modelId + backslash + marker on input.
-const persistedAssistant = (parts: any[]) => message(2, ...parts.filter(p => !(p instanceof vscode.LanguageModelDataPart) || p.mimeType === 'stateful_marker').map(p => {
+const persistedAssistant = (parts: any[]) => message(2, ...parts.filter(p => !(p instanceof vscode.LanguageModelThinkingPart)
+  && (!(p instanceof vscode.LanguageModelDataPart) || p.mimeType === 'stateful_marker')).map(p => {
   if (p instanceof vscode.LanguageModelDataPart) {
     const marker = Buffer.from(p.data).toString('utf8').split('\\')[1];
     return new vscode.LanguageModelDataPart(Buffer.from('wisp/antigravity\\' + JSON.parse(JSON.stringify(marker))), p.mimeType);
@@ -69,7 +70,103 @@ const persistedAssistant = (parts: any[]) => message(2, ...parts.filter(p => !(p
 const followup = (parts: any[]) => [...firstMessages(), persistedAssistant(parts), message(1, text('Continue'))];
 const localHeader = (parts: any[]) => message(2, ...persistedAssistant(parts).content.filter(p => p instanceof vscode.LanguageModelDataPart));
 
+// Agent Host exports markers as response IDs; the SDK retains encrypted reasoning in full history.
+// Source: VS Code 69047191fc, AgentHostByokLmHandler + byokResponsesTranslation.
+const sdkAssistant = (parts: any[]) => message(2, ...parts.flatMap(part => {
+  if (part instanceof vscode.LanguageModelThinkingPart) {
+    const saved = JSON.parse(JSON.stringify({ encrypted_content: part.metadata?.encrypted_content }));
+    return [new vscode.LanguageModelThinkingPart([], 'rs_sdk', { encrypted_content: saved.encrypted_content })];
+  }
+  return part instanceof vscode.LanguageModelTextPart || part instanceof vscode.LanguageModelToolCallPart ? [part] : [];
+}));
+
 describe('Argon native VS Code chat', () => {
+  it('accepts Claude terminal OTHER tool use and restores its exact calls on SDK continuation', async () => {
+    const model = 'claude-opus-5-5-high', h = setup(model);
+    next = result(callParts()); next.response.modelVersion = model; next.response.candidates[0].finishReason = 'OTHER';
+    const first = await h.send();
+    expect(first.filter(p => p instanceof vscode.LanguageModelToolCallPart).map(p => p.callId)).toEqual(['original-a', 'original-b']);
+    next = result([{ text: 'Done' }]); next.response.modelVersion = model;
+    await h.send([...firstMessages(), sdkAssistant(first), message(1,
+      new vscode.LanguageModelToolResultPart('original-a', [text('A')]),
+      new vscode.LanguageModelToolResultPart('original-b', [text('B')]))]);
+    expect(requests[1].body.request.contents[1].parts).toEqual(callParts());
+  });
+  it.each(['plain text', 'wrong model', 'missing id', 'invalid args', 'unknown tool', 'missing usage', 'MAX_TOKENS', 'SAFETY', 'MALFORMED_FUNCTION_CALL'])
+  ('refuses Claude OTHER with %s before exposing output', async kind => {
+    const model = 'claude-opus-5-5-high', h = setup(model);
+    next = result(callParts()); next.response.modelVersion = model; next.response.candidates[0].finishReason = 'OTHER';
+    if (kind === 'plain text') next.response.candidates[0].content.parts = [{ text: 'Ambiguous completion' }];
+    if (kind === 'wrong model') next.response.modelVersion = 'gemini-4-carbon-high';
+    if (kind === 'missing id') delete next.response.candidates[0].content.parts[2].functionCall.id;
+    if (kind === 'invalid args') next.response.candidates[0].content.parts[2].functionCall.args = 'partial JSON';
+    if (kind === 'unknown tool') next.response.candidates[0].content.parts[2].functionCall.name = 'unoffered';
+    if (kind === 'missing usage') delete next.response.usageMetadata;
+    if (['MAX_TOKENS', 'SAFETY', 'MALFORMED_FUNCTION_CALL'].includes(kind)) next.response.candidates[0].finishReason = kind;
+    await expect(h.send()).rejects.toThrow(/incomplete or unsupported/i);
+    expect(h.output).toEqual([]);
+  });
+  it('does not accept OTHER tool use from a non-Claude native model', async () => {
+    const h = setup(); next = result(callParts()); next.response.candidates[0].finishReason = 'OTHER';
+    await expect(h.send()).rejects.toThrow(/incomplete or unsupported/i);
+    expect(h.output).toEqual([]);
+  });
+  it('restores SDK full-history turns from encrypted reasoning without a previous-response marker', async () => {
+    const h = setup('gemini-4-carbon-high'); next = result(callParts());
+    const first = await h.send();
+    const results = message(1, new vscode.LanguageModelToolResultPart('original-a', [text('A')]),
+      new vscode.LanguageModelToolResultPart('original-b', [text('B')]));
+    next = result([{ text: 'Done', thoughtSignature: 'private-final-signature' }]);
+    const second = await h.send([localHeader(first), message(3, text('Keep system instructions.')), results]);
+    const history = [...firstMessages(), sdkAssistant(first), results, sdkAssistant(second), message(1, text('Next user turn'))];
+    next = result([{ text: 'Continued' }]);
+    const output = await h.send(history);
+    expect(output.filter(p => p instanceof vscode.LanguageModelTextPart)).toEqual([text('Continued')]);
+    expect(requests[2].body.request.contents[1].parts).toEqual(callParts());
+    expect(requests[2].body.request.contents[3].parts).toEqual([{ text: 'Done', thoughtSignature: 'private-final-signature' }]);
+    const carrier = first.find(p => p instanceof vscode.LanguageModelThinkingPart);
+    expect(carrier.value).toEqual([]);
+    expect(JSON.stringify(carrier)).not.toMatch(/private-reasoning|private-thought-signature|synthetic-refresh/);
+    expect(await h.chat.provideTokenCount({ id: 'antigravity' }, sdkAssistant(first))).toBeGreaterThanOrEqual(carrier.metadata.encrypted_content.length);
+  });
+  it.each(['missing', 'ciphertext', 'text', 'session', 'tier', 'account', 'summary', 'oversize'])
+  ('refuses %s SDK history before transport or credential refresh', async kind => {
+    const h = setup(), parts = await h.send(), assistant = sdkAssistant(parts);
+    const carrier = assistant.content.find(p => p instanceof vscode.LanguageModelThinkingPart) as vscode.LanguageModelThinkingPart;
+    if (kind === 'missing') assistant.content = assistant.content.filter(p => p !== carrier);
+    if (kind === 'ciphertext') carrier.metadata!.encrypted_content = String(carrier.metadata!.encrypted_content).slice(0, -8) + 'tampered';
+    if (kind === 'text') (assistant.content.find(p => p instanceof vscode.LanguageModelTextPart) as vscode.LanguageModelTextPart).value = 'altered';
+    if (kind === 'summary') carrier.value = ['unverified thinking'];
+    if (kind === 'oversize') carrier.metadata!.encrypted_content = 'x'.repeat(92000);
+    if (kind === 'account') h.changeAccount();
+    const active = kind === 'tier' ? setup('gemini-4-argon-low') : h;
+    const refreshed = active.refreshed.mock.calls.length;
+    await expect(active.send([...firstMessages(), assistant, message(1, text('Next'))],
+      kind === 'session' ? { modelOptions: { _conversationId: 'other-session' } } : {})).rejects.toThrow(/Antigravity/i);
+    expect(requests).toHaveLength(1); expect(active.output).toEqual([]); expect(active.refreshed.mock.calls.length).toBe(refreshed);
+  });
+  it('accepts matching dual carriers but refuses conflicting or duplicated SDK packets', async () => {
+    const h = setup(), first = await h.send(), second = await h.send();
+    const thinking = first.find(p => p instanceof vscode.LanguageModelThinkingPart);
+    const dual = persistedAssistant(first); dual.content.push(thinking);
+    await h.send([...firstMessages(), dual, message(1, text('Continue'))]);
+    expect(requests).toHaveLength(3);
+    dual.content[dual.content.length - 1] = second.find(p => p instanceof vscode.LanguageModelThinkingPart);
+    await expect(h.send([...firstMessages(), dual, message(1, text('Next'))])).rejects.toThrow(/Antigravity/i);
+    const duplicate = sdkAssistant(first); duplicate.content.push(thinking);
+    await expect(h.send([...firstMessages(), duplicate, message(1, text('Next'))])).rejects.toThrow(/Antigravity/i);
+    await expect(h.send([...firstMessages(), sdkAssistant(first), message(1, text('Again')), sdkAssistant(first), message(1, text('Next'))])).rejects.toThrow(/Antigravity/i);
+    expect(requests).toHaveLength(3);
+  });
+  it('keeps original SDK tool IDs and arguments authenticated', async () => {
+    const h = setup(); next = result(callParts()); const parts = await h.send();
+    const assistant = sdkAssistant(parts);
+    (assistant.content.find(p => p instanceof vscode.LanguageModelToolCallPart) as vscode.LanguageModelToolCallPart).input = { path: 'changed.ts' };
+    await expect(h.send([...firstMessages(), assistant, message(1,
+      new vscode.LanguageModelToolResultPart('original-a', [text('A')]),
+      new vscode.LanguageModelToolResultPart('original-b', [text('B')]))])).rejects.toThrow(/Antigravity/i);
+    expect(requests).toHaveLength(1); expect(h.output).toEqual([]);
+  });
   it.each(['low', 'medium', 'high'])('advertises the signed-in Argon %s tier with truthful capabilities', async tier => {
     const rows = await setup(`gemini-4-argon-${tier}`).chat.provideLanguageModelChatInformation();
     expect(rows).toHaveLength(1); expect(rows[0].capabilities.toolCalling).toBe(true);
