@@ -122,10 +122,11 @@ export async function* sseBlocks(body: ReadableStream<Uint8Array>): AsyncGenerat
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let exhausted = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) { exhausted = true; break; }
       buffer += decoder.decode(value, { stream: true });
       const blocks = buffer.split(SSE_BLOCK_SEPARATOR);
       buffer = blocks.pop() ?? ''; // last element is the incomplete tail — carry it forward
@@ -133,7 +134,10 @@ export async function* sseBlocks(body: ReadableStream<Uint8Array>): AsyncGenerat
     }
     if (buffer.trim()) yield buffer; // a stream that ended without a trailing blank line
   } finally {
-    reader.releaseLock();
+    try {
+      // Cancellation may never settle; initiate it without holding the consumer or reader lock open.
+      if (!exhausted) void reader.cancel().catch(() => {});
+    } finally { reader.releaseLock(); }
   }
 }
 

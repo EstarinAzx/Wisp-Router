@@ -626,9 +626,11 @@ export const runAdvisorLoop = async function* (params: AdvisorLoopParams): Async
   // generate); a client tool call or a plain end_turn leaves it false and the loop stops.
   for (;;) {
     let acc = '';                                    // text this pass — carried into the continuation history
+    const passEvents: BridgeStreamEvent[] = [];
     let consult: AssembledToolCall | undefined;      // the advisor call this pass, if any
     let clientTool = false;                          // a non-advisor tool ended the turn
     for await (const ev of params.basePass(turns)) {
+      passEvents.push(ev);
       if ((ev.type === 'tool_call') && ev.call.name === 'advisor') { consult = ev.call; break; }
       if (ev.type === 'tool_call') { clientTool = true; yield ev; continue; }
       if (ev.type === 'text') acc += ev.text;
@@ -652,9 +654,11 @@ export const runAdvisorLoop = async function* (params: AdvisorLoopParams): Async
     consults++;
 
     // Feed the exchange back so the Target resumes with the advice (or the error) in context.
+    const content = buildAnthropicMessageResponse(passEvents, { id: '', model: '' }).content;
+    const hasThinking = content.some(b => b.type === 'thinking' || b.type === 'redacted_thinking');
     turns = [
       ...turns,
-      { role: 'assistant', text: acc, toolCalls: [{ id: consult.id, name: 'advisor', argsJson: consult.argsJson }], toolResults: [] },
+      { role: 'assistant', text: acc, toolCalls: [{ id: consult.id, name: 'advisor', argsJson: consult.argsJson }], toolResults: [], ...(hasThinking ? { rawContent: content } : {}) },
       { role: 'user', text: '', toolCalls: [], toolResults: [{ callId: consult.id, content: advice, ...(failed ? { isError: true } : {}) }] },
     ];
     if (consults >= maxConsults) return;             // safety cap — stop starting new passes

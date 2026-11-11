@@ -211,14 +211,15 @@ export const finishGeminiResponses = (p: ReturnType<typeof prepareGeminiReplay>,
   const items = visible(result, p);
   const carrier = { type: 'reasoning', summary: [], encrypted_content: PREFIX + sealGeminiReplay({ v: 1, binding: binding(p, p.input), result }, p.context, scope(p, p.context)) };
   const output: Item[] = [carrier, ...items].map((item, index) => ({ ...item, id: `${id}_${index}`, ...(index ? { status: 'completed' } : {}) }));
-  const usage = result.usage && {
-    ...(result.usage.total_input_tokens === undefined ? {} : { input_tokens: result.usage.total_input_tokens }),
-    ...(result.usage.total_output_tokens === undefined ? {} : { output_tokens: result.usage.total_output_tokens }),
-    ...(result.usage.total_tokens === undefined ? {} : { total_tokens: result.usage.total_tokens }),
+  const usage = result.usage && result.usage.total_input_tokens !== undefined &&
+    result.usage.total_output_tokens !== undefined && result.usage.total_tokens !== undefined ? {
+    input_tokens: result.usage.total_input_tokens,
+    output_tokens: result.usage.total_output_tokens,
+    total_tokens: result.usage.total_tokens,
     ...(result.usage.total_cached_tokens === undefined ? {} : { input_tokens_details: { cached_tokens: result.usage.total_cached_tokens } }),
-  };
+  } : undefined;
   const response: Item = { id, object: 'response', created_at: Math.floor(Date.now() / 1000), model: p.parsed.model, status: 'completed', output,
-    ...(usage && Object.keys(usage).length ? { usage } : {}) };
+    ...(usage ? { usage } : {}) };
   return { response, frames: completedResponseFrames(response) };
 };
 
