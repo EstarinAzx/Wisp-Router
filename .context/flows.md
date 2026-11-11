@@ -108,6 +108,25 @@ tags: [flows]
 6. **Antigravity arm** `bridgeServer.ts:698` — `standardEffortToAntigravity(effort)` (`shared.ts`, folds `xhigh`/`max`→`high`, because this wire's own client offers exactly three stops) → `antigravityClient.ts` → `buildAntigravityRequestBody` → `applyAntigravityThinkingLevel` runs LAST and emits `request.generationConfig.thinkingConfig = {thinkingLevel, includeThoughts:true}` — but **only for `-tiered` rows** (`antigravityAcceptsThinkingLevel`, a suffix shape test). Every other id pins its depth in the name (`gemini-3.6-flash-low|-medium|-high` are three models), and Wisp lists all 21 flat, so there the user already chose the tier by choosing the row.
 7. **Panel ladder** `catalog.ts:522` `effortOptionsFor` — Anthropic offers `low..max`, Grok and everything else `low..xhigh`; Antigravity is never asked (only Codex/Anthropic/Grok call it), so the Antigravity tier rides the Bridge path alone, never a panel control.
 
+## Historical Antigravity discovery (2026-10-14)
+
+Historical observation, preserved from the previous main checkout. Later releases and the native Argon work below supersede its support limits; it grants no new live-probe allowance.
+
+- **Question:** Why does Antigravity CLI show Gemini 4 Argon while Wisp does not? **Lens:** bug
+- **Summary:** Wisp's live discovery returned no Argon IDs; its parser preserves the native CLI's three Argon IDs when supplied. Signed Desktop separately admits only Gemini 3.8 Flash.
+- **Entry:** packages/tui/src/modelFetch.ts:35 and packages/vscode/src/extension.ts:273
+- **Key files:** packages/core/src/antigravityClient.ts, packages/core/src/antigravity.ts, packages/core/src/codexDesktop.ts, packages/tui/src/modelFetch.ts, packages/vscode/src/extension.ts
+- **Updated:** 2026-10-14
+
+### Hops and evidence
+1. TUI `fetchModelList` and VS Code `antigravityModelIds` prefer live discovery, then use the static fallback on failure/empty results; VS Code additionally times out after four seconds.
+2. `antigravityClient.ts:150` sends the stored Wisp token/project to `/v1internal:fetchAvailableModels` using the existing header and host chain. A single default-host diagnostic returned HTTP 200 and 19 parsed IDs, none Argon.
+3. `antigravity.ts:1065` filters only `tab_*` and numbered `chat_*` rows. An offline check preserved all three `gemini-4-argon-low|medium|high` IDs returned by native `agy models` on CLI 1.3.4.
+4. `codexDesktop.ts:12` admits only `gemini-3.8-flash-tiered`. An offline check confirms all three Argon IDs remain excluded even with instruction hoisting enabled.
+- **Limits:** No Argon generation, account-identity comparison, header-version comparison or new adapter qualification. The observations do not prove which upstream entitlement/client difference explains the catalogs.
+- **Detailed receipt:** Traycer task `1702a7c7-a431-43c2-ab5f-79d9cf189643`, artifact `release-228-options/argon-discovery/index.md`.
+
+
 ## VS Code Antigravity panel — single model, false key error and missing account controls
 - **Question:** Why does the VS Code Antigravity panel show only one model and have no sign-in/sign-out controls while the terminal shows the catalog? **Lens:** bug
 - **Summary:** The extension fetches Antigravity modelOptions, but the webview excludes its kind from the branch consuming that list; refresh uses API-key discovery instead, and a separate terminal-only account branch omits both account buttons.
