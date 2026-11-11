@@ -45,7 +45,7 @@ export const events = (root: string): any[] => fs.existsSync(path.join(root, 'ev
 export const frames = (root: string): any[] => fs.existsSync(path.join(root, 'acceptance', receiptName))
   ? fs.readFileSync(path.join(root, 'acceptance', receiptName), 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s)) : [];
 export const makeFixture = () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wisp-argon-a3-'));
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'wisp-argon-a3-'));
   journal(root, 'fixture-created');
   fs.mkdirSync(path.join(root, 'source')); fs.writeFileSync(path.join(root, 'source', 'fixture.txt'), 'reviewed synthetic source');
   fs.writeFileSync(path.join(root, 'operator.mjs'), 'synthetic bundled operator'); fs.writeFileSync(path.join(root, 'runtime'), 'synthetic pinned runtime');
@@ -72,7 +72,7 @@ export const makeFixture = () => {
   return { root, home, context, keys, binding, fixture, grant: encodeGrant(binding, keys.privateKey) };
 };
 export const removeFixture = (root: string) => {
-  const full = path.resolve(root), parent = path.resolve(os.tmpdir());
+  const full = path.resolve(root), parent = fs.realpathSync.native(os.tmpdir());
   if (path.dirname(full) !== parent || !path.basename(full).startsWith('wisp-argon-a3-')) throw Error('unsafe fixture cleanup');
   const receipt = path.join(full, 'acceptance', receiptName);
   if (fs.existsSync(receipt) && fs.lstatSync(receipt).isFile()) journal(full, 'receipt-final', { raw: fs.readFileSync(receipt, 'utf8') });

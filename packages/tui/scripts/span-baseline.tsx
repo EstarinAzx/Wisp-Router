@@ -18,8 +18,8 @@
  * sandboxed store, stubbed network, stubbed OAuth sign-in, provider env keys scrubbed.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { sandbox } from './span-sandbox';
+import { readFileSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { act as reactAct } from 'react';
@@ -31,10 +31,11 @@ import type { TestRendererSetup } from '@opentui/core/testing';
 
 // Sandbox WISP_HOME with representative payloads: a keyed Provider (stored key), a signed-in OAuth
 // Provider, a routed Family, one Alias, a fixed bridge port + secret. Real ~/.wisp is never touched.
-const sandbox = mkdtempSync(join(tmpdir(), 'wisp-span-'));
-process.env.WISP_HOME = sandbox;
 
 // Env keys leak real machine state into keyStatus rows — scrub every catalog env var.
+let exitCode = 0;
+let destroy = () => {};
+try {
 for (const p of PROVIDERS) if (p.apiKeyEnv) delete process.env[p.apiKeyEnv];
 
 writeFileSync(join(sandbox, 'config.json'), JSON.stringify({
@@ -103,6 +104,7 @@ const update = process.argv.includes('--update');
 // kittyKeyboard: a legacy lone-ESC byte is an ambiguous sequence prefix the parser sits on —
 // kitty encoding makes Esc land as a real keypress.
 const setup = await testRender(<App />, { width: 100, height: 40, kittyKeyboard: true });
+destroy = () => { reactAct(() => setup.renderer.destroy()); };
 const { mockInput, waitForFrame } = setup;
 
 const frames: Record<string, string[]> = {};
@@ -228,6 +230,12 @@ await esc();
 await see('Routing map', 'routing-back');
 await arrow('down');
 await enter();
+await see('Span Codex', 'routing-codex');
+await esc();
+await see('Routing map', 'routing-after-codex');
+await arrow('down');
+await arrow('down');
+await enter();
 await see('Add alias', 'routing-aliases');
 await enter();
 await see('Rename alias', 'route-provider-alias');
@@ -260,7 +268,7 @@ if (update) {
 } else {
   let baseline: Record<string, string[]>;
   try { baseline = JSON.parse(readFileSync(baselinePath, 'utf8')); }
-  catch { console.error(`no baseline at ${baselinePath} — run with --update first`); process.exit(2); }
+  catch { throw new Error(`no baseline at ${baselinePath} — run with --update first`); }
   const names = new Set([...Object.keys(baseline), ...Object.keys(frames)]);
   for (const name of names) {
     const want = baseline[name];
@@ -277,6 +285,13 @@ if (update) {
   console.log(failed ? 'span drift detected' : `all ${names.size} Screens match the baseline`);
 }
 
-setup.renderer.destroy();
-rmSync(sandbox, { recursive: true, force: true });
-process.exit(failed ? 1 : 0);
+exitCode = failed ? 1 : 0;
+} catch (error) {
+  console.error(error);
+  exitCode = 1;
+} finally {
+  try { destroy(); }
+  catch (error) { console.error(error); exitCode = 1; }
+  finally { rmSync(sandbox, { recursive: true, force: true }); }
+}
+process.exit(exitCode);
