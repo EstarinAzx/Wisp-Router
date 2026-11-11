@@ -65,7 +65,13 @@ not passing live Local/forced-tool claims. Core2120/TUI187, typechecks/build pas
 - [x] Run full core tests, TUI tests, package typechecks, extension/webview build; package VSIX and Windows binary and run existing isolated smokes. Retain command exits and source identities.
 - [x] Complete CodeRabbit for new release-prep bytes; reuse matching completed source reviews. Verify final source tree matches tested/reviewed bytes.
 - [x] Integrate authorized commits into remote main through existing GitHub policy; reconcile remote changes and rerun affected checks if needed. Return this checkout to main. Confirm CI, clean intended working tree and exact remote revision.
-- [ ] Refresh baton, retain review/evidence links, and transfer ownership to a fresh verified root/main chat using PREPARE/READY/ACTIVATE. Final owner verifies readiness and presents the result. No tag/publication.
+- [x] Refresh baton, retain review/evidence links, and transfer ownership to a fresh verified root/main chat using PREPARE/READY/ACTIVATE. Final owner verifies readiness and presents the result. No tag/publication.
+
+Final acceptance: root515709ef, relay leg5, verified the primary checkout and matching remote main,
+50 reviewed product/doc paths plus unchanged review instructions, both package SHA-256 values,
+clean VSIX bundle identity, four-platform CI43111319990 and completed CodeRabbit evidence.
+Only the three recorded context/plan status files changed after tested5fdcc7f; no suites or reviews
+were repeated. Exact final revision and limits: local `.claude/wisp-2.2.11/final-readiness-receipt.json`.
 
 ## Initial plan check
 

@@ -8,22 +8,22 @@ tags: [context, active-work, session-logs, vscode]
 # Active Work
 
 _Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Tested product commit: 5fdcc7fb9824bf29d2a8ce016624555b155586aa. PR233 merge: 255afa6c14499998e5bc047963e8283898e540cf (identical tree). Exact final main revision: local `.claude/wisp-2.2.11/unit3-receipt.json`._
+_Tested product commit: 5fdcc7fb9824bf29d2a8ce016624555b155586aa. PR233 merge: 255afa6c14499998e5bc047963e8283898e540cf (identical tree). Exact accepted main revision: local `.claude/wisp-2.2.11/final-readiness-receipt.json`; Unit3 receipt preserves the pre-transfer revision._
 
 ## Current focus
 
-Wisp **2.2.11** / companion **1.14.8** is implemented, packaged, reviewed and merged into remote main through [PR233](https://github.com/EstarinAzx/Wisp-Router/pull/233). The remaining acceptance is **final verification and readiness presentation by a fresh ownership-transferred root chat**. No publication, tag or real-client installation/restart is authorized.
+Wisp **2.2.11** / companion **1.14.8** is release-ready on remote main through [PR233](https://github.com/EstarinAzx/Wisp-Router/pull/233), with the qualification limits below. Fresh root `515709ef-f87f-4124-ac93-05ff3491aba1` accepted ownership through PREPARE/READY/ACTIVATE and verified source identity, package hashes, completed reviews and CI. No publication, tag or real-client installation/restart is authorized.
 
 ## Work contract
 
 - **Authority:** khitarashi, 2026-11-12, root4cbf4b5f-18e7-4f99-84e1-31a6607f68cc: full autonomous engineering, CodeRabbit ON, root relays, primary checkout only/no worktrees, integrate main and leave release-ready in a fresh ownership-transferred main chat. Approval excerpt/spec links: local `.claude/relay/wisp-2.2.11.body.md`.
 - **Requirements:** `docs/superpowers/specs/2026-11-12-session-logs-copilot-design.md`; plan `docs/superpowers/plans/2026-11-12-session-logs-copilot.md`. Completed units stay complete.
-- **Execution:** one inline root owner; local `.claude/relay/wisp-2.2.11.traycer.json` owns identity/phase. N=1 meaningful unit per leg, max20. Only matching ACTIVATE grants ownership; preserve GUI settings.
+- **Execution:** final root `515709ef-f87f-4124-ac93-05ff3491aba1`, relay leg5. Local `.claude/relay/wisp-2.2.11.traycer.json` owns terminal status; the accepted root has unchanged GUI settings and the same primary checkout. No further implementation leg.
 - **Review:** [[review-policy]] on. Single budget ledger is the relay body: logging **passed4/5**, Copilot **passed1/3**, release-prep **passed1/3**. User explicitly extended only the logging cap3->5 for the stale-heading fix in rootcb1a1fa4 on2026-11-12. No pending review or unresolved blocker. Source/instruction manifests and dispositions: `review-3/`, `heading-review-4/`, `copilot-review-1/`, `release-review-1/` under local `.claude/wisp-2.2.11/`. Reuse matching reviews; never reset budgets.
 - **Integration:** versioned context/docs; ignored local evidence/relay. Main integration authorized and complete. No publication/tagging, actual-client installation/restart, historical cleanup or worktrees.
-- **Evidence:** local `.claude/wisp-2.2.11/unit{1,2,3}-receipt.json`; final checks `heading-fix-checks.json`, package receipts `release-package-receipt.json` / `heading-fix-package.json`; final CI `release-ci-final.json`; content identity `release-final-review-coverage.json`. Status-only context/plan changes do not alter product or review instructions.
-- **Pending:** only final root transfer/readiness acceptance; relay JSON carries its IDs/thread. No worker, CLI/remote review, verification shell or disposable test host remains pending.
-- **Checkpoint:** substantive Unit3 complete. Source5fdcc7f passed local gates and four-platform CI, then merged unchanged. Verify receipt/current remote before any action; do not reopen the completed work.
+- **Evidence:** local `.claude/wisp-2.2.11/final-readiness-receipt.json` records fresh acceptance; `unit{1,2,3}-receipt.json` retain implementation evidence. Final checks `heading-fix-checks.json`, packages `release-package-receipt.json` / `heading-fix-package.json`, CI `release-ci-final.json`, content identity `release-final-review-coverage.json`. Only the three recorded context/plan status files differ from tested source.
+- **Pending:** none. No worker, CLI/remote review, verification shell or disposable test host remains pending.
+- **Checkpoint:** all three units and fresh-root acceptance complete. Source5fdcc7f passed local gates and four-platform CI, then merged unchanged. Fresh verification matched all50 product/doc paths and review instructions, both package hashes and the clean VSIX bundle; unchanged suites/reviews were reused, not rerun.
 
 ## Verified state
 
@@ -36,13 +36,13 @@ Wisp **2.2.11** / companion **1.14.8** is implemented, packaged, reviewed and me
 
 ## Limits and preservation
 
-Classic Local isolated UI required GitHub sign-in and stopped before transport; its real API synthetic continuation checks passed. Direct Claude forced ANY tool choice returned HTTP400; automatic tools passed. All variants, live compaction, full-window generation and every model/tool combination remain unqualified. Existing broken chats need a new chat.
+Classic Local isolated UI required GitHub sign-in and stopped before transport; synthetic continuation checks through the actual host API passed with provider network disabled. Direct Claude forced ANY tool choice returned HTTP400; automatic tools passed. All variants, live compaction, full-window generation and every model/tool combination remain unqualified. Existing broken chats need a new chat.
 
 All disposable test hosts stopped and temporary Wisp credential copies removed. SYSTEM-only Git askpass remnants remain at exact paths in `copilot-cleanup.json`; leave ACLs and unrelated cleanup alone. The installed host's pre-existing integrity warning was not repaired. Real auth/settings, permissions, hook trust, running clients,233 excluded historical files and the old worktree are preserved. Desktop protocol5 and wisp-slot1.7.5 are unchanged.
 
 ## Pick up here
 
-After matching ACTIVATE, validate ownership and the Unit3 receipt. Verify local main equals remote main, only recorded context/plan status updates differ from tested5fdcc7f, package hashes/review coverage/CI match and no work is pending. Present readiness and limits from this fresh root; then mark the relay stopped/completed after acceptance is established. No publishing/tagging/installing/restarting. Use pinned task-scratch `bun-1.4.2/bun.exe` only if changed source requires rechecking; core OAuth tests run serially. Final plan checkbox is this fresh-root acceptance, not new implementation.
+No active work. Release preparation and fresh-root acceptance are complete; publication/tagging and client installation/restart require a separate user request. Read the final receipt and these qualification limits before any release task. Preserve completed reviews and budgets; do not restart the relay or repeat unchanged suites.
 
 ## Related
 
