@@ -446,7 +446,7 @@ export const runSyntheticArgonAcceptance = async (grantBytes: Uint8Array, fixtur
   try {
     check(fixture.apiKey === 'SYNTHETIC_ARGON_A3_DO_NOT_USE' && typeof fixture.fetch === 'function' && fixture.fetch !== globalThis.fetch
       && typeof fixture.root === 'string' && path.isAbsolute(fixture.root)
-      && samePath(path.dirname(fixture.root), os.tmpdir()) && path.basename(fixture.root).startsWith('wisp-argon-a3-'), 'synthetic-only');
+      && samePath(path.dirname(fixture.root), fs.realpathSync.native(os.tmpdir())) && path.basename(fixture.root).startsWith('wisp-argon-a3-'), 'synthetic-only');
     const grant = verifyArgonGrant(grantBytes, fixture.publicKey, fixture.expected);
     return await run(grant, { home: fixture.root, signal: fixture.signal, fixtureCredential: fixture.apiKey, fetch: fixture.fetch, now: fixture.now ?? (() => performance.now()),
       claim: () => openReceipt(grant, fixture.root),

@@ -191,33 +191,41 @@ export const App = () => {
     setMode({ kind: 'routing-section', section });
   };
 
-  // Persist one row's new Target through core's pure edits. A refusal (only reachable if a Provider
-  // id slipped past the alias-name precheck) persists nothing.
-  const applyRoute = (row: RouteRow, target: Target) => {
-    const map = routingMap();
-    const next = row.kind === 'family'
-      ? withFamilyRoute(map, PROVIDERS, row.family, target)
-      : row.kind === 'codex-model' ? withCodexModelRoute(map, PROVIDERS, row.name, target)
-      : withAlias(map, PROVIDERS, row.name, target);
-    if (next) home.writeConfig({ routing: next });
-    backToSection(sectionOf(row), next ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
+  const reportActionError = (action: () => void) => {
+    try { action(); }
+    catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
   };
 
+  // Persist one row's new Target through core's pure edits. A refusal (only reachable if a Provider
+  // id slipped past the alias-name precheck) persists nothing.
+  const applyRoute = (row: RouteRow, target: Target) => reportActionError(() => {
+    let applied = false;
+    home.updateConfig(cfg => {
+      const map = cfg.routing ?? EMPTY_ROUTING_MAP;
+      const next = row.kind === 'family'
+        ? withFamilyRoute(map, PROVIDERS, row.family, target)
+        : row.kind === 'codex-model' ? withCodexModelRoute(map, PROVIDERS, row.name, target)
+        : withAlias(map, PROVIDERS, row.name, target);
+      applied = !!next;
+      return next ? { ...cfg, routing: next } : undefined;
+    });
+    backToSection(sectionOf(row), applied ? `${rowLabel(row)} → ${target.providerId} (${target.model})` : 'Refused — that name is a Provider id.');
+  });
+
   // The picker's last entry: clear a Family route / remove an Alias.
-  const clearRow = (row: RouteRow) => {
-    const map = routingMap();
+  const clearRow = (row: RouteRow) => reportActionError(() => {
     if (row.kind === 'family') {
       // Clearing can't be refused — withFamilyRoute only refuses a dangling Target.
-      home.writeConfig({ routing: withFamilyRoute(map, PROVIDERS, row.family, undefined)! });
+      home.updateConfig(cfg => ({ ...cfg, routing: withFamilyRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, row.family, undefined)! }));
       backToSection('families', `${row.family} route cleared.`);
     } else if (row.kind === 'codex-model') {
-      home.writeConfig({ routing: withCodexModelRoute(map, PROVIDERS, row.name, undefined)! });
+      home.updateConfig(cfg => ({ ...cfg, routing: withCodexModelRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, row.name, undefined)! }));
       backToSection('codex', `${row.name} route cleared.`);
     } else {
-      home.writeConfig({ routing: withoutAlias(map, row.name) });
+      home.updateConfig(cfg => ({ ...cfg, routing: withoutAlias(cfg.routing ?? EMPTY_ROUTING_MAP, row.name) }));
       backToSection('aliases', `Alias ${row.name} removed.`);
     }
-  };
+  });
 
   // Fetch the row Provider's model list, then land on pick or free text. The guard compares the row
   // by REFERENCE — only the flow that set this loading mode may resolve it, so an Esc'd or replaced
@@ -264,14 +272,16 @@ export const App = () => {
   const bindClaudeFamilies = () => {
     const p = PROVIDERS.find(isAnthropicProvider);
     if (!p) return;
-    const apply = () => {
+    const apply = () => reportActionError(() => {
       // withFamilyRoute can't refuse here — the Target names a catalog row by construction.
-      let map = routingMap();
-      for (const f of FAMILY_KEYS) map = withFamilyRoute(map, PROVIDERS, f, { providerId: p.id, model: CLAUDE_FAMILY_MODELS[f] })!;
-      home.writeConfig({ routing: map });
+      home.updateConfig(cfg => {
+        let map = cfg.routing ?? EMPTY_ROUTING_MAP;
+        for (const f of FAMILY_KEYS) map = withFamilyRoute(map, PROVIDERS, f, { providerId: p.id, model: CLAUDE_FAMILY_MODELS[f] })!;
+        return { ...cfg, routing: map };
+      });
       // short on purpose — the status row is single-line chrome that clips on narrow terminals
       backToSection('families', `Families → ${p.label} subscription models.`);
-    };
+    });
     isAnthropicSignedIn(home.readAuth().anthropic) ? apply() : startSignIn(p, apply);
   };
 
@@ -311,7 +321,7 @@ export const App = () => {
   };
 
   // ----- command dispatch (Enter in the palette) -----
-  const runCommand = (raw: string) => {
+  const runCommand = (raw: string) => reportActionError(() => {
     const parsed = parseSlash(raw);
     if (!parsed) { setStatus(raw.trim() ? 'Not a command — type / for the palette.' : ''); return; }
     // A unique partial match completes on Enter — that IS the autocomplete contract (/pr → /providers).
@@ -335,7 +345,7 @@ export const App = () => {
         const p = target.args[0] ? byId(target.args[0]) : undefined;
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
         // OAuth rows sign in, they don't take keys — same filter the picker applies.
-        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isKimiProvider(p) || isAntigravityProvider(p))) {
+        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) || isKimiProvider(p) || isAntigravityProvider(p))) {
           setStatus(`${p.label} uses OAuth — try /signin ${p.id}.`); return;
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
@@ -376,7 +386,7 @@ export const App = () => {
             return;
           }
           setMode({ kind: 'effort-pick', options, current });
-        }).catch(() => { if (modeRef.current === loading) backToInput('Could not fetch effort options.'); });
+        }).catch(error => { if (modeRef.current === loading) backToInput(`Could not set effort: ${error instanceof Error ? error.message : String(error)}`); });
         return;
       }
       case 'test': {
@@ -460,9 +470,8 @@ export const App = () => {
         // toggles; the running Bridge reads the flag live per list request, so no restart needed.
         const arg = target.args[0]?.toLowerCase();
         if (arg && arg !== 'on' && arg !== 'off') { setStatus('/aliasonly takes on or off'); return; }
-        const cfg = home.readConfig();
-        const on = arg ? arg === 'on' : !effectiveAliasOnly(cfg);
-        home.writeConfig({ bridge: { ...cfg.bridge, aliasOnlyModels: on } });
+        const updated = home.updateConfig(cfg => ({ ...cfg, bridge: { ...cfg.bridge, aliasOnlyModels: arg ? arg === 'on' : !effectiveAliasOnly(cfg) } }));
+        const on = effectiveAliasOnly(updated);
         // Echo stays honest with zero aliases — the served list falls back to Provider rows.
         setStatus(!on ? 'Claude Code /model list → Providers + aliases.'
           : routingMap().aliases.length === 0 ? 'Claude Code /model list → aliases only (Providers shown until the first alias — add one in /routing).'
@@ -474,9 +483,8 @@ export const App = () => {
         // reads the preference live per list request, so no restart is needed.
         const arg = target.args[0]?.toLowerCase();
         if (arg && arg !== 'on' && arg !== 'off') { setStatus('/modelids takes on or off'); return; }
-        const cfg = home.readConfig();
-        const on = arg ? arg === 'on' : !(cfg.bridge?.aliasPickerShowsModel ?? true);
-        home.writeConfig({ bridge: { ...cfg.bridge, aliasPickerShowsModel: on } });
+        const updated = home.updateConfig(cfg => ({ ...cfg, bridge: { ...cfg.bridge, aliasPickerShowsModel: arg ? arg === 'on' : !(cfg.bridge?.aliasPickerShowsModel ?? true) } }));
+        const on = updated.bridge?.aliasPickerShowsModel;
         setStatus(on ? 'Alias rows show their pinned model id.' : 'Alias rows show bare names.');
         return;
       }
@@ -486,7 +494,7 @@ export const App = () => {
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
     }
-  };
+  });
 
   // ----- palette submit (Enter) — with the suggestion list open, Enter fires the HIGHLIGHTED row,
   // not the raw prefix (Up/Down picked it). A required-arg command (<…>) completes into the input

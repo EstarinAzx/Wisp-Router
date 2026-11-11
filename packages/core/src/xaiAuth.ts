@@ -30,6 +30,7 @@ import type { AddressInfo } from 'net';
 import { readFile } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
+import { AuthStateChangedError } from './homeStore';
 import {
   XaiCreds, codeVerifier, codeChallenge, oauthState,
   tokensToXaiCreds, shouldRefreshXaiToken, isXaiSignedIn, parseGrokAuthJson, isXaiEndpoint,
@@ -152,15 +153,17 @@ const runXaiOAuth = async (openExternal: (url: string) => PromiseLike<boolean>):
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
   const { port, code, close } = await startCallbackServer(state);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await openExternal(buildAuthorizeUrl(authorizationEndpoint, port, challenge, state));
     const authCode = await Promise.race([
       code,
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Grok sign-in timed out.')), OAUTH_TIMEOUT_MS)),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('Grok sign-in timed out.')), OAUTH_TIMEOUT_MS); }),
     ]);
     const creds = await exchangeCode(tokenEndpoint, authCode, verifier, port, Date.now());
     return { ...creds, tokenEndpoint };
   } finally {
+    clearTimeout(timer);
     close();
   }
 };
@@ -171,7 +174,8 @@ const runXaiOAuth = async (openExternal: (url: string) => PromiseLike<boolean>):
 // been written (truly first use); the {} tombstone means signed out.
 export type XaiCredsStore = {
   read: () => XaiCreds | undefined;
-  write: (creds: XaiCreds) => void;
+  // A supplied snapshot must be compared under the host's auth write lock.
+  write: (creds: XaiCreds, expected?: string) => void;
 };
 
 // Owns the Grok token lifecycle against one auth.json slice. Each face holds a single instance and drives
@@ -195,11 +199,20 @@ export class XaiAuth {
   // rotated the token, use its bundle instead of firing our stale (single-use) refresh token. The token
   // endpoint is the cached one (D7), else discovered here. A failed refresh is non-fatal — keep the existing
   // creds (they may still work; the live call surfaces a 401).
+  private refreshInFlight: Promise<XaiCreds> | undefined;
+
   private refreshIfNeeded = async (creds: XaiCreds): Promise<XaiCreds> => {
     if (!creds.refreshToken || !shouldRefreshXaiToken(creds, Date.now())) return creds;
-    const fresh = this.store.read() ?? creds;
+    this.refreshInFlight ??= this.runRefresh().finally(() => { this.refreshInFlight = undefined; });
+    return this.refreshInFlight;
+  };
+
+  private runRefresh = async (): Promise<XaiCreds> => {
+    const fresh = this.store.read();
+    if (!fresh) throw new AuthStateChangedError();
     if (!shouldRefreshXaiToken(fresh, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
+    const beforeRefresh = JSON.stringify(fresh);
     let next: XaiCreds;
     try {
       const tokenEndpoint = fresh.tokenEndpoint ?? (await discoverXaiEndpoints()).tokenEndpoint;
@@ -212,16 +225,29 @@ export class XaiAuth {
       if (!res.ok) { this.log(`[xai] token refresh failed (${res.status})`); return fresh; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
       next = tokensToXaiCreds(payload, Date.now());
+      if (typeof next.accessToken !== 'string' || !next.accessToken.trim()
+        || typeof next.expiresAt !== 'number' || !Number.isFinite(next.expiresAt) || next.expiresAt <= Date.now()
+        || (payload.refresh_token !== undefined && (typeof payload.refresh_token !== 'string' || !payload.refresh_token.trim()))) {
+        this.log('[xai] token refresh returned invalid credentials');
+        return fresh;
+      }
       // The refresh response may omit a fresh refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
       next.tokenEndpoint = tokenEndpoint; // keep the endpoint cached for the next refresh
     } catch (err) {
       this.log(`[xai] token refresh error: ${String(err)}`);
       return fresh;
+    } finally {
+      // Failed grants must not hand a signed-out or replaced account back to the caller either.
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
     }
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
-    try { this.store.write(next); } catch (err) { this.log(`[xai] token persist error: ${String(err)}`); }
+    try { this.store.write(next, beforeRefresh); } catch (err) {
+      if (err instanceof AuthStateChangedError) throw err;
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
+      this.log(`[xai] token persist error: ${String(err)}`);
+    }
     return next;
   };
 

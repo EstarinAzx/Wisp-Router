@@ -171,9 +171,15 @@ export const AliasRenameScreen = ({ name, onBack, onStatus }: {
         if (!next || next === name) { onBack('Unchanged.'); return; }
         // Split the two refusals so the message names the actual collision; input stays editable.
         if (PROVIDERS.some((p) => p.id === next)) { onStatus(`"${next}" is a Provider id — pick another name.`); return; }
-        const renamed = withAliasRenamed(routingMap(), PROVIDERS, name, next);
-        if (!renamed) { onStatus(`"${next}" is already an alias — pick another name.`); return; }
-        home.writeConfig({ routing: renamed });
+        let applied = false;
+        try {
+          home.updateConfig(cfg => {
+            const renamed = withAliasRenamed(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, name, next);
+            applied = !!renamed;
+            return renamed ? { ...cfg, routing: renamed } : undefined;
+          });
+        } catch (error) { onStatus(String(error)); return; }
+        if (!applied) { onStatus(`"${next}" is already an alias — pick another name.`); return; }
         onBack(`Alias ${name} → ${next}.`);
       })}
     />

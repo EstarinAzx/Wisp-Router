@@ -19,6 +19,12 @@ import { join } from 'path';
 import { WispHome, wispHomeDir } from '../src/homeStore';
 import { CodexAuth } from '../src/codexAuth';
 import { AnthropicAuth } from '../src/anthropicAuth';
+import { XaiAuth } from '../src/xaiAuth';
+import { KimiAuth } from '../src/kimiAuth';
+import type { CodexCreds } from '../src/catalog';
+import { createAntigravityReplayContext } from '../src/antigravity';
+import { EMPTY_ROUTING_MAP, withAlias, withFamilyRoute } from '../src/routing';
+import { PROVIDERS } from '../src/catalog';
 
 vi.mock('fs', async importOriginal => {
   const actual = await importOriginal<typeof import('fs')>();
@@ -32,14 +38,21 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 // The sandbox path points at a subdir that does NOT exist yet — creation on demand is part of the contract.
 const home = () => new WispHome(join(dir, '.wisp'));
 
-describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisition', provider => {
+const renewalManager = (provider: 'codex' | 'anthropic' | 'xai' | 'kimi', h: WispHome) => {
+  const store = { read: () => h.readAuth()[provider], write: (c: CodexCreds, expected?: string) => {
+    h.writeAuth({ [provider]: c }, expected === undefined ? undefined : { provider, snapshot: expected });
+  } };
+  if (provider === 'kimi') return new KimiAuth(store, () => {});
+  const constructors = { codex: CodexAuth, anthropic: AnthropicAuth, xai: XaiAuth };
+  return new constructors[provider](store, async () => false, () => {});
+};
+
+describe.each(['codex', 'anthropic', 'xai', 'kimi'] as const)('%s renewal at auth lock acquisition', provider => {
   test.each([false, true])('preserves normal renewal and unrelated writes (disk failure: %s)', async diskFailure => {
     const h = home();
     const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
-    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
-    const manager = provider === 'codex'
-      ? new CodexAuth({ read: () => h.readAuth().codex, write: (c, expected?: string) => { h.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
-      : new AnthropicAuth({ read: () => h.readAuth().anthropic, write: (c, expected?: string) => { h.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    h.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, tokenEndpoint: 'https://auth.x.ai/token' } });
+    const manager = renewalManager(provider, h);
     vi.stubGlobal('fetch', async () => {
       home().writeAuth({ bridgeSecret: 'sibling-write' });
       return Response.json({ access_token: 'fixture-renewed', refresh_token: 'fixture-rotated', expires_in: 3600 });
@@ -59,13 +72,14 @@ describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisit
     } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
   });
 
-  test.each(['signout', 'replacement', 'removal'])('preserves a concurrent %s and returns no old-account credentials', async change => {
+  test.each([
+    ['signout', false], ['replacement', false], ['removal', false],
+    ['signout', true], ['replacement', true], ['removal', true],
+  ] as const)('preserves a concurrent %s and returns no old-account credentials (lock held: %s)', async (change, lockHeld) => {
     const a = home(), b = home();
     const expired = `e30.${Buffer.from('{"exp":1}').toString('base64url')}.fixture`;
-    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1 } });
-    const manager = provider === 'codex'
-      ? new CodexAuth({ read: () => a.readAuth().codex, write: (c, expected?: string) => { a.writeAuth({ codex: c }, expected === undefined ? undefined : { provider: 'codex', snapshot: expected }); } }, async () => false, () => {})
-      : new AnthropicAuth({ read: () => a.readAuth().anthropic, write: (c, expected?: string) => { a.writeAuth({ anthropic: c }, expected === undefined ? undefined : { provider: 'anthropic', snapshot: expected }); } }, async () => false, () => {});
+    a.writeAuth({ [provider]: { accessToken: expired, refreshToken: 'fixture-refresh', expiresAt: 1, tokenEndpoint: 'https://auth.x.ai/token' } });
+    const manager = renewalManager(provider, a);
     let changed = false, preserved = '';
     const open = fs.openSync;
     // The second real store writes after the manager's last read, just before the first gets the lock.
@@ -74,6 +88,8 @@ describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisit
         changed = true;
         b.writeAuth({ [provider]: change === 'signout' ? {} : change === 'removal' ? undefined : { accessToken: 'fixture-new-account' } });
         preserved = readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8');
+        // Another process may have renamed auth.json but still own the lock when renewal arrives.
+        if (lockHeld) writeFileSync(join(dir, '.wisp', 'auth.lock'), 'other-writer', { flag: 'wx' });
       }
       return open(...args);
     });
@@ -84,7 +100,8 @@ describe.each(['codex', 'anthropic'] as const)('%s renewal at auth lock acquisit
       expect(readFileSync(join(dir, '.wisp', 'auth.json'), 'utf8')).toBe(preserved);
       expect(result).toBeInstanceOf(Error);
       expect(String(result)).toMatch(/sign-in changed/);
-      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(false);
+      expect(existsSync(join(dir, '.wisp', 'auth.lock'))).toBe(lockHeld);
+      if (lockHeld) expect(readFileSync(join(dir, '.wisp', 'auth.lock'), 'utf8')).toBe('other-writer');
     } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
   });
 });
@@ -230,6 +247,114 @@ describe('status read/write', () => {
 // ----------------------------- read/write config ----------------------------- //
 
 describe('config read/write', () => {
+  test('ordinary patches exclude a competing writer until the atomic swap completes', () => {
+    const a = home(), b = home();
+    a.writeConfig({ provider: 'groq' });
+    const rename = fs.renameSync;
+    let competingError: unknown;
+    let attempted = false;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (!attempted && String(to).endsWith('config.json')) {
+        attempted = true;
+        try { b.writeConfig({ effort: 'high' }); } catch (error) { competingError = error; }
+      }
+      rename(from, to);
+    });
+    try { a.writeConfig({ provider: 'codex' }); } finally { spy.mockRestore(); }
+    expect(String(competingError)).toMatch(/busy/i);
+    b.writeConfig({ effort: 'high' });
+    expect(a.readConfig()).toEqual({ provider: 'codex', effort: 'high' });
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('nested edits read under the guard and preserve a sibling family, alias and unknown fields', () => {
+    const a = home(), b = home();
+    a.writeConfig({});
+    writeFileSync(join(dir, '.wisp', 'config.json'), JSON.stringify({ future: 'keep', bridge: { port: 4242, future: true } }));
+    const open = fs.openSync;
+    let injected = false;
+    const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      if (!injected && String(args[0]).endsWith('config.lock')) {
+        injected = true;
+        b.updateConfig(cfg => ({ ...cfg, routing: withFamilyRoute(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, 'opus', { providerId: 'codex', model: 'sibling' })! }));
+      }
+      return open(...args);
+    });
+    try {
+      a.updateConfig(cfg => ({ ...cfg, routing: withAlias(cfg.routing ?? EMPTY_ROUTING_MAP, PROVIDERS, 'first', { providerId: 'codex', model: 'first' })! }));
+    } finally { spy.mockRestore(); }
+    expect(injected).toBe(true);
+    expect(a.readConfig()).toEqual({ future: 'keep', bridge: { port: 4242, future: true }, routing: {
+      families: { opus: { providerId: 'codex', model: 'sibling' } }, aliases: [{ name: 'first', target: { providerId: 'codex', model: 'first' } }],
+    } });
+  });
+
+  test('busy config locks refuse both mutation paths without stealing the lock', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), lock = join(dir, '.wisp', 'config.lock');
+    const before = readFileSync(path, 'utf8');
+    writeFileSync(lock, 'other writer');
+    expect(() => h.writeConfig({ effort: 'high' })).toThrow(/busy/i);
+    expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow(/busy/i);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(readFileSync(lock, 'utf8')).toBe('other writer');
+  });
+
+  test('a refused mutation writes nothing and conditional seeding leaves an existing store intact', () => {
+    const h = home();
+    expect(h.updateConfig(() => undefined)).toEqual({});
+    expect(h.configExists()).toBe(false);
+    expect(readdirSync(join(dir, '.wisp'))).toEqual([]);
+    h.updateConfig(() => h.configExists() ? undefined : { provider: 'groq' });
+    const before = readFileSync(join(dir, '.wisp', 'config.json'), 'utf8');
+    h.updateConfig(() => h.configExists() ? undefined : { provider: 'codex' });
+    expect(readFileSync(join(dir, '.wisp', 'config.json'), 'utf8')).toBe(before);
+  });
+
+  test('unreadable config is not mistaken for an absent file', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), before = readFileSync(path, 'utf8');
+    const read = fs.readFileSync;
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementation((...args: any[]) => {
+      if (String(args[0]) === path) throw Object.assign(new Error('fixture denied'), { code: 'EACCES' });
+      return (read as any)(...args);
+    });
+    try { expect(() => h.writeConfig({ effort: 'high' })).toThrow(/denied/); }
+    finally { spy.mockRestore(); }
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('failed callbacks, corrupt stores and failed swaps preserve bytes and release the config guard', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex' });
+    const path = join(dir, '.wisp', 'config.json'), before = readFileSync(path, 'utf8');
+    expect(() => h.updateConfig(() => { throw Error('refused'); })).toThrow('refused');
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw Error('fixture disk full'); });
+    try { expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow('fixture disk full'); }
+    finally { spy.mockRestore(); }
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    writeFileSync(path, '{broken');
+    expect(() => h.updateConfig(cfg => ({ ...cfg, effort: 'high' }))).toThrow(/config.json/);
+    expect(readFileSync(path, 'utf8')).toBe('{broken');
+    expect(readdirSync(join(dir, '.wisp'))).toEqual(['config.json']);
+  });
+
+  test('replay identity uses the same trimmed Bridge secret as authentication', () => {
+    const h = home();
+    const creds = { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', projectId: 'example-project-1' };
+    h.writeAuth({ antigravity: creds, bridgeSecret: '  synthetic-bridge \n' });
+    const expected = createAntigravityReplayContext(creds, 'synthetic-bridge');
+    expect(h.antigravityReplayContext()).toEqual(expected);
+    h.writeAuth({ bridgeSecret: 'other-secret' });
+    expect(h.antigravityReplayContext()).not.toEqual(expected);
+    h.writeAuth({ bridgeSecret: ' \n' });
+    expect(h.antigravityReplayContext()).toBeUndefined();
+  });
+
   test('malformed routing containers cannot fall back or erase explicit Codex bindings (#216)', () => {
     const h = home();
     h.writeConfig({});

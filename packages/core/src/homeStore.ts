@@ -11,7 +11,7 @@
  *
  * Both the extension and the TUI hold a WispHome each; the file is the single source of truth
  * (ADR-0002). Writes are read-merge-write with a tmp+rename swap so a concurrent reader never sees
- * a torn file. Auth writes share a guard; renewal callers supply the expected Provider snapshot so
+ * a torn file. Each store's writes share a guard; renewal callers supply the expected Provider snapshot so
  * comparison and persistence cannot interleave with another cooperating writer.
  */
 
@@ -75,36 +75,35 @@ export class WispHome {
     }
   };
 
-  // Shallow read-merge-write. JSON.stringify drops undefined values, so `field: undefined` in a patch
-  // deletes the field on disk; unknown keys parsed off disk ride the spread and survive.
-  //
-  // #182: the read is deliberately permissive — an unreadable store parses as {} so wisp still starts and
-  // routes on defaults. The WRITE is where that has to stop. Merging {} with a patch and putting it back
-  // does not ignore the file, it ERASES it, and the contents we are erasing are precisely the ones we just
-  // admitted we could not parse. So a store that holds content we did not understand is never overwritten;
-  // the caller gets the same kind of throw writeRaw already produces for ENOSPC/EPERM, which is why no call
-  // site needs a new policy for this. "Nothing there" (absent/empty) is not that case and stays writable.
-  private merge = <T extends object>(file: string, parse: (raw?: string) => T, patch: Partial<T>, mode: number): T => {
-    const raw = this.readRaw(file);
-    if (isUnusableStore(raw)) throw new Error(
-      `${this.path(file)} exists but could not be read as JSON. Wisp will not overwrite it — that would ` +
-      `destroy whatever it holds. Repair the file, or move it aside to start fresh, then retry.`,
-    );
-    const next = { ...parse(raw), ...patch };
-    this.writeRaw(file, serializeWispStore(next), mode);
-    return next;
-  };
-
   readConfig = (): WispConfig => parseWispConfig(this.readRaw(CONFIG_FILE));
   configExists = (): boolean => existsSync(this.path(CONFIG_FILE));
-  writeConfig = (patch: Partial<WispConfig>): WispConfig => this.merge(CONFIG_FILE, parseWispConfig, patch, 0o644);
+
+  // Compute nested edits from current disk state under the guard. No async work in the callback;
+  // undefined refuses an edit without writing. Unlike permissive reads, writes fail on unreadable stores.
+  updateConfig = (update: (current: WispConfig) => WispConfig | undefined): WispConfig => this.withStoreLock('config', () => {
+    let raw: string | undefined;
+    try { raw = readFileSync(this.path(CONFIG_FILE), 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (isUnusableStore(raw)) throw new Error(
+      `${this.path(CONFIG_FILE)} exists but could not be read as JSON. Wisp will not overwrite it — that would ` +
+      `destroy whatever it holds. Repair the file, or move it aside to start fresh, then retry.`,
+    );
+    const current = parseWispConfig(raw);
+    const next = update(current);
+    if (!next) return current;
+    this.writeRaw(CONFIG_FILE, serializeWispStore(next), 0o644);
+    return next;
+  });
+
+  // Shallow patches retain unknown keys; JSON serialization deletes fields explicitly set to undefined.
+  writeConfig = (patch: Partial<WispConfig>): WispConfig => this.updateConfig(current => ({ ...current, ...patch }));
 
   readAuth = (): WispAuth => parseWispAuth(this.readRaw(AUTH_FILE));
   authExists = (): boolean => existsSync(this.path(AUTH_FILE));
   // Secrets file — owner-only (0o600) per ADR-0002.
-  writeAuth = (patch: Partial<WispAuth>, expected?: { provider: 'codex' | 'anthropic' | 'antigravity'; snapshot: string }): WispAuth => {
+  writeAuth = (patch: Partial<WispAuth>, expected?: { provider: 'codex' | 'anthropic' | 'antigravity' | 'xai' | 'kimi'; snapshot: string }): WispAuth => {
     if (Object.prototype.hasOwnProperty.call(patch, 'geminiApi')) throw new Error('Gemini credential bundle is reserved.');
-    return this.withAuthLock(() => {
+    return this.withStoreLock('auth', () => {
       const current = this.authForWrite();
       // The expected Provider bundle and the write share the guard; sibling fields may change freely.
       if (expected && JSON.stringify(current[expected.provider]) !== expected.snapshot) throw new AuthStateChangedError();
@@ -114,13 +113,13 @@ export class WispHome {
     });
   };
 
-  private withAuthLock = <T>(action: () => T): T => {
+  private withStoreLock = <T>(store: 'auth' | 'config', action: () => T): T => {
     this.ensureDir();
-    const path = this.path('auth.lock');
+    const path = this.path(`${store}.lock`);
     let fd: number;
     try { fd = openSync(path, 'wx', 0o600); }
-    catch { throw new Error('Wisp auth is busy or inaccessible. Stop all Wisp writers before inspecting an orphan auth.lock.'); }
-    // ponytail: cooperative local writers only; no age-based lock stealing or manual rollback defense.
+    catch { throw new Error(`Wisp ${store} is busy or inaccessible. Stop all Wisp writers before inspecting an orphan ${store}.lock.`); }
+    // shortcut: cooperative local writers only; reconsider the protocol if unguarded writers must be supported.
     try { return action(); }
     finally { try { closeSync(fd); } finally { unlinkSync(path); } }
   };
@@ -148,7 +147,7 @@ export class WispHome {
 
   antigravityReplayContext = (): AntigravityReplayContext | undefined => {
     const auth = this.readAuth();
-    return createAntigravityReplayContext(auth.antigravity, auth.bridgeSecret);
+    return createAntigravityReplayContext(auth.antigravity, auth.bridgeSecret?.trim());
   };
 
   private geminiContext = (b: NonNullable<WispAuth['geminiApi']>): GeminiReplayContext => ({
@@ -156,12 +155,12 @@ export class WispHome {
     credentialBinding: createHmac('sha256', Buffer.from(b.replayKey, 'base64url')).update(`gemini-api\0${b.apiKey}`).digest('base64url'),
   });
 
-  geminiReplayContext = (): GeminiReplayContext | undefined => this.withAuthLock(() => {
+  geminiReplayContext = (): GeminiReplayContext | undefined => this.withStoreLock('auth', () => {
     const b = this.geminiBundle(this.authForWrite());
     return b && this.geminiContext(b);
   });
 
-  saveGeminiApiKey = (apiKey: string, expectedLifetime: string | null): void => this.withAuthLock(() => {
+  saveGeminiApiKey = (apiKey: string, expectedLifetime: string | null): void => this.withStoreLock('auth', () => {
     if (typeof apiKey !== 'string' || !/^[\x21-\x7e]+$/.test(apiKey)) throw new Error('Gemini API key must be nonempty printable ASCII without spaces.');
     const auth = this.authForWrite();
     const old = this.geminiBundle(auth);
@@ -170,14 +169,14 @@ export class WispHome {
     this.writeRaw(AUTH_FILE, serializeWispStore(auth), 0o600);
   });
 
-  removeGeminiApiKey = (expectedLifetime: string): void => this.withAuthLock(() => {
+  removeGeminiApiKey = (expectedLifetime: string): void => this.withStoreLock('auth', () => {
     const auth = this.authForWrite();
     if (!expectedLifetime || this.geminiBundle(auth)?.lifetime !== expectedLifetime) throw new Error('Gemini credentials changed; reopen key setup.');
     delete auth.geminiApi;
     this.writeRaw(AUTH_FILE, serializeWispStore(auth), 0o600);
   });
 
-  geminiCredentials = (expected: GeminiReplayContext): string => this.withAuthLock(() => {
+  geminiCredentials = (expected: GeminiReplayContext): string => this.withStoreLock('auth', () => {
     const b = this.geminiBundle(this.authForWrite());
     if (!b) throw new Error('Gemini API credentials are missing.');
     const current = this.geminiContext(b);
@@ -189,7 +188,7 @@ export class WispHome {
 
   assertGeminiCurrent = (expected: GeminiReplayContext): void => { this.geminiCredentials(expected); };
 
-  migrateSecrets = (slots: SecretSlots): void => this.withAuthLock(() => {
+  migrateSecrets = (slots: SecretSlots): void => this.withStoreLock('auth', () => {
     const next = planSecretsMigration({ auth: this.authForWrite(), slots });
     if (next) this.writeRaw(AUTH_FILE, serializeWispStore(next), 0o600);
   });

@@ -1,21 +1,21 @@
 # Wisp
 
-A VS Code extension that performs AI inline code edits (**Inquire**) through a
-catalog of OpenAI-compatible **Providers**, with a side panel for managing the
-Active Provider's key and model. This glossary fixes the language for the
-extension's user-visible state, so the two status surfaces (status bar and side
-panel) describe the same thing the same way.
+A model router with a terminal UI, a shared local **Bridge**, and a VS Code
+companion that routes chat and performs inline code edits (**Inquire**). The TUI
+and extension side panel manage the same **Active Provider**, credentials and
+models. This glossary fixes their shared language, including the extension's
+two status surfaces (status bar and side panel).
 
 ## Language
 
 ### Product and provider
 
 **Wisp**:
-The product — the VS Code extension itself, and the name on all user-visible
-chrome (activity-bar container, side panel, status bar, commands `wisp.*`,
-settings `wisp.*`, the `wisp.apiKey` secret). Provider-agnostic by design so
-more **Providers** can be added later. "The extension" is used interchangeably;
-reserve **Wisp** for user-facing chrome and the product-vs-**Provider** split.
+The product — the terminal app, shared Bridge and VS Code companion. The
+extension uses the name on its activity-bar container, side panel, status bar,
+commands `wisp.*` and editor-local settings `wisp.*`; shared secrets live in
+**Wisp home**. Provider-agnostic by design. Reserve "the extension" for the
+VS Code companion and **Wisp** for the product-vs-**Provider** split.
 
 **Provider**:
 The external backend Wisp routes **Inquire** requests through
@@ -38,7 +38,7 @@ remembers its own. _Avoid_: implying several Providers serve requests at once.
 **Provider catalog**:
 The set of **built-in Providers** Wisp ships ready-made — each a canonical name
 paired with its base URL, default model, and API-key environment variable.
-Curated, not exhaustive; **OpenCode Zen** is the default and first entry. _Avoid_:
+Curated, not exhaustive; **OpenCode Go** is the default and first entry. _Avoid_:
 treating the catalog as the limit — a **Custom Provider** reaches anything else.
 
 **Built-in Provider** / **Custom Provider**:
@@ -151,7 +151,9 @@ A local endpoint Wisp can expose so tools **outside** VS Code reach the
 dialects — **OpenAI Chat Completions** (`/v1/chat/completions`, e.g. the GitHub Copilot CLI),
 **Anthropic Messages** (`/v1/messages`, e.g. Claude Code), and the native Codex
 subset of **Responses** (`/v1/responses`) — through the same
-listener and secret. It faces **outward** — the mirror of the **LM Chat
+listener and secret. Either the terminal or the VS Code extension can host it,
+using the same **Wisp home** port and access secret; only one host can bind that
+port at a time. It faces **outward** — the mirror of the **LM Chat
 Provider**, which surfaces Wisp's models *inward* into VS Code's own chat. An
 external tool names a **Provider**; Wisp answers with that Provider's selected
 model, routing the request through the same path every other surface uses; a
@@ -229,15 +231,15 @@ once. A Target whose Provider is unusable (no key / signed out) fails loud with
 the Provider's real error; it never silently falls back. _Avoid_: a Target with
 an unpinned model — the pin is the point.
 
-### The TUI face — shipped (npm `wisp-router` 2.x; side-panel retirement still pending)
+### The TUI face — shipped (npm `wisp-router` 2.x)
 
 **Wisp TUI**:
-The terminal app that becomes the face of Wisp and its **only** config surface —
-an ASCII brand splash over a slash-command palette (`/providers`, `/signin`,
-`/routing`, `/test`, …). It replaces the **side panel**; **Inquire** retires with
-it, and the extension keeps only VS Code chat routing. _Avoid_: calling the TUI a
-chat or an agent — plain text is not sent to a model (the `/test` command is the
-one deliberate exception).
+The terminal configuration face of Wisp — an ASCII brand splash over a
+slash-command palette (`/providers`, `/signin`, `/routing`, `/test`, …). It
+shares **Wisp home** with the extension. The **side panel**, **Inquire** and
+extension-hosted Bridge remain available alongside it.
+_Avoid_: calling the TUI a chat or an agent — plain text is not sent to a model
+(the `/test` command is the one deliberate exception).
 
 **Screen**:
 One full-panel view the **Wisp TUI** shows at a time — the palette, a picker, a
@@ -249,15 +251,16 @@ widget a Screen is built from (e.g. a select list); a Screen is the whole view.
 **Wisp home**:
 The per-user shared store (`~/.wisp/`) both faces read: settings, catalog state,
 and the **Routing map** in a config file; API keys and OAuth tokens in
-`auth.json`. Replaces VS Code SecretStorage as the home of secrets. _Avoid_:
+`auth.json`, alongside the shared Bridge access secret. Replaces VS Code
+SecretStorage as the home of secrets. _Avoid_:
 implying the extension and the TUI each keep their own state — one store, two
 readers.
 
 **wisp serve**:
 The headless way to run the **Bridge** — the same Wisp process with no screen
-drawn. After the split the Bridge (all dialects) lives with the TUI side, never
-the extension. _Avoid_: calling it a daemon — nothing detaches, auto-starts, or
-manages pids; it is just Wisp running without its face.
+drawn. It hosts the same Bridge engine and all dialects as `/bridge` in the TUI
+and the extension's Bridge control. _Avoid_: calling it a daemon — nothing
+detaches, auto-starts, or manages pids; it is just Wisp running without its face.
 
 **claude-wisp**:
 The launcher command that starts Claude Code pre-wired to the **Bridge**: it sets

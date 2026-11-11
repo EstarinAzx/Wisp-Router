@@ -149,14 +149,16 @@ const runCodexOAuth = async (openExternal: (url: string) => PromiseLike<boolean>
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
   const { port, code, close } = await startCallbackServer(state);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await openExternal(buildAuthorizeUrl(port, challenge, state));
     const authCode = await Promise.race([
       code,
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Codex sign-in timed out.')), OAUTH_TIMEOUT_MS)),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('Codex sign-in timed out.')), OAUTH_TIMEOUT_MS); }),
     ]);
     return exchangeCode(authCode, verifier, port);
   } finally {
+    clearTimeout(timer);
     close();
   }
 };
@@ -192,9 +194,17 @@ export class CodexAuth {
   // rotated the token, use its bundle — firing our stale (possibly single-use) refresh token instead
   // could invalidate the fresh one. A failed refresh is non-fatal — keep the existing creds (they may
   // still work; the live call surfaces a 401).
+  private refreshInFlight: Promise<CodexCreds> | undefined;
+
   private refreshIfNeeded = async (creds: CodexCreds): Promise<CodexCreds> => {
     if (!creds.refreshToken || !shouldRefreshCodexToken({ accessToken: creds.accessToken, idToken: creds.idToken }, Date.now())) return creds;
-    const fresh = this.store.read() ?? creds;
+    this.refreshInFlight ??= this.runRefresh().finally(() => { this.refreshInFlight = undefined; });
+    return this.refreshInFlight;
+  };
+
+  private runRefresh = async (): Promise<CodexCreds> => {
+    const fresh = this.store.read();
+    if (!fresh) throw new AuthStateChangedError();
     if (!shouldRefreshCodexToken({ accessToken: fresh.accessToken, idToken: fresh.idToken }, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
     const beforeRefresh = JSON.stringify(fresh);
@@ -217,14 +227,16 @@ export class CodexAuth {
     } catch (err) {
       this.log(`[codex] token refresh error: ${String(err)}`);
       return fresh;
+    } finally {
+      // Failed grants must not hand a signed-out or replaced account back to the caller either.
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
     }
-    // A sign-out, replacement or another renewal during the await owns the newer store state.
-    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Codex sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side (the old refresh token
     // may be consumed), so a failed auth.json write must not discard the new bundle — keep using it in
     // memory and let a later write retry.
     try { this.store.write(next, beforeRefresh); } catch (err) {
       if (err instanceof AuthStateChangedError) throw err;
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
       this.log(`[codex] token persist error: ${String(err)}`);
     }
     return next;

@@ -134,14 +134,16 @@ const runAnthropicOAuth = async (openExternal: (url: string) => PromiseLike<bool
   const challenge = await codeChallenge(verifier);
   const state = oauthState();
   const { port, code, close } = await startCallbackServer(state);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await openExternal(buildAuthorizeUrl(port, challenge, state));
     const authCode = await Promise.race([
       code,
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Claude sign-in timed out.')), OAUTH_TIMEOUT_MS)),
+      new Promise<never>((_, rej) => { timer = setTimeout(() => rej(new Error('Claude sign-in timed out.')), OAUTH_TIMEOUT_MS); }),
     ]);
     return exchangeCode(authCode, verifier, state, port, Date.now());
   } finally {
+    clearTimeout(timer);
     close();
   }
 };
@@ -188,9 +190,17 @@ export class AnthropicAuth {
   // process already rotated the token, use its bundle instead of firing our stale refresh token.
   // Subscribers OMIT scopes on refresh so the backend re-expands them. A failed refresh is non-fatal —
   // keep the existing creds (they may still work; the live call surfaces a 401).
+  private refreshInFlight: Promise<AnthropicCreds> | undefined;
+
   private refreshIfNeeded = async (creds: AnthropicCreds): Promise<AnthropicCreds> => {
     if (!creds.refreshToken || !shouldRefreshAnthropicToken(creds, Date.now())) return creds;
-    const fresh = this.store.read() ?? creds;
+    this.refreshInFlight ??= this.runRefresh().finally(() => { this.refreshInFlight = undefined; });
+    return this.refreshInFlight;
+  };
+
+  private runRefresh = async (): Promise<AnthropicCreds> => {
+    const fresh = this.store.read();
+    if (!fresh) throw new AuthStateChangedError();
     if (!shouldRefreshAnthropicToken(fresh, Date.now())) return fresh;
     if (!fresh.refreshToken) return fresh;
     const beforeRefresh = JSON.stringify(fresh);
@@ -208,18 +218,26 @@ export class AnthropicAuth {
       // must not silently strip the account display and metadata.user_id an hour after sign-in.
       const { accessToken: _at, refreshToken: _rt, expiresAt: _ea, ...identity } = fresh;
       next = { ...identity, ...tokensToAnthropicCreds(payload, Date.now()) };
+      if (typeof next.accessToken !== 'string' || !next.accessToken.trim()
+        || typeof next.expiresAt !== 'number' || !Number.isFinite(next.expiresAt) || next.expiresAt <= Date.now()
+        || (payload.refresh_token !== undefined && (typeof payload.refresh_token !== 'string' || !payload.refresh_token.trim()))) {
+        this.log('[anthropic] token refresh returned invalid credentials');
+        return fresh;
+      }
       // The refresh response may omit a fresh refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
       this.log(`[anthropic] token refresh error: ${String(err)}`);
       return fresh;
+    } finally {
+      // Failed grants must not hand a signed-out or replaced account back to the caller either.
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
     }
-    // A sign-out, replacement or another renewal during the await owns the newer store state.
-    if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new Error('Anthropic sign-in changed during token refresh; retry the operation.');
     // Persist OUTSIDE the fetch catch: the rotation already happened server-side, so a failed auth.json
     // write must not discard the new bundle — keep using it in memory and let a later write retry.
     try { this.store.write(next, beforeRefresh); } catch (err) {
       if (err instanceof AuthStateChangedError) throw err;
+      if (JSON.stringify(this.store.read()) !== beforeRefresh) throw new AuthStateChangedError();
       this.log(`[anthropic] token persist error: ${String(err)}`);
     }
     return next;

@@ -4,6 +4,18 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.6] - 2026-11-11
+
+### Fixed
+
+- Bundle the audited credential lifecycle, guarded config mutations, Bridge disconnect cancellation, SSE cleanup and advisor thinking-replay fixes.
+- Reject superseded credentials after a busy persistence failure while retaining unchanged-account disk-error fallback; normalize Bridge replay secrets and correct storage guidance.
+
+### Surfaces
+
+- **VSIX: 1.14.6**, **terminal/npm: 2.2.9**, **wisp-slot: unchanged at 1.7.5**. Both Bridge hosts bundle the repaired shared core. Desktop protocol remains **5** and public Gemini API enrollment stays disabled.
+- See [release notes and limits](../../docs/releases/v2.2.9.md). Installation and real extension-host acceptance remain separate from source/package checks.
+
 ## [1.14.5] - 2026-11-11
 
 - Bundle the Argon subscription Responses adapter and exact-SKU signed Desktop admission, with encrypted state replay, original tool IDs and explicit instruction-hoisting consent.
@@ -111,7 +123,7 @@ All notable changes to **Wisp** are documented here. Format follows
 - The `codex-wisp` launcher is delivered by the terminal/npm package, not by the extension.
 - **wisp-slot: unchanged.**
 
-## [1.13.6] ? 2026-09-07
+## [1.13.6] — 2026-09-07
 
 ### Fixed
 
@@ -122,7 +134,7 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ### Surfaces
 
-- **VS Code: 1.13.6** ? bundles the same core fixes as **wisp-router 2.1.2**.
+- **VS Code: 1.13.6** — bundles the same core fixes as **wisp-router 2.1.2**.
 - **wisp-slot: unchanged.**
 
 ## [1.13.5] — 2026-09-06

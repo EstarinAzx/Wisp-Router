@@ -55,12 +55,12 @@ export const quotaCurrent = async (provider: QuotaProvider): Promise<{ accessTok
     ...(provider === 'codex' ? { accountId: (creds as { accountId?: string }).accountId } : {}) } : undefined;
 };
 export const xaiAuth = new XaiAuth(
-  { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
+  { read: () => home.readAuth().xai, write: (c, expected) => { home.writeAuth({ xai: c }, expected === undefined ? undefined : { provider: 'xai', snapshot: expected }); } },
   openExternal, () => {});
 // Kimi takes no openExternal: the device flow shows the user a URL + code to visit themselves (#170), so
 // there is no browser leg to launch and nothing to catch on a loopback.
 export const kimiAuth = new KimiAuth(
-  { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
+  { read: () => home.readAuth().kimi, write: (c, expected) => { home.writeAuth({ kimi: c }, expected === undefined ? undefined : { provider: 'kimi', snapshot: expected }); } },
   () => {});
 // Antigravity (#188) is a browser flow like the first three — Google OAuth on a fixed loopback port.
 export const antigravityAuth = new AntigravityAuth(

@@ -6,6 +6,21 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.9] - 2026-11-11
+
+### Fixed
+
+- Preserve sign-out and account replacement during renewal and failed persistence; share concurrent grants, validate refresh responses and clear completed OAuth timers.
+- Guard configuration edits, preserve unrelated routes/preferences/snapshots, report busy writes and normalize Bridge secrets for replay.
+- Cancel local upstream work on Chat/Messages disconnect, clean up early SSE exits without hanging, and preserve ordered signed thinking in advisor continuation.
+- Bound optional model metadata lookup, use authenticated Antigravity tests, refuse unsupported Argon tests and direct Grok key entry to OAuth.
+- Repair hermetic layout checks, canonical temporary-path fixtures and current/historical documentation. The dormant Gemini API adapter emits only complete usage; enrollment stays disabled.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.9**, **companion VSIX: 1.14.6**, **wisp-slot: unchanged at 1.7.5**. Both hosts receive shared core fixes; command/layout repairs belong to the terminal. Desktop protocol remains **5**.
+- See [verification and limits](../../docs/releases/v2.2.9.md). No new live-provider or installed-host acceptance is claimed.
+
 ## [2.2.8] - 2026-11-11
 
 - Add subscription-backed Argon Low, Medium and High on the Responses route, preserving original tool IDs and encrypted model state through continuation. Signed Desktop requires explicit instruction-hoisting opt-in; each Argon SKU advertises its fixed tier.
@@ -171,7 +186,7 @@ Changes up to 2.0.10 are folded into the product changelog at
 - **VS Code extension: 1.13.6, unchanged.** The existing version is attached to the release as usual.
 - **wisp-slot: unchanged.**
 
-## [2.1.2] ? 2026-09-07
+## [2.1.2] — 2026-09-07
 
 ### Fixed
 
@@ -183,8 +198,8 @@ Changes up to 2.0.10 are folded into the product changelog at
 
 ### Surfaces
 
-- **npm / TUI / Bridge: 2.1.2** ? both Codex caching fixes.
-- **VS Code extension: 1.13.6** ? bundles the same core, including its hosted Bridge.
+- **npm / TUI / Bridge: 2.1.2** — both Codex caching fixes.
+- **VS Code extension: 1.13.6** — bundles the same core, including its hosted Bridge.
 - **wisp-slot: unchanged.** Other providers retain their existing request mapping.
 
 ### Notes

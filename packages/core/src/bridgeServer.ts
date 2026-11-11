@@ -672,6 +672,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // Provider's record opens the upstream as BridgeStreamEvents → render back through bridge.ts's SSE emitters
   // (or one chat.completion object when stream:false). Kinds differ only inside their record's open().
   const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const controller = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     let body: unknown;
     try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
 
@@ -693,10 +695,6 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
     const model = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
-
-    // Bridge the client hanging up to an AbortController so the upstream call dies with the request.
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
 
     try {
       // #168: the open is primed and bounded-retried in one step — a stream that dies before delivering
@@ -1017,6 +1015,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // stream the provider's reply back as Anthropic SSE via the #45 encoder. Claude Code always streams, so this
   // is SSE-only. message_start echoes the model the client requested (raw, pre-alias-strip).
   const handleAnthropicMessages = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const controller = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     let body: unknown;
     try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
 
@@ -1045,9 +1045,6 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // now plays the server role — a dangling advisor call was the old failure). off when Claude Code didn't send it.
     const advisorNote = parsed.advisor ? ` advisor=${parsed.advisor.model ?? 'default'}` : '';
     deps.log(`[bridge] messages ${provider.id} effort=${parsed.effort ?? deps.effort()} (${parsed.effort ? 'claude code' : 'panel'}) images=${imageCount}${advisorNote}`);
-
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
 
     const requested = (body as { model?: unknown }).model;
     const meta: AnthropicSseMeta = { id: `msg_${crypto.randomBytes(12).toString('hex')}`, model: typeof requested === 'string' ? requested : parsed.model };

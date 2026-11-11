@@ -155,6 +155,31 @@ describe('Gemini native custom patch replay', () => {
 });
 
 describe('Gemini Responses replay', () => {
+  test.each([undefined, {}, { total_output_tokens: 7 }, { total_cached_tokens: 4 },
+    { total_input_tokens: 3, total_output_tokens: 7 }])('omits incomplete protocol usage %j', usage => {
+    const out = finishGeminiResponses(prepare(body()), { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }], ...(usage ? { usage } : {}) }, 'usage');
+    expect(out.response).not.toHaveProperty('usage');
+    for (const frame of out.frames.split('\n\n').filter(Boolean)) {
+      const event = JSON.parse(frame.split('\ndata: ')[1]);
+      if (event.response) expect(event.response).not.toHaveProperty('usage');
+    }
+  });
+
+  test.each([0, 4])('emits complete protocol usage with %i cached tokens', total_cached_tokens => {
+    const out = finishGeminiResponses(prepare(body()), { status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }],
+      usage: { total_input_tokens: 10, total_output_tokens: 7, total_tokens: 17, total_cached_tokens } }, 'usage');
+    expect(out.response.usage).toEqual({ input_tokens: 10, output_tokens: 7, total_tokens: 17,
+      input_tokens_details: { cached_tokens: total_cached_tokens } });
+    expect(JSON.parse(out.frames.trim().split('\ndata: ').at(-1)!).response.usage).toEqual(out.response.usage);
+  });
+
+  test('preserves complete zero counts without inventing cache accounting', () => {
+    const out = finishGeminiResponses(prepare(body()), { status: 'completed',
+      steps: [{ type: 'model_output', content: [{ type: 'text', text: 'done' }] }],
+      usage: { total_input_tokens: 0, total_output_tokens: 0, total_tokens: 0 } }, 'usage');
+    expect(out.response.usage).toEqual({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+  });
+
   test.each([1, 2048, 65536])('forwards explicit output cap %i without changing the caller body', max_output_tokens => {
     const value = { ...body(), max_output_tokens }, before = structuredClone(value);
     expect(prepare(value).request.maxOutputTokens).toBe(max_output_tokens);

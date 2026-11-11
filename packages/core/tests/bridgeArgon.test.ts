@@ -54,6 +54,22 @@ const initial = () => ({ model: 'argon', instructions: 'ROOT', input: [{ role: '
 const native = (parts: any[]) => ({ response: { modelVersion: 'gemini-4-argon', candidates: [{ finishReason: 'STOP', content: { role: 'model', parts } }],
   usageMetadata: { promptTokenCount: 108, candidatesTokenCount: 40, thoughtsTokenCount: 0 } } });
 
+test('a whitespace-padded stored secret authenticates and retains replay identity when trimmed', async () => {
+  const f = setup();
+  f.home.writeAuth({ bridgeSecret: '  secret \n' });
+  f.deps.accessSecret = () => f.home.readAuth().bridgeSecret!.trim();
+  f.deps.antigravityReplayContext = f.home.antigravityReplayContext;
+  vi.stubGlobal('fetch', async () => { f.calls.backend++; return Response.json(native([{ text: 'accepted' }])); });
+  await run(f.deps, async port => {
+    const first = await post(port, '/v1/responses', initial());
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    f.home.writeAuth({ bridgeSecret: 'secret' });
+    const second = await post(port, '/v1/responses', { ...initial(), input: [...initial().input, ...first.body.output, { role: 'user', content: 'Continue.' }] });
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+  });
+  expect(f.calls.backend).toBe(2);
+});
+
 test.each(['/v1/responses', '/codex-desktop/v1/responses'])('real HTTP %s preserves original state through two turns without API credentials', async endpoint => {
   const f = setup(), sent: any[] = []; let firstParts: any[];
   delete f.deps.desktopAntigravityTargets; // Exercise the release admission policy, including signed HTTP.
