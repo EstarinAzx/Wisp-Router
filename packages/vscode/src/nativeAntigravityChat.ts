@@ -1,4 +1,4 @@
-// Antigravity native chat: Copilot's persisted stateful_marker carries authenticated original model parts.
+// Antigravity native chat: persisted markers and encrypted reasoning carry authenticated original parts.
 // Depends on the shared bounded transport, native-result validator, AES-GCM and request pairing checks.
 import * as vscode from 'vscode';
 import {
@@ -18,8 +18,18 @@ const accountError = (): never => { throw new Error('Antigravity sign-in changed
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const HISTORY_BYTES = 16 * 1024 * 1024;
 const tooLarge = (): never => { throw new Error('Antigravity conversation is too large to retain safely. Start a new chat with less context.'); };
+// The supported host exposes this part, but the extension's stable API typings predate it.
+const ThinkingPart = (vscode as unknown as { LanguageModelThinkingPart?: new (value: string | string[], id?: string,
+  metadata?: Record<string, unknown>) => { value: string | string[]; metadata?: Record<string, unknown> } }).LanguageModelThinkingPart;
+const thinkingMarker = (part: unknown): string | undefined => {
+  if (!ThinkingPart || !(part instanceof ThinkingPart)) return;
+  const marker = part.metadata?.encrypted_content;
+  return typeof marker === 'string' ? marker : undefined;
+};
+export const antigravityNativeStateSize = (part: unknown): number =>
+  part instanceof vscode.LanguageModelDataPart && part.mimeType === MIME ? part.data.byteLength : Buffer.byteLength(thinkingMarker(part) ?? '');
 
-// shortcut: Local mode sends reference-only continuations; reload/eviction requires a new chat.
+// shortcut: Agent Host tool rounds send reference-only continuations; reload/eviction requires a new chat.
 // Classic Copilot retains its encrypted per-turn packets and does not depend on this cache.
 export class NativeAntigravityHistory {
   private entries = new Map<string, string>();
@@ -68,6 +78,8 @@ const turnsFrom = (messages: readonly vscode.LanguageModelChatRequestMessage[], 
   if (role === 3 && conversationStarted) return historyError();
   if (role !== 3) conversationStarted = true;
   const turn: AntigravityTurn = { role: role === 3 ? 'system' : role === 2 ? 'assistant' : 'user', content: '', toolCalls: [], toolResults: [] };
+  let marker: string | undefined;
+  const carriers = new Set<string>();
   for (const part of message.content) {
     if (part instanceof vscode.LanguageModelTextPart) turn.content += part.value;
     else if (part instanceof vscode.LanguageModelToolCallPart) {
@@ -76,11 +88,16 @@ const turnsFrom = (messages: readonly vscode.LanguageModelChatRequestMessage[], 
     } else if (part instanceof vscode.LanguageModelToolResultPart) {
       if (turn.role !== 'user' || part.content.some(p => !(p instanceof vscode.LanguageModelTextPart))) return historyError();
       turn.toolResults!.push({ callId: part.callId, content: part.content.map(p => (p as vscode.LanguageModelTextPart).value).join('') });
-    } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType === MIME) {
-      if (turn.role !== 'assistant' || turn.nativeParts) return historyError();
-      const original = readMarker(part, context, binding);
-      if (seen.has(original.marker)) return historyError();
-      seen.add(original.marker); turn.nativeParts = original.parts;
+    } else if ((part instanceof vscode.LanguageModelDataPart && part.mimeType === MIME) || (ThinkingPart && part instanceof ThinkingPart)) {
+      const isData = part instanceof vscode.LanguageModelDataPart, carrier = isData ? 'marker' : 'thinking';
+      if (turn.role !== 'assistant' || carriers.has(carrier)) return historyError();
+      carriers.add(carrier);
+      if (!isData && (Array.isArray(part.value) ? part.value.length !== 0 : part.value !== '')) return historyError();
+      const encoded = isData ? undefined : thinkingMarker(part);
+      if (!isData && (!encoded || encoded.length > 91024)) return historyError();
+      const original = readMarker(isData ? part : new vscode.LanguageModelDataPart(Buffer.from(`antigravity\\${encoded}`), MIME), context, binding);
+      if ((marker && marker !== original.marker) || (!marker && seen.has(original.marker))) return historyError();
+      marker = original.marker; seen.add(marker); turn.nativeParts = original.parts;
     } else if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith('image/') && turn.role === 'user') {
       (turn.images ??= []).push({ mimeType: part.mimeType, dataBase64: Buffer.from(part.data).toString('base64') });
     } else {
@@ -120,9 +137,9 @@ export const provideAntigravityChatResponse = async (args: {
     && first instanceof vscode.LanguageModelDataPart && first.mimeType === MIME;
   let messages: AntigravityTurn[];
   if (referenceOnly) {
-    // Local prepends previous_response_id, then new instructions and incremental tool/user input.
+    // Agent Host prepends previous_response_id, then new instructions and incremental input.
     const original = readMarker(first, context, binding), saved = args.history.get(original.marker);
-    if (!saved) throw new Error('Antigravity Local chat state is no longer available after reload or cache eviction. Start a new chat.');
+    if (!saved) throw new Error('Antigravity incremental chat state is no longer available after reload or cache eviction. Start a new chat.');
     const tail = turnsFrom(args.messages.slice(1), context, binding);
     if (tail.some(t => t.role === 'assistant')) return historyError();
     const instructions = tail.filter(t => t.role === 'system');
@@ -156,7 +173,7 @@ export const provideAntigravityChatResponse = async (args: {
   const output: vscode.LanguageModelResponsePart[] = [];
   let checkpoint: { marker: string; turn: AntigravityTurn } | undefined;
   try {
-    const result = parseAntigravityNativeResult(raw), parts = result.candidates[0].content.parts;
+    const result = parseAntigravityNativeResult(raw, undefined, args.model), parts = result.candidates[0].content.parts;
     const used = new Set(messages.flatMap(m => m.toolCalls ?? []).map(call => call.id));
     const calls: vscode.LanguageModelToolCallPart[] = [];
     let text = '';
@@ -178,6 +195,8 @@ export const provideAntigravityChatResponse = async (args: {
     checkpoint = { marker, turn: { role: 'assistant', content: text, nativeParts: parts,
       toolCalls: calls.map(call => ({ id: call.callId, name: call.name, argsJson: JSON.stringify(call.input) })) } };
     output.push(new vscode.LanguageModelDataPart(Buffer.from(`antigravity\\${marker}`), MIME));
+    // The SDK persists reasoning.encrypted_content across user turns; response IDs alone are lost.
+    if (ThinkingPart) output.push(new ThinkingPart([], undefined, { encrypted_content: marker }) as unknown as vscode.LanguageModelResponsePart);
     if (text) output.push(new vscode.LanguageModelTextPart(text));
     output.push(...calls);
     output.push(new vscode.LanguageModelDataPart(Buffer.from(JSON.stringify({ prompt_tokens: usage.promptTokenCount,

@@ -40,7 +40,7 @@ import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
 import { isAntigravityProvider, fetchAntigravityModelInfos, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds, type AntigravityModelInfo } from '@wisp/core';
 import { antigravityNativeChatError } from './nativeChatSupport';
-import { NativeAntigravityHistory, provideAntigravityChatResponse } from './nativeAntigravityChat';
+import { NativeAntigravityHistory, provideAntigravityChatResponse, antigravityNativeStateSize } from './nativeAntigravityChat';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -385,7 +385,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     const p = deps.providers.find(p => p.id === _model.id);
     // Encrypted state hides its tokenizer input. Charge bytes conservatively instead of zero tokens.
     const stateBudget = typeof text !== 'string' && p && isAntigravityProvider(p)
-      ? text.content.reduce((total: number, part) => total + (part instanceof vscode.LanguageModelDataPart && part.mimeType === 'stateful_marker' ? part.data.byteLength : 0), 0) : 0;
+      ? text.content.reduce((total: number, part) => total + antigravityNativeStateSize(part), 0) : 0;
     return Math.ceil(str.length / 4) + stateBudget;
   },
 });

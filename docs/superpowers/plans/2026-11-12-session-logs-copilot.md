@@ -46,11 +46,18 @@ Selected API: `createSessionLogger(source, home?)` returns `begin(protocol, iden
 
 Files: begin `packages/vscode/src/nativeAntigravityChat.ts`, `chatProvider.ts`, core `antigravityResponses.ts`/`antigravityClient.ts`; tests `packages/core/tests/vscodeArgon.test.ts`, `vscodeChat.test.ts`; `packages/vscode/tests/argon-host.cjs`; parity docs. Do not assume all need edits.
 
-- [ ] Identify installed VS Code/Copilot harness version and trace its actual request/marker conversion. Read relevant existing pinned source; refresh official source if necessary. Retain sanitized evidence for the two supplied errors.
-- [ ] Reproduce text response for Antigravity Claude and tool-follow-up for Carbon in the actual pictured Copilot harness. Distinguish native response validation, request conversion and upstream failure. Use the new session diagnostics to isolate boundaries without logging sensitive content.
-- [ ] Write a minimal failing regression for each demonstrated root cause, confirm RED, make the smallest shared fix, confirm GREEN. Keep replay/account binding, original tool IDs, complete responses and cancellation enforced.
-- [ ] Exercise classic/native and Local continuation plus the Copilot SDK/Agent Host path; cover other supported providers' text/tool requests using existing fixtures. Record actual UI vs intercepted-I/O evidence separately.
-- [ ] Finish parity docs/tests and CodeRabbit checkpoint, with exact scope and review dispositions, then commit locally. If a real upstream/platform dependency blocks one probe, preserve the negative evidence and continue independent authorized work; do not fake acceptance.
+- [x] Identify installed VS Code/Copilot harness version and trace its actual request/marker conversion. Read relevant existing pinned source; refresh official source if necessary. Retain sanitized evidence for the two supplied errors.
+- [x] Reproduce text response for Antigravity Claude and tool-follow-up for Carbon in the actual pictured Copilot harness. Distinguish native response validation, request conversion and upstream failure. Use the new session diagnostics to isolate boundaries without logging sensitive content.
+- [x] Write a minimal failing regression for each demonstrated root cause, confirm RED, make the smallest shared fix, confirm GREEN. Keep replay/account binding, original tool IDs, complete responses and cancellation enforced.
+- [x] Exercise classic/native and Local continuation plus the Copilot SDK/Agent Host path; cover other supported providers' text/tool requests using existing fixtures. Record actual UI vs intercepted-I/O evidence separately.
+- [x] Finish parity docs/tests and CodeRabbit checkpoint, with exact scope and review dispositions, then commit locally. If a real upstream/platform dependency blocks one probe, preserve the negative evidence and continue independent authorized work; do not fake acceptance.
+
+Unit2 evidence: actual VS Code1.146.0 / Copilot0.74.0 SDK reproduced both failures, then Carbon and Claude
+Opus5.5 high each completed a file-read tool cycle and a following user turn. Classic Local UI required
+GitHub sign-in and was stopped before transport; its real API path passed synthetic tests. Direct Claude
+forced ANY tool mode returned HTTP400; automatic selection is qualified. These are documented limits,
+not passing live Local/forced-tool claims. Core2120/TUI187, typechecks/build pass. CodeRabbit completed
+8/8 paths with zero issues at1/3. Exact revision/evidence: local `.claude/wisp-2.2.11/unit2-receipt.json`.
 
 ## Unit 3: release readiness and integration
 

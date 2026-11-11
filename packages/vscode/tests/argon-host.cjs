@@ -40,9 +40,12 @@ exports.run = async () => {
     for await (const part of first.stream) parts.push(part);
     const marker = parts.find(p => p instanceof vscode.LanguageModelDataPart);
     const call = parts.find(p => p instanceof vscode.LanguageModelToolCallPart);
+    const thinking = parts.find(p => p instanceof vscode.LanguageModelThinkingPart);
     assert.equal(marker?.mimeType, 'stateful_marker');
     assert.equal(call?.callId, 'native-host-call');
     assert(!Buffer.from(marker.data).toString().includes('private'));
+    assert.deepEqual(thinking?.value, []);
+    assert.equal(typeof thinking?.metadata?.encrypted_content, 'string');
     // Mirror Copilot's persisted round: only the marker string is saved, then prefixed with model.id.
     const saved = JSON.parse(JSON.stringify({ marker: Buffer.from(marker.data).toString().split('\\')[1],
       call: { id: call.callId, name: call.name, input: call.input } }));
@@ -54,8 +57,8 @@ exports.run = async () => {
     const second = await model.sendRequest([...input, restored, vscode.LanguageModelChatMessage.User([
       new vscode.LanguageModelToolResultPart('native-host-call', [new vscode.LanguageModelTextPart('synthetic result')]),
     ])], options, cancellation.token);
-    let text = '';
-    for await (const part of second.stream) if (part instanceof vscode.LanguageModelTextPart) text += part.value;
+    let text = ''; const secondParts = [];
+    for await (const part of second.stream) { secondParts.push(part); if (part instanceof vscode.LanguageModelTextPart) text += part.value; }
     assert.equal(text, 'Synthetic continuation complete.');
     assert.deepEqual(requests[1].request.contents[1].parts, nativeParts);
     assert.equal(requests[1].request.contents[2].parts[0].functionResponse.id, 'native-host-call');
@@ -70,16 +73,34 @@ exports.run = async () => {
     assert.equal(localText, 'Synthetic continuation complete.');
     assert.deepEqual(requests[2].request.contents[1].parts, nativeParts);
     assert.equal(requests[2].request.contents[2].parts[0].functionResponse.response.result, 'Local result');
+    // The SDK retains reasoning.encrypted_content, not response-id markers, in full history.
+    const sdkAssistant = output => vscode.LanguageModelChatMessage.Assistant(output.flatMap(part => {
+      if (part instanceof vscode.LanguageModelThinkingPart) return [new vscode.LanguageModelThinkingPart([], 'rs_restored',
+        JSON.parse(JSON.stringify({ encrypted_content: part.metadata.encrypted_content })))];
+      return part instanceof vscode.LanguageModelTextPart || part instanceof vscode.LanguageModelToolCallPart ? [part] : [];
+    }));
+    const sdk = await model.sendRequest([...input, sdkAssistant(parts), vscode.LanguageModelChatMessage.User([
+      new vscode.LanguageModelToolResultPart('native-host-call', [new vscode.LanguageModelTextPart('synthetic result')]),
+    ]), sdkAssistant(secondParts), vscode.LanguageModelChatMessage.User('Next turn')], options, cancellation.token);
+    let sdkText = '';
+    for await (const part of sdk.stream) if (part instanceof vscode.LanguageModelTextPart) sdkText += part.value;
+    assert.equal(sdkText, 'Synthetic continuation complete.');
+    assert.deepEqual(requests[3].request.contents[1].parts, nativeParts);
+    assert.equal(requests[3].request.contents[4].parts[0].text, 'Next turn');
     let refused = false;
     try {
       const invalid = await model.sendRequest([...input, restored, vscode.LanguageModelChatMessage.User([
         new vscode.LanguageModelToolResultPart('native-host-call ', [new vscode.LanguageModelTextPart('wrong identity')]),
       ])], options, cancellation.token);
       for await (const _part of invalid.stream) assert.fail('Invalid continuation emitted output');
-    } catch (error) { assert.match(String(error), /Argon/); refused = true; }
+    } catch (error) { assert.match(String(error), /Antigravity conversation state/); refused = true; }
     assert(refused, 'Unknown result identity must be refused');
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 4);
     fs.writeFileSync(path.join(home, 'receipt.json'), JSON.stringify({ passed: true, vscode: vscode.version,
-      model: model.id, requests: requests.length, originalPartsRestored: true, localContinuation: true, invalidResultRefused: true, providerNetwork: false }, null, 2));
+      model: model.id, requests: requests.length, originalPartsRestored: true, localContinuation: true,
+      sdkEncryptedHistory: true, invalidResultRefused: true, providerNetwork: false }, null, 2));
+  } catch (error) {
+    fs.writeFileSync(path.join(home, 'receipt.json'), JSON.stringify({ passed: false, error: String(error) }));
+    throw error;
   } finally { globalThis.fetch = originalFetch; cancellation.dispose(); }
 };

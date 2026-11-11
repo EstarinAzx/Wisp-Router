@@ -24,10 +24,14 @@ upstream availability. Image-generation models remain refused because the adapte
 channel. Inquire is a separate editor command and remains unavailable for Antigravity.
 
 The adapter requires VS Code 1.145.3 or newer and supports text, user image inputs, tool definitions,
-required tool mode and text tool results. Original tool-call IDs survive continuation; a missing ID is
+auto tool selection and text tool results. Original tool-call IDs survive continuation; a missing ID is
 an error, not an invented ID. Replies are buffered until the complete native response is validated,
 before any tools are handed to VS Code. Cancellation aborts transport; incomplete or truncated responses
-fail without executing their tool calls. Response structure is validated independently of model names.
+fail without executing their tool calls. Cloud Code reports Claude tool-use completion as `OTHER`.
+Native chat accepts that case only when the returned model version exactly matches the requested
+Claude model and the complete response contains well-formed tool calls. Unknown tools, missing IDs,
+invalid arguments, missing usage, truncation and safety stops still fail before output is delivered.
+The Bridge's Argon validator remains `STOP`-only.
 The Bridge's existing Argon qualification remains separate from this native chat path.
 Native requests retain the same request ID and body when failing over an explicit capacity rejection;
 ambiguous transport failures and rate limits are not automatically retried.
@@ -43,27 +47,30 @@ stale native rows. The descriptor's validated output reserve also takes preceden
 caps in the outgoing request.
 
 Each assistant turn carries an AES-GCM encrypted packet in Copilot's `stateful_marker` data
-part. It contains the original model parts, thought signatures and tool IDs, bound to the account,
+part and the SDK's reasoning `encrypted_content`. Both contain the same packet; no plaintext thinking
+is emitted. It contains the original model parts, thought signatures and tool IDs, bound to the account,
 endpoint, exact model and Copilot conversation identity. The account's refresh token supplies secret key
 material with a separate native-chat domain label; no Bridge start or Bridge secret is needed.
 Restored assistant text and tool calls must match the authenticated native parts before transport.
 System instructions stay system instructions, and positioned mid-conversation system turns are refused
 rather than silently moved. Credential changes during generation suppress delivery.
 
-VS Code's **Local** session mode sends a previous-response marker plus incremental input, rather than
-the full conversation. Wisp restores that path from an in-memory cache bounded to 32 checkpoints and
+VS Code's **Copilot SDK / Agent Host** sends a previous-response marker plus incremental input during
+tool continuation. Wisp restores that path from an in-memory cache bounded to 32 checkpoints and
 16 MiB of serialized history. Markers are authenticated for the account, model and conversation before
-cache access; new leading instructions replace the cached ones. Local chats require a new conversation
-after extension reload or cache eviction. No conversation files or extra credentials are written.
-Classic Copilot history continues to use its self-contained encrypted packets without depending on
-that cache. Both paths report the validated upstream prompt, output and reasoning token counts.
+cache access; new leading instructions replace the cached ones. An incremental continuation requires
+a new conversation after extension reload or cache eviction. Between user turns, the SDK sends full
+history without response-ID markers; encrypted reasoning packets restore the original parts without
+that cache. Classic **Local** history keeps its self-contained marker packets. If a host returns both
+carriers, they must match; duplicates or conflicting packets are refused. No conversation files or
+extra credentials are written. Both paths report validated upstream usage.
 
 The carrier is a pinned Copilot compatibility contract, not a promise about arbitrary custom MIME
 parts. Inspected source at VS Code commit `dcd3ad6e368fbe19d03f37054a40dbaf40d676f4`:
 [response and request conversion](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/vscode-node/extChatEndpoint.ts),
 [marker encoding](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/common/statefulMarkerContainer.tsx),
 and [persisted tool rounds](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/extension/prompt/common/toolCallRound.ts).
-The [Local handler](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostByokLmHandler.ts)
+The [Agent Host handler](https://github.com/microsoft/vscode/blob/69047191fc427f2f92828279aae1d90d8eeda7ab/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostByokLmHandler.ts)
 and its [incremental proxy](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/src/vs/platform/agentHost/node/copilot/byokLmProxyService.ts)
 establish the separate reference-only continuation shape.
 Those source functions were exercised with synthetic rounds, and an isolated VS Code 1.145.3 host
@@ -76,6 +83,19 @@ Changing accounts or models also requires a new chat. Packets are limited to 64 
 and encrypted bytes count conservatively toward the estimated token budget. Automated generation tests
 intercept provider I/O; advertising upstream limits is not a full-window generation qualification.
 Live coverage of every model and interactive Copilot compaction remain unverified.
+
+On 2026-11-12, the installed VS Code 1.146.0 (`69047191fc`) / Copilot 0.74.0 SDK harness reproduced
+both failures in an isolated development host with live Antigravity transport: Claude tool calls ended
+with `OTHER`, and a Carbon conversation lost its marker on the next user turn. After correction,
+`gemini-4-carbon-high` and `claude-opus-5-5-high` each read a controlled workspace file, returned its test
+word, and answered a subsequent user turn. The actual UI and Agent Host requests were observed;
+these are distinct from synthetic `vscode.lm` tests. Account entitlement and other model variants are
+not established by those probes. A separate direct Claude forced-tool (`ANY`) probe returned HTTP 400;
+the qualified harness uses automatic tool selection. Existing conversations whose packets were already
+lost need a new chat.
+The separate classic Local UI requested GitHub sign-in in the isolated profile, so its live probe
+stopped before provider transport. Its real VS Code API path passed with synthetic provider I/O;
+that does not establish a signed-in Local UI tool cycle.
 
 ## Codex context
 
@@ -133,5 +153,6 @@ without `argon-host-test.txt` containing `synthetic-only` and the exact syntheti
 declared at its top. Set the temporary config to provider `antigravity` and model
 `gemini-4-argon-high`; disable the built-in Copilot extension in that test process. It invokes Wisp's
 real registered model through `vscode.lm`, intercepts every provider fetch and writes `receipt.json`.
-It tests both full-history and Local marker-only continuation. It never invokes a real tool or changes
+It tests classic full-history, Agent Host marker-only continuation and persisted SDK encrypted reasoning.
+It never invokes a real tool or changes
 an installed Wisp extension.
