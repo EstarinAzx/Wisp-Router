@@ -111,7 +111,7 @@ All notable changes to **Wisp** are documented here. Format follows
 - The `codex-wisp` launcher is delivered by the terminal/npm package, not by the extension.
 - **wisp-slot: unchanged.**
 
-## [1.13.6] ? 2026-09-07
+## [1.13.6] — 2026-09-07
 
 ### Fixed
 
@@ -122,7 +122,7 @@ All notable changes to **Wisp** are documented here. Format follows
 
 ### Surfaces
 
-- **VS Code: 1.13.6** ? bundles the same core fixes as **wisp-router 2.1.2**.
+- **VS Code: 1.13.6** — bundles the same core fixes as **wisp-router 2.1.2**.
 - **wisp-slot: unchanged.**
 
 ## [1.13.5] — 2026-09-06

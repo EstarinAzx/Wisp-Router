@@ -171,7 +171,7 @@ Changes up to 2.0.10 are folded into the product changelog at
 - **VS Code extension: 1.13.6, unchanged.** The existing version is attached to the release as usual.
 - **wisp-slot: unchanged.**
 
-## [2.1.2] ? 2026-09-07
+## [2.1.2] — 2026-09-07
 
 ### Fixed
 
@@ -183,8 +183,8 @@ Changes up to 2.0.10 are folded into the product changelog at
 
 ### Surfaces
 
-- **npm / TUI / Bridge: 2.1.2** ? both Codex caching fixes.
-- **VS Code extension: 1.13.6** ? bundles the same core, including its hosted Bridge.
+- **npm / TUI / Bridge: 2.1.2** — both Codex caching fixes.
+- **VS Code extension: 1.13.6** — bundles the same core, including its hosted Bridge.
 - **wisp-slot: unchanged.** Other providers retain their existing request mapping.
 
 ### Notes

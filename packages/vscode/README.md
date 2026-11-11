@@ -2,9 +2,9 @@
 
 **Experimental Desktop bridge:** ChatGPT Desktop (Codex) can use Wisp aliases alongside native models. See the [README preview](https://github.com/EstarinAzx/Wisp-Router#chatgpt-desktop-codex-bridge--experimental). Compatibility varies by Provider and model; verification boundaries are described below.
 
-**Companion 1.14.2:** the extension-hosted Bridge implements terminal 2.2.5's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
+**Companion 1.14.5:** the extension-hosted Bridge implements terminal 2.2.8's signed desktop protocol 5, including native voice signaling and qualified opt-in Antigravity routing. Native Codex names retain their full capabilities and desktop sign-in despite shared route overrides or Alias collisions. Configuration, refresh and rollback belong to terminal `wisp codex-desktop` or `/gpt-desktop on|off` in its TUI. Installation and running-Bridge handover are separate actions. [Desktop setup and limits](https://github.com/EstarinAzx/Wisp-Router/blob/main/docs/codex-desktop.md).
 
-Update the terminal setup command and serving Bridge together; older protocols are refused. A protocol-3 setup needs journaled disable then enable for voice settings. Only Antigravity `gemini-3.8-flash-tiered` is qualified under explicit compatibility: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Strict mode and other Antigravity targets remain excluded. Native context limits still apply. Desktop qualification used the standalone Bridge; installed VS Code host behavior remains a separate verification boundary. Coordinate any installation/reload around active clients; keep the current working Bridge running until a handover is explicitly arranged. Slot is unchanged.
+Update the terminal setup command and serving Bridge together; older protocols are refused. A protocol-3 setup needs journaled disable then enable for voice settings. Antigravity `gemini-3.8-flash-tiered` and the exact `gemini-4-argon-low`, `gemini-4-argon-medium` and `gemini-4-argon-high` targets are qualified under explicit compatibility: developer notes retain their text/order but apply globally, losing original placement and temporal scope. Strict mode and other Antigravity targets remain excluded. Native context limits still apply. See the [2.2.8 release evidence and limits](../../docs/releases/v2.2.8.md) for Desktop and extension-host acceptance. Coordinate any installation/reload around active clients; keep the current working Bridge running until a handover is explicitly arranged. Slot is unchanged.
 
 **Run your ChatGPT or Claude.ai subscription as a model inside VS Code's GitHub Copilot chat — and route external tools like Claude Code onto the same backends.** Sign in with your ChatGPT or Claude.ai account and Codex or Claude models answer right in the native **Chat view**, **Agent mode**, and the **`Ctrl+I`** picker — on your own subscription, no API key. Flip the **Bridge** on and the very same providers become a local endpoint that **Claude Code** and the **Copilot CLI** can run on too.
 
@@ -18,7 +18,7 @@ Wisp is a **BYOK model router** for the Copilot harness, registering your own ba
 
 Net: run Copilot's chat / agent / edit experience — and Claude Code's — on the model access you already pay for.
 
-- **Version:** 1.14.2
+- **Version:** 1.14.5
 - **Requires:** VS Code 1.104+
 - **Repo:** [github.com/EstarinAzx/Wisp-Router](https://github.com/EstarinAzx/Wisp-Router)
 - **Not on the Marketplace** — install from a `.vsix` release or from source (see [Install](#install)).
@@ -30,7 +30,7 @@ Net: run Copilot's chat / agent / edit experience — and Claude Code's — on t
 1. **Install the extension.** Download the latest `.vsix` from the [GitHub Releases](https://github.com/EstarinAzx/Wisp-Router/releases) page, then in VS Code open **Extensions → ⋯ → Install from VSIX…** and select the file. (Full options, including building from source, are in [Install](#install).)
 2. **Pick a provider.** Open the **Wisp side panel** from the activity-bar icon and choose your **Active Provider**, or run **`Wisp: Set API Key`** from the Command Palette to store a key for it.
    - The default provider is **OpenCode Go**.
-   - For a key-based provider, paste your key — it goes straight to the OS keychain (see [Security](#security)).
+   - For a key-based provider, paste your key — it is saved in `~/.wisp/auth.json` (see [Security](#security)).
    - To use your **ChatGPT subscription**, run **`Wisp: Sign in to Codex`** instead of setting a key.
    - To use your **Claude.ai subscription**, run **`Wisp: Sign in to Claude`** instead of setting a key.
    - For a local, keyless model, pick **Ollama**.
@@ -142,11 +142,12 @@ Inquire is **code-only** and **fails safe**: a block whose search text isn't fou
 
 > The Bridge opens a **local** network listener (`127.0.0.1` only) — treat it as a power-user feature.
 
-The Bridge is the **reverse** of the chat harness: instead of routing your backends *into* VS Code, it exposes them *out* as a local endpoint speaking **two dialects** — OpenAI-compatible and Anthropic Messages — so external tools like **Claude Code** and the **GitHub Copilot CLI** can run on the same providers, including your **ChatGPT (Codex)** and **Claude.ai** subscriptions.
+The Bridge is the **reverse** of the chat harness: instead of routing your backends *into* VS Code, it exposes them *out* as a local endpoint speaking **three dialects** — OpenAI Chat Completions, Anthropic Messages and the supported native Codex Responses subset — so external tools like **Claude Code** and the **GitHub Copilot CLI** can run on the same providers, including your **ChatGPT (Codex)** and **Claude.ai** subscriptions.
 
+- **Hosts.** The extension and terminal (`wisp serve` or `/bridge` in the TUI) host the same Bridge engine and share its configured port and access secret. Only one host can listen on that port at a time.
 - **Turn it on** from the **Wisp side panel** (Bridge **Start / Stop**) or the **`Wisp: Toggle Bridge`** command. While running, the panel shows the **address** (`http://127.0.0.1:41184` by default) and a generated **access secret**, both with copy buttons.
-- **Auth.** Every request needs the access secret — `Authorization: Bearer <secret>` or `x-api-key: <secret>`. The secret is generated on start, lives in the OS keychain, and is shown only while the Bridge is running.
-- **Endpoints.** `GET /v1/models`, `POST /v1/chat/completions` (OpenAI dialect, streaming or not), and `POST /v1/messages` (Anthropic dialect, SSE). A request naming a provider id, alias, or mapped family routes accordingly; anything else falls back to your **Active Provider**.
+- **Auth.** Every request needs the access secret — `Authorization: Bearer <secret>` or `x-api-key: <secret>`. The secret is generated on first use, saved as `bridgeSecret` in `~/.wisp/auth.json`, and reused across host restarts. The panel shows it only while its Bridge is running.
+- **Endpoints.** `GET /v1/models`, `POST /v1/chat/completions` (OpenAI dialect, streaming or not), `POST /v1/messages` (Anthropic dialect, SSE), and `POST /v1/responses` (the [supported Codex subset](../../docs/codex-wisp.md)). A request naming a provider id, alias, or mapped family routes accordingly; anything else falls back to your **Active Provider**.
 - **Copilot CLI, zero setup.** Terminals opened *after* you start the Bridge inherit `COPILOT_*` environment variables that point the Copilot CLI straight at the Bridge — open a new terminal, run `copilot`, and it's already on your Wisp providers.
 - **Claude Code, copy-paste setup.** The panel's **Claude Code** section (Bridge running) offers ready-to-copy env snippets — PowerShell / bash session lines or a project `.claude/settings.json` block — carrying the live address, secret, and model-discovery flag. Paste, open a fresh terminal, run `claude`: every Wisp provider shows up in Claude Code's own `/model` picker (as `claude-wisp-*` rows) with streaming and full tool round-trips, and Claude Code's `/effort` level is forwarded to the backend.
 - **Local only.** The listener binds `127.0.0.1` (never a public interface). Change the port via `bridge.port` in [`~/.wisp/config.json`](#settings).
@@ -176,7 +177,7 @@ Available from the Command Palette (and the editor chrome where noted):
 
 | Command | Shortcut | What it does |
 | --- | --- | --- |
-| **Wisp: Set API Key** | — | Store the Active Provider's key in the OS keychain. |
+| **Wisp: Set API Key** | — | Store the Active Provider's key in `~/.wisp/auth.json`. |
 | **Wisp: List / Choose Model** | — | Fetch the provider's `/models` and pick one. |
 | **Wisp: Inquire** | `Ctrl+Shift+I` / `Cmd+Shift+I` | The inline code edit (also via right-click). |
 | **Wisp: Sign in to Codex** | — | OAuth sign-in with a ChatGPT account. |
@@ -192,7 +193,7 @@ Available from the Command Palette (and the editor chrome where noted):
 Wisp's state lives in the **Wisp home** at `~/.wisp/` and is shared with the Wisp TUI:
 
 - `~/.wisp/config.json` — Active Provider, per-provider models, reasoning Effort, the Routing map, the Custom base URL, and Bridge settings (`bridge.port`, default `41184`; `bridge.aliasPickerShowsModel`, default `true`; `bridge.aliasOnlyModels`, default `true` — Claude Code's `/model` list shows only Aliases; with zero Aliases it falls back to the Provider rows). Managed by the side panel; hand-editable (the extension picks up external edits live).
-- `~/.wisp/auth.json` — API keys and OAuth tokens, owner-only file permissions.
+- `~/.wisp/auth.json` — API keys, OAuth tokens and the shared Bridge access secret; see [Security](#security) for file permissions.
 
 Existing VS Code state (SecretStorage keys, provider/model/routing choices) is migrated into `~/.wisp/` once, on the first launch after upgrading.
 
@@ -207,7 +208,7 @@ Only editor-local tuning remains under VS Code `wisp.*` settings:
 
 ## Security
 
-- **Keys live in `~/.wisp/auth.json`** with owner-only permissions (the same posture as the Codex CLI, Claude Code, and opencode) — never in VS Code settings. Per-provider environment-variable fallbacks exist (e.g. `OPENCODE_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_KEY`).
+- **Keys and the Bridge secret live in `~/.wisp/auth.json`** (`0600` in a `0700` directory on POSIX; Windows relies on the user-profile ACLs) — never in VS Code settings. Per-provider environment-variable fallbacks exist (e.g. `OPENCODE_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_KEY`).
 - **Keys are write-only to the UI** — the stored key value is never exposed back to the webview.
 - **No workspace key redirection.** Built-in provider base URLs are hardcoded in the extension, and the Active Provider + Custom URL live in `~/.wisp/config.json` — outside any workspace's reach — so a malicious workspace can't redirect your Bearer key to an attacker's endpoint.
 - **OAuth tokens** (Codex and Claude) are stored in `auth.json`; sign-out writes a tombstone so a CLI login is not silently re-imported. You can import an existing Codex CLI login (`~/.codex/auth.json`).

@@ -2,10 +2,10 @@
 
 For persistent signed-in desktop configuration, see [Codex desktop integration](codex-desktop.md). The launcher below remains available with its child-only configuration.
 
-Terminal 2.1.5 adds picker Aliases and exact Codex model routes to `codex-wisp` (introduced
-in 2.1.4). Use the 2.1.5 Bridge or the Bridge hosted by companion VS Code extension 1.13.8
-for these routes. These versions are prepared locally; publication and installation are separate.
-Older installed packages do not gain the new behavior automatically.
+Current source versions are terminal **2.2.8** and companion **1.14.5**. Picker Aliases and
+exact Codex model routes were introduced in terminal 2.1.5 / companion 1.13.8; `codex-wisp`
+itself was introduced in 2.1.4. The historical release-preparation evidence below does not
+establish the installed version. Older installed packages do not gain new behavior automatically.
 
 Configure a Wisp Provider and model, then start the updated Bridge (`wisp serve`, `/bridge`
 in the TUI, or the extension's Bridge control). Restart older hosts after updating their package.
@@ -215,12 +215,18 @@ node packages/tui/tests/packagedCodex.check.mjs out/wisp.exe /path/to/unpacked/p
 The optional npm directory must come from `npm pack`, with the matching unpacked platform
 package under `node_modules/@tsd47216/wisp-router-<platform>-<arch>`. Stage copies of the npm
 templates, stamp both package versions and every optional dependency to the terminal version,
-and put the compiled binary in the platform package's `bin/` before packing. Source templates
-remain `0.0.0-dev`, matching release workflow stamping. The check copies artifacts outside
-the repository, empties the child PATH, and verifies launcher failures, existing commands,
-the compiled Responses route, config/auth preservation and npm optional-dependency/cache resolution.
+and put the compiled binary in the platform package's `bin/` before packing. The checked-in npm
+source templates currently contain `2.2.8`, including every platform optional dependency in the
+thin shell. The release workflow stamps the tag version into those manifests and dependency pins
+before packing. The check copies artifacts outside the repository, empties the child PATH,
+and verifies launcher failures, existing commands, the compiled Responses route, config/auth
+preservation and npm optional-dependency/cache resolution.
 
 ## Release surfaces and evidence limits
+
+The following records the historical 2.1.5 / 1.13.8 preparation checkpoint: those versions
+were prepared locally; publication and installation were separate. For current release
+evidence, see [2.2.8 verification and limits](releases/v2.2.8.md).
 
 - **Terminal 2.1.5:** compiled TUI/headless Bridge bundles the shared exact model resolver;
   source, compiled and npm launchers include additive picker Aliases. npm exposes
