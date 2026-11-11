@@ -94,7 +94,7 @@ Native models keep their capabilities and ChatGPT sign-in. Voice uses your exist
 <details>
 <summary><strong>Try the Desktop bridge</strong></summary>
 
-Use terminal **2.2.10** with a matching Bridge, or companion VSIX **1.14.7** when VS Code hosts it. You'll also need an independently installed native Codex CLI. Read the [Desktop setup and rollback guide](docs/codex-desktop.md) first, especially if you already have custom Codex configuration or other clients sharing `CODEX_HOME`.
+Use terminal **2.2.11** with a matching Bridge, or companion VSIX **1.14.8** when VS Code hosts it. You'll also need an independently installed native Codex CLI. Read the [Desktop setup and rollback guide](docs/codex-desktop.md) first, especially if you already have custom Codex configuration or other clients sharing `CODEX_HOME`.
 
 With the Bridge running, use **`/gpt-desktop on`** in Wisp and restart Desktop. To turn routing off, use **`/gpt-desktop off`** and restart Desktop again. Neither command starts or stops the Bridge. Use fresh chats when switching to external models.
 

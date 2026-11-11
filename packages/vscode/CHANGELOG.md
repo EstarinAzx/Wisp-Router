@@ -4,6 +4,22 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.8] - 2026-11-12
+
+### Fixed
+
+- Preserve authenticated Antigravity replay packets through Copilot SDK/Agent Host full-history turns using encrypted reasoning alongside response-ID markers; reject missing, altered or conflicting state.
+- Accept Claude's terminal `OTHER` response only for well-formed native tool calls with exact requested/returned Claude model identity. Other response, tool-ID and account/conversation guards remain enforced.
+
+### Added
+
+- Record bounded, sanitized per-session activity for native chat and the extension-hosted Bridge, readable through terminal `wisp logs` / `wisp log <session-id>` and TUI `/show logs`.
+
+### Surfaces
+
+- **VSIX: 1.14.8**, **terminal/npm: 2.2.11**, **wisp-slot: unchanged at 1.7.5**. Desktop protocol remains **5**.
+- Real Copilot SDK tests covered Carbon high and Claude Opus5.5 high tool cycles and the following user turn. Classic Local live sign-in, forced Claude tool choice, all variants, live compaction and full-window generation retain the [documented limits](../../docs/releases/v2.2.11.md). Existing broken chats need a new chat.
+
 ## [1.14.7] - 2026-11-12
 
 ### Fixed
