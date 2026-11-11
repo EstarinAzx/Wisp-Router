@@ -8,21 +8,21 @@ tags: [context, active-work, session-logs, vscode]
 # Active Work
 
 _Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Current fix: uncommitted changes on main, baseline31b0ab8d9d55eb4c2407c3eb60ffad2a8a52fdb1. Published v2.2.11 remains unchanged at e831d803f6d1baf829e84a527dec75ccaabe88a4._
+_Usage fix committed locally as9bc71ab; release metadata for2.2.12/1.14.9 is in progress. Published v2.2.11 remains unchanged at e831d803f6d1baf829e84a527dec75ccaabe88a4._
 
 ## Current focus
 
-Native VS Code usage reporting for **Codex, Anthropic and Grok is fixed locally and verified**, following khitarashi's2026-11-12 request. The rebuilt development host reports usage; the user's GPT-6 Astra screenshot shows5% instead of0%. Changes remain uncommitted/unreleased; no version bump, tag, publication or installed-client replacement. Published Wisp2.2.11 / companion1.14.8 remains the prior release.
+khitarashi explicitly authorized **"ok release it now"** after confirming the GPT context meter. Prepare and publish **Wisp2.2.12 / companion1.14.9** with the reviewed native Codex/Anthropic/Grok usage fix. Release metadata and local package checks are in progress; no2.2.12 tag/publication yet. Installed clients remain unchanged.
 
 ## Work contract
 
-- **Authority:** khitarashi,2026-11-12 in root515709ef: "Fix native VS Code usage reporting for Codex, Anthropic and Grok, add regression coverage, and verify it in the dev host. Don't publish another release yet." Prior primary-checkout/no-worktree and auth/settings preservation remain.
-- **Requirements/plan:** local `.claude/context-usage-diagnosis/work.md`; forward real native usage, preserve cached prompt accounting, merge Anthropic partial snapshots, verify regressions and host behavior.
+- **Authority:** khitarashi,2026-11-12 in root515709ef: usage fix/regressions/dev-host verification, then explicit "ok release it now", superseding the earlier publication hold. Prior primary-checkout/no-worktree and auth/settings preservation remain. No client installation/restart.
+- **Requirements/plan:** local `.claude/wisp-2.2.12/work.md` owns release progress; `.claude/context-usage-diagnosis/work.md` retains completed implementation/host evidence.
 - **Execution:** root515709ef, inline in primary checkout. Prior2.2.11 relay stays stopped/completed; this is separate unreleased work.
-- **Review:** [[review-policy]] on. New checkpoint native-vscode-usage **passed1/3**, all5 files covered,0 findings, current hashes match; ledger/dispositions in local `.claude/context-usage-diagnosis/work.md` and `review-1/`. Native ExitCode capture was null; completed NDJSON and shell0 retained honestly. Prior release ledger remains closed: logging4/5, Copilot1/3, release-prep1/3 under `.claude/relay/wisp-2.2.11.body.md`.
-- **Integration:** five product/test files remain local on main; `usage-host.cjs` is staged, other edits unstaged. Versioned baton updated; local evidence ignored. No commit/push/publication performed for this fix.
+- **Review:** [[review-policy]] on. Native-vscode-usage **passed1/3**, all5 files covered,0 findings, hashes match. New wisp-2.2.12-release-prep **1/3**, attempt1 reserved/pending; ledger `.claude/wisp-2.2.12/work.md`. Preserve prior closed budgets and original native review's null exit-capture limitation; complete NDJSON establishes its outcome.
+- **Integration:** implementation committed locally on primary main; release metadata will be reviewed, integrated through PR/CI, then tagged/published. Versioned baton; local evidence ignored. No worktrees.
 - **Evidence:** local `.claude/context-usage-diagnosis/`: red.log, green.log, core.log, checks.json, host-receipt.json, review-1/manifest.json/events.ndjson/dispositions.json and final-receipt.json. Published release evidence remains `.claude/wisp-2.2.11/publication-receipt.json`.
-- **Pending:** none. Core/build, synthetic host and CodeRabbit shells finished. Interactive development host intentionally remains open.
+- **Pending:**2.2.12 release metadata review attempt1/3 reserved; local release checks passed, shell3ca1c09c exited0. No PR yet. Local `.claude/wisp-2.2.12/work.md` owns the live review budget/process evidence. Interactive development host remains open.
 - **Checkpoint:** fix complete locally:33 provider tests,2135 full core tests, types/build, six real-extension-host API requests across three providers, user visual GPT5% confirmation and CodeRabbit5/5. Live Anthropic/Grok UI meters were not separately tested.
 
 ## Verified state
@@ -45,7 +45,7 @@ All disposable test hosts stopped and temporary Wisp credential copies removed. 
 
 ## Pick up here
 
-No implementation work remains for the native usage fix; preserve the reviewed local diff and await the user's next request. Do not publish, move the2.2.11 tag, restart the old relay or repeat unchanged reviews. Review the final receipt/current source hashes before integrating. The user confirmed the GPT development-host meter at5%; no live Anthropic/Grok meter claim. Prior Carbon smoke and published-release limits remain historical evidence.
+Continue the authorized2.2.12 release from its local work ledger. After local package checks, review only new release metadata, preserve matching native-usage review, push PR and verify platform CI/review before main integration/tag. Verify published GitHub/npm artifacts and finish context. Do not move older tags or restart the completed2.2.11 relay. No installed-client replacement/restart.
 
 ## Related
 

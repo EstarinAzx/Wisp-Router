@@ -1,6 +1,6 @@
 {
   "name": "@tsd47216/wisp-router-win32-x64",
-  "version": "2.2.11",
+  "version": "2.2.12",
   "license": "MIT",
   "description": "wisp-router compiled binary for Windows x64",
   "os": [

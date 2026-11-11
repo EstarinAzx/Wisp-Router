@@ -9,9 +9,9 @@ tags: [context, pick-up]
 
 Use the primary checkout on local `main`; [[active-work]] is the current baton. Historical notes and the old worktree are not queues.
 
-**Native VS Code usage fix is complete locally and unreleased.** Codex/Anthropic/Grok usage reporting, cached-token accounting and Anthropic split updates are verified.33 provider/2135 core tests, types/build, six synthetic real-host requests and user GPT5% screenshot passed. Read [[active-work]] and local `.claude/context-usage-diagnosis/final-receipt.json`; preserve the uncommitted reviewed diff. The user explicitly said not to publish another release.
+**Wisp2.2.12 / companion1.14.9 release is authorized and in progress.** khitarashi's "ok release it now" supersedes the earlier hold. Native usage fix is committed locally as9bc71ab; metadata/package checks are running. Read [[active-work]] and local `.claude/wisp-2.2.12/work.md`; preserve existing implementation evidence and budgets. No client installation/restart.
 
-CodeRabbit native-vscode-usage passed1/3,5/5 files,0 findings; no pending review/worker. Prior2.2.11 checkpoints stay closed: logging4/5, Copilot1/3, release-prep1/3. Published2.2.11 remains unchanged. No automatic commit/push/release or relay restart.
+CodeRabbit native-vscode-usage passed1/3,5/5 files,0 findings. New2.2.12-release-prep1/3 is pending after passing local checks. Prior2.2.11 checkpoints stay closed: logging4/5, Copilot1/3, release-prep1/3. Preserve historical tags and completed relay state.
 
 ## Related
 
