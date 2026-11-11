@@ -38,6 +38,7 @@ import { fetchEffortOptions } from './modelFetch';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth, quotaCurrent } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow, RoutingSection } from './modes';
+import { logBackMode } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
 import { wrapWords } from './widgets';
 import {
@@ -52,8 +53,7 @@ import {
 } from './routingScreens';
 import { PaletteScreen } from './paletteScreen';
 import { TestScreen, streamTestReply } from './testScreen';
-import { BridgeScreen, HelpScreen, InfoScreen, LogScreen } from './infoScreens';
-import { createRingLog } from './logBuffer';
+import { BridgeScreen, HelpScreen, InfoScreen, LogScreen, SessionListScreen } from './infoScreens';
 import { copyText } from './clipboard';
 import { runGptDesktop } from './codexDesktop';
 import { antigravityCompatResult } from './antigravityCompat';
@@ -79,12 +79,8 @@ export { streamTestReply } from './testScreen';
 
 // ----------------------------------------- Bridge ----------------------------------------- //
 
-// One host instance for the session — /bridge starts it, /bridge off stops it. The log seam
-// feeds the /show-log ring buffer (#122) — the same lines `wisp serve` prints, collected for
-// the process lifetime whether the Log Screen is open or not. The listener dies with the
-// process on /quit — headless hosting is `wisp serve`, not a TUI leftover.
-const bridgeLog = createRingLog();
-const bridge = createTuiBridge((line) => bridgeLog.push(line));
+// One local host; log screens read the shared store without starting this listener.
+const bridge = createTuiBridge(() => {});
 
 // ----------------------------------------- Copied indicator ----------------------------------------- //
 
@@ -489,7 +485,7 @@ export const App = () => {
         return;
       }
       // Opens with the Bridge in any state (#122) — the Screen itself shows the not-running hint.
-      case 'show-log': setMode({ kind: 'log' }); return;
+      case 'show-log': setMode({ kind: 'logs' }); return;
       case 'help': setMode({ kind: 'help' }); return;
       case 'quit': exitTui(); return;
       default: setStatus(`Unknown command: /${command}`);
@@ -509,7 +505,8 @@ export const App = () => {
       if (inputRef.current) inputRef.current.value = `/${pick.name} `;
       return;
     }
-    runCommand(`/${pick.name}`);
+    // Literal arguments (like /show logs) are part of the selected command; optional hints are not.
+    runCommand(`/${pick.name}${pick.args && !pick.args.startsWith('[') ? ` ${pick.args}` : ''}`);
   };
 
   // Palette suggestion + highlight live above the keyboard handler so Tab can reuse the clamped
@@ -555,7 +552,8 @@ export const App = () => {
           ? backToSection(sectionOf(mode.row), 'Cancelled.')
         : mode.kind === 'routing-section' ? setMode({ kind: 'routing' })
         : mode.kind === 'test' && mode.phase !== 'streaming' ? backToInput() // finished screen just closes
-        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'log' || mode.kind === 'info' ? backToInput() // info screens just close — nothing to cancel
+        : mode.kind === 'log' || mode.kind === 'logs' ? setMode(logBackMode(mode))
+        : mode.kind === 'bridge' || mode.kind === 'help' || mode.kind === 'info' ? backToInput() // info screens just close — nothing to cancel
         : backToInput('Cancelled.');
       return;
     }
@@ -647,7 +645,8 @@ export const App = () => {
 
       {mode.kind === 'bridge' && <BridgeScreen address={mode.address} secret={mode.secret} cols={panelCols} />}
 
-      {mode.kind === 'log' && <LogScreen log={bridgeLog} running={bridge.isRunning()} cols={panelCols} />}
+      {mode.kind === 'logs' && <SessionListScreen onSelect={id => setMode({ kind: 'log', id })} />}
+      {mode.kind === 'log' && <LogScreen id={mode.id} cols={panelCols} />}
 
       {mode.kind === 'help' && <HelpScreen onDone={backToInput} />}
 

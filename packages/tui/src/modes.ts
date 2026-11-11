@@ -44,8 +44,8 @@ export type Mode =
   | { kind: 'bridge'; address: string; secret: string }
   | { kind: 'help' }
   | { kind: 'info'; title: string; lines: string[]; abort?: AbortController }
-  // Payload-less: the Log Screen reads the shell-owned ring buffer live (#122).
-  | { kind: 'log' }
+  | { kind: 'logs' }
+  | { kind: 'log'; id: string }
   // The /routing chain (#65, sectioned #79): overview (two sections) → section rows → name a new
   // alias / pick a row's Provider → pick its model. 'alias-rename' edits an existing alias's NAME
   // in place (Target kept) — reached from the row's Provider picker. The families section also
@@ -58,3 +58,6 @@ export type Mode =
   | { kind: 'route-model-loading'; row: RouteRow; provider: Provider }
   | { kind: 'route-model-pick'; row: RouteRow; provider: Provider; options: string[] }
   | { kind: 'route-model-free'; row: RouteRow; provider: Provider };
+
+export const logBackMode = (mode: Extract<Mode, { kind: 'log' | 'logs' }>): Mode =>
+  mode.kind === 'log' ? { kind: 'logs' } : { kind: 'input' };

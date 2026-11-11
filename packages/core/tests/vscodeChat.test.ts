@@ -4,6 +4,10 @@ import * as vscode from './fixtures/vscode';
 import { registerWispChatProvider, type ChatProviderDeps } from '../../vscode/src/chatProvider';
 import { PROVIDERS } from '../src/catalog';
 import { codexCatalog } from '../src/codexModels';
+import { mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { createSessionLogger, listLogSessions, readSessionLog } from '../src/sessionLog';
 
 const antigravity = PROVIDERS.find(p => p.id === 'antigravity')!;
 const token = (cancelled = false) => {
@@ -48,6 +52,37 @@ beforeEach(() => {
   });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+it('shares native conversation diagnostics with external readers without storing chat content', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'wisp-native-logs-'));
+  try {
+    const { send } = setup('gemini-3-flash', { sessionLog: createSessionLogger('vscode-chat', home) });
+    await send([user(text('PRIVATE-PROMPT'))], { modelOptions: { _conversationId: 'PRIVATE-A' } });
+    response = () => new Response(frame([], 'MAX_TOKENS'));
+    await expect(send([user(text('PRIVATE-PROMPT'))], { modelOptions: { _conversationId: 'PRIVATE-B' } })).rejects.toThrow();
+    const sessions = listLogSessions(home);
+    expect(sessions).toHaveLength(2);
+    const entries = sessions.flatMap(s => readSessionLog(s.id, home));
+    expect(entries.some(e => e.event === 'error')).toBe(true);
+    expect(entries.some(e => e.event === 'complete')).toBe(true);
+    expect(sessions.every(s => s.inFlight === 0 && s.source === 'vscode-chat')).toBe(true);
+    expect(JSON.stringify(entries)).not.toMatch(/PRIVATE|test-token|answer/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+it('records refused native models and revoked credentials as failures, never successful turns', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'wisp-refused-logs-'));
+  const sessionLog = createSessionLogger('vscode-chat', home);
+  try {
+    await expect(setup('gemini-3.1-flash-image', { sessionLog }).send()).rejects.toThrow();
+    const codex = PROVIDERS.find(p => p.id === 'codex')!;
+    const { provider } = setup('', { providers: [codex], sessionLog });
+    await provider.provideLanguageModelChatResponse({ id: 'codex' }, [user(text('PRIVATE'))],
+      { modelOptions: { _conversationId: 'revoked-conversation' } }, { report: () => {} }, token());
+    expect(listLogSessions(home)).toHaveLength(2);
+    expect(listLogSessions(home).map(s => s.event), JSON.stringify(listLogSessions(home).flatMap(s => readSessionLog(s.id, home)))).toEqual(['error', 'error']);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
 
 describe('native Codex context descriptor', () => {
   it('forwards optional MCP maps unchanged through the registered native Codex request', async () => {

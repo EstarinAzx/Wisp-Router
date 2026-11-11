@@ -24,6 +24,7 @@
  */
 
 import * as vscode from 'vscode';
+import type { SessionLogger } from '@wisp/core';
 import OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildChatModelInfos, lookupModelsDevCaps,
@@ -70,6 +71,7 @@ export type ChatProviderDeps = {
   antigravityStoredCreds?: () => AntigravityCreds | undefined;
   onDidChangeModels?: vscode.Event<void>;
   log: (message: string) => void;
+  sessionLog?: SessionLogger;
 };
 
 // ----------------------------- Message mapping ----------------------------- //
@@ -218,15 +220,18 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     if (!provider) return;
     if (isGeminiApiProvider(provider)) throw new Error('Gemini API is not qualified for VS Code chat.');
     const modelId = resolveModel(deps.modelMap(), provider);
+
+    const controller = new AbortController();
+    const cancellation = token.onCancellationRequested(() => controller.abort());
+    const requestLog = deps.sessionLog?.begin('native', options.modelOptions?._conversationId);
+    requestLog?.event('route', { provider: provider.id, model: modelId });
+    let outcome: 'complete' | 'error' = 'complete';
+    try {
+    if (token.isCancellationRequested) return;
     if (isAntigravityProvider(provider)) {
       const unsupported = antigravityNativeChatError(modelId, vscode.version);
       if (unsupported) throw new Error(unsupported);
     }
-
-    const controller = new AbortController();
-    const cancellation = token.onCancellationRequested(() => controller.abort());
-    try {
-    if (token.isCancellationRequested) return;
 
     if (isAntigravityProvider(provider)) {
       try {
@@ -247,7 +252,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     // assembled tool calls at the end, which map to text / tool-call parts exactly like the OpenAI path.
     if (isCodexProvider(provider)) {
       const creds = await deps.codexCreds();
-      if (!creds) return; // only signed-in Codex is advertised — rare sign-out race
+      if (!creds) { outcome = 'error'; return; } // sign-out race after advertisement
       const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
       const tools = toCodexResponsesTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
       const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
@@ -277,7 +282,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     // assembled tool calls at stream end, mapped to text / tool-call parts exactly like the Codex path.
     if (isAnthropicProvider(provider)) {
       const creds = await deps.anthropicCreds();
-      if (!creds) return; // only signed-in Anthropic is advertised — rare sign-out race
+      if (!creds) { outcome = 'error'; return; } // sign-out race after advertisement
       const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
       const tools = toAnthropicTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
       const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'any' : 'auto';
@@ -309,7 +314,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     // message shape + Responses tools. effort stays the shared EffortLevel (xaiReasoning gates per model).
     if (isXaiProvider(provider)) {
       const creds = await deps.xaiCreds();
-      if (!creds) return; // only signed-in Grok is advertised — rare sign-out race
+      if (!creds) { outcome = 'error'; return; } // sign-out race after advertisement
       const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
       const tools = toCodexResponsesTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
       const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
@@ -333,7 +338,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     }
 
     const client = await deps.clientFor(provider);
-    if (!client) return; // only usable models are advertised, so this is the rare key-revoked race
+    if (!client) { outcome = 'error'; return; } // key revoked after advertisement
 
     // Forward the agent's tools so the model can call them; tool_choice mirrors VS Code's tool mode.
     const tools = toOpenAiTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
@@ -370,7 +375,8 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       deps.log(`[error] chat ${provider.id} ${String(err)}`);
       throw err; // surface real failures to VS Code's chat UI
     }
-    } finally { cancellation.dispose(); }
+    } catch (error) { outcome = 'error'; throw error; }
+    finally { cancellation.dispose(); requestLog?.finish(controller.signal.aborted || token.isCancellationRequested ? 'cancel' : outcome); }
   },
 
   // No tokenizer dependency: a ~4-chars-per-token heuristic is enough for the picker's budgeting.

@@ -75,6 +75,8 @@ Press **Esc** to close the panel and keep the Bridge running. **`/bridge off`** 
 
 If you prefer a terminal without the interface, run **`wisp serve`** instead. It hosts the same Bridge until you press **Ctrl+C**.
 
+Inspect traffic separately with **`wisp logs`**, then **`wisp log <session-id> -f`**. In the TUI, **`/show logs`** opens the same session picker, including chats handled by VS Code. See [session logging](docs/session-logs.md) for identity, privacy and retention limits.
+
 ## ChatGPT Desktop (Codex) bridge — experimental
 
 Wisp now brings your configured models into the signed-in Desktop model picker. Keep your native Codex models and add aliases for external models alongside them. Here's **Grok 4.7** selected through Wisp:

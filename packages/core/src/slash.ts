@@ -30,7 +30,8 @@ export const SLASH_COMMANDS: SlashCommandDef[] = [
   { name: 'gpt-desktop', args: '<on|off>', description: 'Toggle Desktop routing; on applies Antigravity developer notes globally' },
   { name: 'antigravity-compat', args: '[on|off|status]', description: 'Inspect or change Claude client fallback for Antigravity (default off)' },
   { name: 'quota', args: '[refresh [anthropic|codex]]', description: 'Show cached account usage; refresh only on request' },
-  { name: 'show-log', description: "Show the Bridge's log (collects while the Bridge runs, even closed)" },
+  { name: 'show', args: 'logs', description: 'Pick a chat session and follow its logs from any Wisp host' },
+  { name: 'show-log', description: 'Alias for /show logs' },
   { name: 'aliasonly', args: '[on|off]', description: "Claude Code's /model list shows only Aliases (hides Provider rows)" },
   { name: 'modelids', args: '[on|off]', description: "Alias rows in Claude Code's /model list carry their pinned model id" },
   { name: 'help', description: 'List every command with its arguments' },
@@ -46,6 +47,7 @@ export const parseSlash = (input: string): ParsedSlash | undefined => {
   if (!trimmed.startsWith('/')) return undefined;
   const [head, ...args] = trimmed.slice(1).split(/\s+/);
   if (!head) return undefined;
+  if (head.toLowerCase() === 'show' && args.length === 1 && args[0].toLowerCase() === 'logs') return { command: 'show-log', args: [] };
   return { command: head.toLowerCase(), args };
 };
 

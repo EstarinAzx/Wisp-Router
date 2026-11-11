@@ -2,50 +2,50 @@
 type: active-work
 project: wisp
 updated: 2026-11-12
-tags: [context, active-work, vscode, release]
+tags: [context, active-work, session-logs, vscode]
 ---
 
 # Active Work
 
 _Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Runtime release: `c514368c96637b6503817459a444b176c2f89678` / `v2.2.10`._
+_Source: reviewed Unit 1 over ae53b4016e67d14a70061f769559eac6308d767d; exact local commit in `.claude/wisp-2.2.11/unit1-receipt.json`._
 
 ## Current focus
 
-**Release complete:** Wisp **2.2.10**, VS Code companion **1.14.7**, Slot unchanged **1.7.5**. [PR #232](https://github.com/EstarinAzx/Wisp-Router/pull/232) merged with a merge commit; [release workflow 43021318794](https://github.com/EstarinAzx/Wisp-Router/actions/runs/43021318794) passed all four native builds and publication. The [GitHub release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.10) contains the VSIX and four binaries, and all five npm packages are visible at 2.2.10. No installation or client handover was performed.
+Wisp **2.2.11**: shared per-chat session logging is implemented. Unit 1 has passed CodeRabbit; the next root owns the actual VS Code Copilot SDK/Agent Host investigation. No release readiness is claimed yet.
 
-**Workspace guard:** use the primary checkout on local `main`. If elsewhere, locate `refs/heads/main` with `git worktree list --porcelain`, then read that checkout's `.context/pick-up.md`. This is the only current baton. Preserved `wisp/` notes and the retained old worktree are historical, not separate queues.
+## Work contract
 
-## Work contract and completed checkpoint
+- **Authority:** khitarashi, 2026-11-12, root chat 4cbf4b5f-18e7-4f99-84e1-31a6607f68cc: full autonomous engineering, CodeRabbit ON, Traycer root relays, no worktrees, integrate into main and leave release-ready in a fresh ownership-transferred main chat. Approval excerpt and acceptance: local `.claude/relay/wisp-2.2.11.body.md`.
+- **Requirements:** `docs/superpowers/specs/2026-11-12-session-logs-copilot-design.md`; plan `docs/superpowers/plans/2026-11-12-session-logs-copilot.md`. Do not repeat planning or ask for design approval already covered by autonomy.
+- **Execution:** primary checkout only, one inline root owner. `.claude/relay/wisp-2.2.11.traycer.json` owns runtime identity/phase; N=1 meaningful unit per leg, max 20. This checkpoint was written by cef16f29-40b4-42a5-9da6-dbc4cf328168 in leg 2; the control JSON names the current owner. Preserve GUI settings across roots.
+- **Review:** [[review-policy]] on. Session-logs is **passed at 3/3**, no pending run or unresolved finding. Attempt 3 reviewed all 15 TUI paths with zero issues; 19 unchanged non-TUI paths reuse completed attempt 2. Exact source hashes, commands, coverage and dispositions are in the local relay body's single checkpoint ledger; local receipt: `.claude/wisp-2.2.11/unit1-receipt.json`. Copilot/release-prep remain 0/3. Do not reset or reopen the completed logging checkpoint.
+- **Integration:** versioned context/docs; local relay/evidence ignored. Commit/PR/merge into remote main authorized. No tag/publication, actual client installation/restart or historical cleanup. No worktree creation/use.
+- **Pending:** no implementation worker or review. Root transfer identifiers/thread live in relay JSON. Only ACTIVATE grants a successor body ownership.
+- **Checkpoint:** Unit 1 is review-passed; exact local commit is recorded in the receipt. Do not reimplement it. Unit 2 is the next authorized substantive work.
 
-- **Authority:** khitarashi, 2026-11-12: eyeball passed; release now and address uncommitted files. Scoped commit/PR/merge/tag/publication and non-destructive Source Control cleanup are complete. Installation remains a separate request.
-- **Scope:** `docs/releases/v2.2.10.md` describes native Antigravity accounts/discovery, shared text/chat state, dynamic limits, Codex maximum context and MCP schema preservation. Existing Bridge qualification and Desktop protocol 5 are unchanged.
-- **Owner:** root chat `8f60fde8-74fa-49f0-98e5-788163a75924`, primary checkout, owns VS Code fix coordination. The predecessor handoff is complete; no relay or review worker is pending.
-- **Integration:** release source `07c837229364af5cec7673eaced00640d02d1dd5` passed PR build43019841620, then merged as `c514368c96637b6503817459a444b176c2f89678`. The tag points to that merge and its tree is identical to the verified candidate. Later release-verification/context commits change documentation only. Do not reset primary main or revive the old worktree's baton.
-- **Review policy:** independent scoped reviews plus regression-tested correction passes. No persistent CodeRabbit opt-in; the earlier audit checkpoint remains closed at 1/3 with 47-file coverage. Final GPT-budget and MCP-schema reviewers returned no actionable findings and are archived.
-- **Native acceptance:** the user passed basic Argon, Carbon and Codex chat and confirmed account-backed 1M/872K displays. Agent generation tests used intercepted I/O. Full-window requests, actual Pylance dynamic-key invocation, every model/tool combination and interactive compaction are not newly qualified.
-- **Source checks:** core2081/TUI201 (896 assertions), core/TUI typechecks and extension/webview compilation passed. A release-prep run timed out in `authLifecycle.test.ts` Antigravity callback cleanup because OAuth test files share fixed ports; isolated62 and full2081 passed after core file execution was serialized. Production auth code was unchanged.
-- **Package checks:** local Windows launcher/Responses and signed-Desktop smokes passed. Downloaded VSIX and Windows executable match GitHub digests; the VSIX bundle equals the tested build. The published Windows smoke and npm tarball integrity passed. The published npm wrapper downloaded and ran the exact GitHub binary in an isolated home.
-- **Registry:** some lookups initially returned404 while publication became visible. Final registry checks confirmed the dispatcher and all four platform packages at2.2.10. The Windows fallback was independently exercised; no npm version was republished or replaced.
-- **Evidence:** `.claude/vscode-parity/release-2.2.10.json` records final revisions and verification; `.claude/vscode-parity/release-2.2.10/` contains logs, public manifests and downloaded artifacts. `dynamic-models-review.md`, `codex-context-plan.md` and `codex-tool-schema-plan.md` preserve code-review and RED/GREEN evidence.
-- **Cleanup:** all233 pre-existing untracked files are preserved and hash-unchanged. Local `.git/info/exclude` hides `/wisp/` and `/docs/Screenshot 2026-10-13 114007.png`; neither was deleted or published. Canonical `.context/` remains tracked. The original preservation manifest is under `.claude/vscode-parity/main-before-handoff/`.
-- **Preservation:** real settings/auth/provider selection, permissions, hook trust and running clients were preserved. Git's first tag push stalled; a task-local retry used the existing gh credentials without changing persistent authentication configuration. Keep the old worktree until separately authorized to remove it.
+## State
+
+- Shared core `sessionLog.ts` stores bounded safe events, hashed host/protocol/conversation IDs, recent activity and request heartbeats. Bridge request attribution uses AsyncLocalStorage; native VS Code owns request handles. Terminal and extension hosts write the same format.
+- CLI `wisp logs`, bare `wisp log`, `wisp log <id> [-f|--follow]`; TUI `/show logs` and `/show-log` list external sessions and open one. Esc detail -> list -> input. Serve stdout is lifecycle-only. Legacy logs remain untouched; obsolete ring-buffer code was removed.
+- Isolated multi-process tests cover separate serve/CLI/fresh TUI, cross-process writer separation, retention, preserved settings and no content/credential leakage. Final validation: 2097 core tests, 187 TUI tests, core/TUI typechecks and extension/webview compile all pass on pinned Bun1.4.2. Exact command exits and source snapshots are retained locally. Palette selection, typed command, alias and back navigation run in a real headless App.
+- CodeRabbit fixes: advisor routing cannot replace the base chat's route; request-local metadata prevents stale status/model on reused or overlapping turns. Review evidence: `.claude/wisp-2.2.11/review-1/`; RED/GREEN logs and ledger in `.claude/wisp-2.2.11/` and `.superpowers/sdd/2026-11-12-session-logs-copilot/progress.md`.
+- Windows directory rename produced intermittent EPERM in the first lock design; a complete owner file published by hard link avoids that operation. Dead PIDs are reclaimed under a recovery claim; live/unknown locks are preserved. Controlled 200-request probe had 0 missing outcomes after the fix. The filesystem store remains best-effort.
+- TUI span fixture was stale at 2.2.9. Recapture verified only 34 version/padding rows to existing 2.2.10 and six intended command-palette rows; old snapshot and comparison retained. Unit 3 must recapture when versions change. One unrelated Desktop config rename hit transient EPERM; targeted and later full TUI runs passed without unrelated edits.
 
 ## Pick up here
 
-No active release work. Wait for the user's next request. Do not republish2.2.10 or install/restart clients automatically. If installation is requested, use the published VSIX/binaries and coordinate any Bridge handover. Historical held issues remain in [[release-follow-ups]]; they are not a new work queue.
+After ACTIVATE, verify relay ownership and the Unit 1 receipt, then execute **Unit 2**. Unit 1 is complete and reviewed; preserve its hashes and commit. No review/worker is pending. Use TDD and root-cause debugging, then the separate Copilot CodeRabbit checkpoint (0/3).
 
-## Implementation boundaries
+For Unit 2, reproduce the user's actual Copilot SDK/Agent Host failures: Antigravity Claude incomplete/unsupported response and Carbon tool continuation losing replay state. Existing native/intercepted tests are not proof of that UI harness. Inspect relevant `.claude/vscode-parity/argon-research/` sources and the current installed host; filter the huge source-paths.json. Preserve replay/account/model/conversation binding and original tool IDs. Complete CodeRabbit, then release preparation/integration and a fresh final readiness owner. Versions remain 2.2.10/1.14.7 until Unit 3 prepares 2.2.11/1.14.8 if applicable.
 
-- Antigravity native chat requires VS Code1.145.3+. One adapter handles discovered text/chat IDs, including Argon and Carbon. Account metadata supplies context/output/image-input capability. Local history is bounded to32 checkpoints/16MiB and needs a new chat after reload/eviction. Classic encrypted packets preserve original state. Image-generation output and Antigravity Inquire remain unsupported.
-- Native Codex uses the account maximum automatically, with the known default as fallback. `wisp.codexContextWindows` permits smaller exact-model budgets within the known ceiling. Native Codex configuration and public API limits remain separate.
-- Native Codex/Grok preserve client/MCP schemas with explicit `strict:false`. Optional fields and dynamic maps survive. Bridge callers keep their explicit schema policy; execution and permissions remain with the native host.
-- Earlier2.2.9 publication and old provider experiments remain closed. One earlier test-profile askpass socket resisted cleanup; no permissions or user processes were changed to remove it.
+## Preservation
+
+Real auth/settings, permissions, hook trust, running clients, 233 excluded historical files and the retained old worktree are unchanged. Prior 2.2.10 receipt: `.claude/vscode-parity/release-2.2.10.json`. Native full-window generation, all model/tool combinations and live compaction remain incompletely qualified. Run fixed OAuth-port core tests serially. Pinned Bun: task scratch `bun-1.4.2/bun.exe`; do not replace the older global Bun.
 
 ## Related
 
 - [[pick-up]]
 - [[overview]]
-- [[flows]]
-- [[decisions]]
+- [[review-policy]]
 - [[release-follow-ups]]
