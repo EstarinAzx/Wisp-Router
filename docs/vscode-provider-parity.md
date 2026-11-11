@@ -39,13 +39,25 @@ Restored assistant text and tool calls must match the authenticated native parts
 System instructions stay system instructions, and positioned mid-conversation system turns are refused
 rather than silently moved. Credential changes during generation suppress delivery.
 
+VS Code's **Local** session mode sends a previous-response marker plus incremental input, rather than
+the full conversation. Wisp restores that path from an in-memory cache bounded to 32 checkpoints and
+16 MiB of serialized history. Markers are authenticated for the account, tier and conversation before
+cache access; new leading instructions replace the cached ones. Local chats require a new conversation
+after extension reload or cache eviction. No conversation files or extra credentials are written.
+Classic Copilot history continues to use its self-contained encrypted packets without depending on
+that cache. Both paths report the validated upstream prompt, output and reasoning token counts.
+
 The carrier is a pinned Copilot compatibility contract, not a promise about arbitrary custom MIME
 parts. Inspected source at VS Code commit `dcd3ad6e368fbe19d03f37054a40dbaf40d676f4`:
 [response and request conversion](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/vscode-node/extChatEndpoint.ts),
 [marker encoding](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/platform/endpoint/common/statefulMarkerContainer.tsx),
 and [persisted tool rounds](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/extensions/copilot/src/extension/prompt/common/toolCallRound.ts).
+The [Local handler](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/agentHostByokLmHandler.ts)
+and its [incremental proxy](https://github.com/microsoft/vscode/blob/dcd3ad6e368fbe19d03f37054a40dbaf40d676f4/src/vs/platform/agentHost/node/copilot/byokLmProxyService.ts)
+establish the separate reference-only continuation shape.
 Those source functions were exercised with synthetic rounds, and an isolated VS Code 1.145.3 host
-passed advertisement, actual `vscode.lm` transport, JSON-restored encrypted state and tool continuation.
+passed advertisement, actual `vscode.lm` transport, JSON-restored encrypted state, classic and Local-shaped
+tool continuation, and rejection of an altered tool-result ID before another transport call.
 
 Copilot deliberately removes old markers when its summary generation changes. A summary-only request
 can start a new chain; retained assistant history without its state is refused with a new-chat message.
@@ -99,4 +111,5 @@ without `argon-host-test.txt` containing `synthetic-only` and the exact syntheti
 declared at its top. Set the temporary config to provider `antigravity` and model
 `gemini-4-argon-high`; disable the built-in Copilot extension in that test process. It invokes Wisp's
 real registered model through `vscode.lm`, intercepts every provider fetch and writes `receipt.json`.
-It never invokes a real tool or changes an installed Wisp extension.
+It tests both full-history and Local marker-only continuation. It never invokes a real tool or changes
+an installed Wisp extension.

@@ -59,6 +59,17 @@ exports.run = async () => {
     assert.equal(text, 'Synthetic continuation complete.');
     assert.deepEqual(requests[1].request.contents[1].parts, nativeParts);
     assert.equal(requests[1].request.contents[2].parts[0].functionResponse.id, 'native-host-call');
+    const localHeader = vscode.LanguageModelChatMessage.Assistant([
+      new vscode.LanguageModelDataPart(Buffer.from(model.id + '\\' + saved.marker), 'stateful_marker'),
+    ]);
+    const local = await model.sendRequest([localHeader, vscode.LanguageModelChatMessage.User([
+      new vscode.LanguageModelToolResultPart('native-host-call', [new vscode.LanguageModelTextPart('Local result')]),
+    ])], options, cancellation.token);
+    let localText = '';
+    for await (const part of local.stream) if (part instanceof vscode.LanguageModelTextPart) localText += part.value;
+    assert.equal(localText, 'Synthetic continuation complete.');
+    assert.deepEqual(requests[2].request.contents[1].parts, nativeParts);
+    assert.equal(requests[2].request.contents[2].parts[0].functionResponse.response.result, 'Local result');
     let refused = false;
     try {
       const invalid = await model.sendRequest([...input, restored, vscode.LanguageModelChatMessage.User([
@@ -67,8 +78,8 @@ exports.run = async () => {
       for await (const _part of invalid.stream) assert.fail('Invalid continuation emitted output');
     } catch (error) { assert.match(String(error), /Argon/); refused = true; }
     assert(refused, 'Unknown result identity must be refused');
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     fs.writeFileSync(path.join(home, 'receipt.json'), JSON.stringify({ passed: true, vscode: vscode.version,
-      model: model.id, requests: requests.length, originalPartsRestored: true, invalidResultRefused: true, providerNetwork: false }, null, 2));
+      model: model.id, requests: requests.length, originalPartsRestored: true, localContinuation: true, invalidResultRefused: true, providerNetwork: false }, null, 2));
   } finally { globalThis.fetch = originalFetch; cancellation.dispose(); }
 };

@@ -39,7 +39,7 @@ import { getModelsDevCatalog } from '@wisp/core';
 import { isGeminiApiProvider } from '@wisp/core';
 import { isAntigravityProvider, isAntigravityArgonModel, antigravityStream, antigravityMaxCompletionTokens, standardEffortToAntigravity, type AntigravityCreds } from '@wisp/core';
 import { antigravityNativeChatError } from './nativeChatSupport';
-import { provideArgonChatResponse } from './nativeArgonChat';
+import { NativeArgonHistory, provideArgonChatResponse } from './nativeArgonChat';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -118,7 +118,9 @@ const toAnthropicMessages = (messages: readonly vscode.LanguageModelChatRequestM
 
 // Implements the three LanguageModelChatProvider methods over Wisp's catalog. The model `id` we
 // advertise IS the Provider id, so the response/token methods map it straight back to a Provider.
-const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => ({
+const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider => {
+  const argonHistory = new NativeArgonHistory();
+  return ({
   onDidChangeLanguageModelChatInformation: deps.onDidChangeModels,
   // Advertise one model per usable Provider. Key presence is async (the injected resolver) so resolve it for
   // every Provider first, then hand the plain facts to the pure builder, which owns the usability rules.
@@ -199,7 +201,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
         if (isAntigravityArgonModel(modelId)) {
           await provideArgonChatResponse({ model: modelId, baseUrl: resolveBaseUrl(provider, deps.customBaseUrl()),
             maxOutputTokens: model.maxOutputTokens, messages, options, progress, signal: controller.signal,
-            current: deps.antigravityCreds, stored: deps.antigravityStoredCreds ?? (() => undefined) });
+            current: deps.antigravityCreds, stored: deps.antigravityStoredCreds ?? (() => undefined), history: argonHistory });
           return;
         }
         const creds = await deps.antigravityCreds();
@@ -372,6 +374,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
     return Math.ceil(str.length / 4) + stateBudget;
   },
 });
+};
 
 // Register Wisp as the 'wisp' chat-model vendor (matches contributes.languageModelChatProviders in
 // package.json). Returns the Disposable for the caller to push onto context.subscriptions.

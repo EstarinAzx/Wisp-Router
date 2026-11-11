@@ -133,6 +133,7 @@ account availability still depends on the service. Argon low/medium/high also su
 tools on VS Code 1.145.3+, with encrypted conversation replay and complete-response validation.
 Image-output and other unqualified IDs remain out of the native picker, with a reason in the panel.
 Argon needs a new chat after an account/tier change or if Copilot drops required history state.
+Local-mode continuation is cached only while the extension runs, so start a new chat after reloading it.
 Antigravity Inquire is not supported. See [details and validation limits](../../docs/vscode-provider-parity.md).
 
 ### Custom

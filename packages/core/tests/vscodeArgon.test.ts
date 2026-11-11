@@ -54,7 +54,7 @@ const setup = (model = 'gemini-4-argon-high') => {
     signOut: () => { creds = {}; }, renew: () => { creds = { ...creds, accessToken: 'renewed-access' }; } };
 };
 // Copilot stores the marker string separately, then reconstructs modelId + backslash + marker on input.
-const persistedAssistant = (parts: any[]) => message(2, ...parts.map(p => {
+const persistedAssistant = (parts: any[]) => message(2, ...parts.filter(p => !(p instanceof vscode.LanguageModelDataPart) || p.mimeType === 'stateful_marker').map(p => {
   if (p instanceof vscode.LanguageModelDataPart) {
     const marker = Buffer.from(p.data).toString('utf8').split('\\')[1];
     return new vscode.LanguageModelDataPart(Buffer.from('wisp/antigravity\\' + JSON.parse(JSON.stringify(marker))), p.mimeType);
@@ -63,6 +63,7 @@ const persistedAssistant = (parts: any[]) => message(2, ...parts.map(p => {
   return text(p.value);
 }));
 const followup = (parts: any[]) => [...firstMessages(), persistedAssistant(parts), message(1, text('Continue'))];
+const localHeader = (parts: any[]) => message(2, ...persistedAssistant(parts).content.filter(p => p instanceof vscode.LanguageModelDataPart));
 
 describe('Argon native VS Code chat', () => {
   it.each(['low', 'medium', 'high'])('advertises the signed-in Argon %s tier with truthful capabilities', async tier => {
@@ -104,6 +105,54 @@ describe('Argon native VS Code chat', () => {
     const h = setup(); await h.send();
     await h.send([message(3, text('System')), message(1, text('<conversation-summary>Earlier work</conversation-summary>')), message(1, text('Continue'))]);
     expect(requests).toHaveLength(2);
+  });
+  it('restores Local-mode incremental tool continuation from its marker-only header', async () => {
+    const h = setup(); next = result(callParts()); const parts = await h.send();
+    next = result([{ text: 'Local done' }]);
+    const second = await h.send([localHeader(parts), message(3, text('Updated Local instructions')),
+      message(1, new vscode.LanguageModelToolResultPart('original-b', [text('B')]), new vscode.LanguageModelToolResultPart('original-a', [text('A')]))]);
+    expect(requests[1].body.request.systemInstruction.parts).toEqual([{ text: 'Updated Local instructions' }]);
+    expect(requests[1].body.request.contents[0].parts[0].text).toBe('Hello');
+    expect(requests[1].body.request.contents[1].parts).toEqual(callParts());
+    expect(second.filter(p => p instanceof vscode.LanguageModelTextPart)).toEqual([text('Local done')]);
+    const usage = second.find(p => p instanceof vscode.LanguageModelDataPart && p.mimeType === 'usage');
+    expect(JSON.parse(Buffer.from(usage.data).toString())).toMatchObject({ prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
+    await h.send([localHeader(second), message(1, text('Another user turn'))]);
+    expect(requests[2].body.request.contents.map((c: any) => c.parts.find((p: any) => p.text && !p.thought)?.text).filter(Boolean)).toEqual(['Hello', 'Reading.', 'Local done', 'Another user turn']);
+  });
+  it('fails safely for a Local marker after a provider restart, while classic history remains usable', async () => {
+    const first = setup(); const parts = await first.send();
+    const restarted = setup();
+    await expect(restarted.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Argon/i);
+    expect(requests).toHaveLength(1);
+    await restarted.send(followup(parts)); expect(requests).toHaveLength(2);
+  });
+  it('does not let a Local continuation cross conversation or account boundaries', async () => {
+    const h = setup(); const parts = await h.send();
+    await expect(h.send([localHeader(parts), message(1, text('Continue'))], { modelOptions: { _conversationId: 'other-session' } })).rejects.toThrow(/Argon/i);
+    h.changeAccount(); await expect(h.send([localHeader(parts), message(1, text('Continue'))])).rejects.toThrow(/Argon/i);
+    expect(requests).toHaveLength(1);
+  });
+  it('keeps Local continuation storage bounded and preserves the newest checkpoint', async () => {
+    const h = setup(); let oldest: any[] = [], newest: any[] = [];
+    for (let i = 0; i < 33; i++) { newest = await h.send(); if (!i) oldest = newest; }
+    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Argon/i);
+    await h.send([localHeader(newest), message(1, text('Current branch'))]);
+    expect(requests).toHaveLength(34);
+  });
+  it('refuses oversized continuation history before making a provider request', async () => {
+    const h = setup();
+    await expect(h.send([message(1, text('x'.repeat(16 * 1024 * 1024 + 1)))])).rejects.toThrow(/Argon.*large/i);
+    expect(requests).toHaveLength(0);
+  });
+  it('evicts Local checkpoints by aggregate bytes before the entry-count limit', async () => {
+    const h = setup(); let oldest: any[] = [], newest: any[] = [];
+    for (let i = 0; i < 17; i++) {
+      newest = await h.send([message(1, text('x'.repeat(1024 * 1024)))]); if (!i) oldest = newest;
+    }
+    await expect(h.send([localHeader(oldest), message(1, text('Old branch'))])).rejects.toThrow(/Argon/i);
+    await h.send([localHeader(newest), message(1, text('Current branch'))]);
+    expect(requests).toHaveLength(18);
   });
   it('refuses positioned system instructions instead of silently hoisting them', async () => {
     const h = setup(), parts = await h.send();
