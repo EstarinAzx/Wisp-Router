@@ -16,11 +16,12 @@
  */
 
 import {
-  resolveBaseUrl, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  resolveBaseUrl, isCodexProvider, isAnthropicProvider, isXaiProvider, isAntigravityProvider,
+  isAntigravityArgonModel, antigravityStream, standardEffortToAntigravity,
   DEFAULT_EFFORT, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, type Provider,
 } from '@wisp/core';
-import { home, codexAuth, anthropicAuth, xaiAuth, bearerFor } from './store';
+import { home, codexAuth, anthropicAuth, xaiAuth, antigravityAuth, bearerFor } from './store';
 import { PANEL, DIM } from './theme';
 
 // ----------------------------------------- Wiring check ----------------------------------------- //
@@ -29,14 +30,22 @@ import { PANEL, DIM } from './theme';
 const TEST_PROMPT = 'Reply with one short sentence confirming you can hear me.';
 
 // Fire the canned prompt through one Provider and yield raw answer-text deltas. Dispatch mirrors the
-// Bridge's three kinds (bridgeServer.startProviderStream): Codex → Responses stream, Anthropic →
-// Messages stream, keyed → plain fetch on <base>/chat/completions. Failures throw with the Provider's
+// Bridge's clients: Codex → Responses, Anthropic → Messages, Antigravity → Cloud Code,
+// keyed → plain fetch on <base>/chat/completions. Failures throw with the Provider's
 // real message — the caller renders them loud, never falls back. Exported so the wiring check itself
 // can be exercised headless (no TTY) — the screen around it is plain state rendering.
 export async function* streamTestReply(p: Provider, model: string, signal: AbortSignal): AsyncGenerator<string> {
   const cfg = home.readConfig();
   const baseUrl = resolveBaseUrl(p, cfg.customBaseUrl ?? '');
   const message = { role: 'user' as const, content: TEST_PROMPT };
+  if (isAntigravityProvider(p)) {
+    if (isAntigravityArgonModel(model)) throw new Error('Argon requires the Responses API to preserve its original model state; /test is unsupported.');
+    const creds = await antigravityAuth.current();
+    if (!creds?.accessToken) throw new Error(`${p.label} is not signed in — /signin antigravity.`);
+    for await (const ev of antigravityStream({ creds, baseUrl, model, messages: [message], thinkingLevel: standardEffortToAntigravity(cfg.effort ?? DEFAULT_EFFORT), signal }))
+      if (ev.type === 'text') yield ev.text;
+    return;
+  }
   if (isCodexProvider(p)) {
     const creds = await codexAuth.current();
     if (!creds) throw new Error(`${p.label} is not signed in — /signin codex.`);

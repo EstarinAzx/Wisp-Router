@@ -335,7 +335,7 @@ export const App = () => {
         const p = target.args[0] ? byId(target.args[0]) : undefined;
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
         // OAuth rows sign in, they don't take keys — same filter the picker applies.
-        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isKimiProvider(p) || isAntigravityProvider(p))) {
+        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) || isKimiProvider(p) || isAntigravityProvider(p))) {
           setStatus(`${p.label} uses OAuth — try /signin ${p.id}.`); return;
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
