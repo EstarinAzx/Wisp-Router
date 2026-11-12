@@ -783,6 +783,78 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
     const cooled = lines.find((l) => l.includes('#190') && l.includes('cooling down'));
     expect(cooled).toContain(`${Math.round(DEFAULT_COOLDOWN_SECONDS / 60)}m`);
   });
+
+  it.each([
+    ...['/v1/messages', '/v1/chat/completions', '/v1/responses'].flatMap(path =>
+      ['quota', 'transient'].map(failure => [path, failure, 'gemini-4-carbon-high', 'claude-opus-5-5-high'])),
+    ['/v1/messages', 'quota', 'claude-opus-5-5-high', 'gemini-4-carbon-high'],
+  ])('isolates Antigravity model cooldowns after %s %s failures on %s', async (path, failure, exhausted, alternate) => {
+    const sonnet = 'claude-sonnet-5-5-high';
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const model = JSON.parse(init.body as string).model;
+      sent.push(model);
+      return model === exhausted ? quota429(failure === 'quota' ? 'QUOTA_EXHAUSTED' : 'RATE_LIMIT_EXCEEDED', failure === 'quota' ? '1h' : '30s')()
+        : new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"healthy target"}]},"finishReason":"STOP"}]}}\r\n\r\n');
+    });
+    const anthropic: Provider = { id: 'anthropic', label: 'Anthropic', kind: 'anthropic-oauth', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-5-5', apiKeyEnv: '' };
+    const map: RoutingMap = { families: {
+      fable: { providerId: 'antigravity', model: exhausted },
+      opus: { providerId: 'antigravity', model: alternate },
+      sonnet: { providerId: 'antigravity', model: sonnet },
+    }, aliases: [{ name: 'limited', target: { providerId: 'antigravity', model: exhausted } }] };
+    const session = '11111111-1111-4111-8111-111111111111';
+    const realNow = Date.now;
+    let clockOffset = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + clockOffset);
+    try { await runServer(antigravityDeps({ providers: [ANTIGRAVITY, anthropic], routingMap: () => map }), async port => {
+      const request = (model: string, door = path) => post(port, door, { model, stream: true,
+        ...(door === '/v1/responses' ? { input: 'continue', store: false } : { max_tokens: 32,
+          metadata: { user_id: JSON.stringify({ session_id: session }) },
+          messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }, { role: 'user', content: 'continue' }] }),
+      }, { session_id: session });
+      for (let i = 0; i < (failure === 'quota' ? 1 : 3); i++) expect((await request('limited')).status).toBe(429);
+      for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5']) {
+        const reply = await request(model, '/v1/messages');
+        expect(reply.status, reply.body).toBe(200);
+        expect(reply.body).toContain('healthy target');
+      }
+      expect(sent.slice(-2)).toEqual([alternate, sonnet]);
+      // The exhausted target still falls back; an explicit alias still reaches its own upstream.
+      expect((await request('claude-fable-5')).status).toBe(401);
+      expect((await request('limited')).status).toBe(429);
+      // Editing the same family mid-session must use its new target, not the family's old cooldown.
+      map.families.fable = { providerId: 'antigravity', model: alternate };
+      expect((await request('claude-fable-5')).status).toBe(200);
+      map.families.fable = { providerId: 'antigravity', model: exhausted };
+      clockOffset = 3_601_000;
+      expect((await request('claude-fable-5')).status).toBe(429);
+    }); } finally { clock.mockRestore(); }
+  });
+
+  it('records an in-flight failure against the model sent, even if the selected model changes', async () => {
+    const provider = { ...ANTIGRAVITY, id: 'google-subscription' };
+    let selected = 'gemini-4-carbon-high';
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      const model = JSON.parse(init.body as string).model;
+      selected = 'claude-opus-5-5-high';
+      return model === 'gemini-4-carbon-high' ? quota429('QUOTA_EXHAUSTED', '1h')()
+        : new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"switched"}]},"finishReason":"STOP"}]}}\r\n\r\n');
+    });
+    const anthropic: Provider = { id: 'anthropic', label: 'Anthropic', kind: 'anthropic-oauth', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-5-5', apiKeyEnv: '' };
+    await runServer(antigravityDeps({ providers: [provider, anthropic], activeProviderId: () => provider.id,
+      modelMap: () => ({ [provider.id]: selected }), routingMap: () => ({ families: {
+        opus: { providerId: provider.id, model: 'claude-opus-5-5-high' },
+        fable: { providerId: provider.id, model: 'gemini-4-carbon-high' },
+      }, aliases: [] }),
+    }), async port => {
+      const request = (model: string) => post(port, '/v1/messages', { model, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect((await request(provider.id)).status).toBe(429);
+      expect((await request('claude-opus-5-5')).status).toBe(200);
+      expect((await request('claude-fable-5')).status).toBe(401);
+    });
+  });
+
 });
 
 // ---------------- #191: the Anthropic door's Antigravity arm — Claude Code driven by Gemini ---------------- //

@@ -253,12 +253,12 @@ export const withCooldownFallback = (
   match: RouteMatch | undefined,
   requestedModel: string,
   providers: Provider[],
-  cooling: (providerId: string) => boolean,
+  cooling: (providerId: string, model?: string) => boolean,
   isFallbackProvider: (p: Provider) => boolean,
 ): RouteMatch | undefined => {
-  if (!match || match.matched !== 'family' || !cooling(match.provider.id)) return match;
+  if (!match || match.matched !== 'family' || !cooling(match.provider.id, match.pinnedModel)) return match;
   const fallback = providers.find(isFallbackProvider);
-  if (!fallback || fallback.id === match.provider.id || cooling(fallback.id)) return match;
+  if (!fallback || fallback.id === match.provider.id || cooling(fallback.id, requestedModel)) return match;
   return { provider: fallback, pinnedModel: requestedModel, matched: 'family' };
 };
 
