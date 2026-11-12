@@ -370,12 +370,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // routes until its plan window resets, so a dead codex doesn't eat every request (and the user doesn't
   // babysit the Routing map). One instance per Bridge host, like the diagnosis chain below.
   const cooldowns = createProviderCooldowns();
+  // Antigravity limits can belong to one model; Carbon exhaustion must not cool Claude too.
+  const cooldownKey = (providerId: string, model?: string): string => {
+    const provider = deps.providers.find(p => p.id === providerId);
+    return JSON.stringify([providerId, provider && isAntigravityProvider(provider) ? model : null]);
+  };
 
   // Record a provider error against the cooldown store. A recognized usage-limit 429 logs the multi-day horizon
   // and RETURNS — the plan window is the answer, and letting the same failure also touch the short channel is
   // exactly the contamination #168 forbids. Anything transient feeds the blip channel instead, which only cools
   // once the failures repeat.
-  const noteProviderError = (providerId: string, err: unknown): void => {
+  const noteProviderError = (providerId: string, model: string, err: unknown): void => {
+    const key = cooldownKey(providerId, model);
     const message = String(err);
     // #190: a record that classified the failure itself already knows the horizon the server stated, so the
     // long channel is seeded from that number instead of being re-parsed out of prose. Checked FIRST, so a
@@ -384,17 +390,17 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const failure = antigravityFailureOf(err);
     if (failure?.code === ANTIGRAVITY_QUOTA_EXHAUSTED_CODE) {
       const quotaSeconds = failure.cooldownSeconds ?? DEFAULT_COOLDOWN_SECONDS;
-      cooldowns.noteQuotaWindow(providerId, quotaSeconds);
-      deps.log(`[bridge] provider ${providerId} quota exhausted — cooling down ${Math.round(quotaSeconds / 60)}m until ${new Date(Date.now() + quotaSeconds * 1000).toISOString()} (#190)`);
+      cooldowns.noteQuotaWindow(key, quotaSeconds);
+      deps.log(`[bridge] provider ${providerId} model=${model} quota exhausted — cooling down ${Math.round(quotaSeconds / 60)}m until ${new Date(Date.now() + quotaSeconds * 1000).toISOString()} (#190)`);
       return;
     }
-    const seconds = cooldowns.noteUsageLimit(providerId, message);
+    const seconds = cooldowns.noteUsageLimit(key, message);
     if (seconds !== undefined) {
       deps.log(`[bridge] provider ${providerId} usage limit hit — cooling down ${Math.round(seconds / 60)}m; claude-* family routes fall back to anthropic until ${new Date(Date.now() + seconds * 1000).toISOString()} (#161)`);
       return;
     }
-    const transient = cooldowns.noteTransient(providerId, message);
-    if (transient !== undefined) deps.log(`[bridge] provider ${providerId} repeated transient failures — cooling down ${transient}s; family routes fall back to a healthy Target meanwhile (#168)`);
+    const transient = cooldowns.noteTransient(key, message);
+    if (transient !== undefined) deps.log(`[bridge] provider ${providerId} model=${model} repeated transient failures — cooling down ${transient}s; family routes fall back to a healthy Target meanwhile (#168)`);
   };
 
   // Resolve a requested model name through the Routing map (#51): Provider id → Alias exact → Family
@@ -404,7 +410,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // requested claude-* id pinned — the same flip the user used to make by hand, minus the babysitting.
   const routeFor = (requestedModel: string): RouteMatch | undefined => {
     const direct = resolveRoute(deps.routingMap(), deps.providers, deps.activeProviderId(), requestedModel);
-    const route = withCooldownFallback(direct, requestedModel, deps.providers, cooldowns.cooling, isAnthropicProvider);
+    const route = withCooldownFallback(direct, requestedModel, deps.providers,
+      (id, model) => cooldowns.cooling(cooldownKey(id, model)), isAnthropicProvider);
     if (route) {
       const context = requestContext.getStore();
       if (context?.log && !context.baseRouteLogged) {
@@ -412,7 +419,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         context.baseRouteLogged = true; // Advisor sub-calls must not replace the answering chat's route.
       }
       const fellBack = direct && route.provider.id !== direct.provider.id;
-      deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}${fellBack ? ` (cooldown fallback: ${direct.provider.id} limited until ${new Date(cooldowns.coolingUntil(direct.provider.id) ?? 0).toISOString()} #161)` : ''}`);
+      deps.log(`[bridge] route ${route.matched} '${requestedModel}' -> ${route.provider.id}${route.pinnedModel ? ` model=${route.pinnedModel}` : ''}${fellBack ? ` (cooldown fallback: ${direct.provider.id} limited until ${new Date(cooldowns.coolingUntil(cooldownKey(direct.provider.id, direct.pinnedModel)) ?? 0).toISOString()} #161)` : ''}`);
     }
     return route;
   };
@@ -693,6 +700,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const failProviderRequest = (
     res: http.ServerResponse,
     provider: Provider,
+    model: string,
     err: unknown,
     controller: AbortController,
     executor: ProviderExecutor,
@@ -709,7 +717,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       return sendJson(res, failure.status, { error: { message: failure.message, type: 'provider_error', code: failure.code } });
     }
     deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-    noteProviderError(provider.id, err);
+    noteProviderError(provider.id, model, err);
     // The log line names the classified code so the four cases are tellable apart in operation.
     const classified = executor.classify(err);
     if (classified) deps.log(`[bridge] ${provider.id} failure classified code=${classified.code} -> HTTP ${classified.status} (#166)`);
@@ -788,7 +796,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         sendJson(res, 200, buildCompletion(meta, text, calls));
       }
     } catch (err) {
-      failProviderRequest(res, provider, err, controller, executor);
+      failProviderRequest(res, provider, model, err, controller, executor);
     }
   };
 
@@ -943,7 +951,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       controller.signal.throwIfAborted();
       const final = encoder.finish();
       if (parsed.stream) { res.end(final.frames); } else sendJson(res, 200, final.response);
-    } catch (err) { failProviderRequest(res, provider, err, controller, executor, encoder.fail, signedDesktop); }
+    } catch (err) { failProviderRequest(res, provider, model, err, controller, executor, encoder.fail, signedDesktop); }
   };
 
   // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
@@ -1098,6 +1106,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } else route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
+    const model = route.pinnedModel ?? resolveModel(deps.modelMap(), provider);
     if (isGeminiApiProvider(provider)) return sendError(res, 400, 'Gemini API is available only on the qualified custom Responses route.');
 
     // Antigravity hoists positioned instructions into the global prefix. Opted-in clients must rebuild
@@ -1154,7 +1163,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Renewal or an account change during this turn invalidates quota, never relabels old meters.
       const authRevision = deps.authRevision?.();
       const result = await openPrimed(provider, executorFor(provider), controller, () =>
-        startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller, (m) => { quotaMeters = m; }));
+        startProviderStream({ ...parsed, tools: advisorTools }, provider, model, controller, (m) => { quotaMeters = m; }));
       if (!result.ok) return sendError(res, result.status, result.message);
 
       // The event source: with an advisor tool, the door plays the server role via runAdvisorLoop (the first
@@ -1166,7 +1175,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const basePass = (turns: NormalizedTurn[]): AsyncIterable<BridgeStreamEvent> => {
           if (firstPass) { firstPass = false; return result.events; }
           return (async function* () {
-            const r = await startProviderStream({ ...parsed, turns, tools: advisorTools }, provider, route.pinnedModel, controller);
+            const r = await startProviderStream({ ...parsed, turns, tools: advisorTools }, provider, model, controller);
             if (!r.ok) throw new Error(r.message);
             yield* r.events;
           })();
@@ -1274,7 +1283,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     } catch (err) {
       // Head already out (mid-stream failure) → the shared answer writes a proper Anthropic `error` event so
       // Claude Code shows the real message instead of "empty or malformed"; otherwise a clean status.
-      failProviderRequest(res, provider, err, controller, executorFor(provider), anthropicErrorFrame);
+      failProviderRequest(res, provider, model, err, controller, executorFor(provider), anthropicErrorFrame);
     }
   };
 
