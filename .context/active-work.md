@@ -1,40 +1,42 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-11-12
+updated: 2026-11-13
 tags: [context, active-work, release]
 ---
 
 # Active Work
 
-_Last updated: 2026-11-12 by Codex (GPT-6 Astra), agent 875d19af-7c4a-4a37-b47c-154a92d39ea8._
-_Release source: 49d7eff2b1c4675ced9d80a39f0c834c0fa85a57 on main; Git tree identical to tested/reviewed head7c077ac757e3663b765cf6b1334dab20364c12d0._
+_Last updated: 2026-11-13 by Codex, agent 73a06749-2fc6-4187-b7aa-601691ee578a._
+_Release source: 3c76ad7283846e8d9372b79b8748c6d4c0be606d on main; tree identical to reviewed/tested branch head 030688a9d11fad48e4ce35757ef90332b10a22d4._
 
 ## Current focus
 
-**Wisp2.2.13 is published, verified and globally installed.** Tagv2.2.13 points to verified source49d7eff. Release workflow43198177867 passed all four native builds and publication. GitHub publishes four binaries plus companion1.14.10 VSIX; all five npm packages are visible and verified. Global npm installation succeeded, and the resolved wisp command reports2.2.13. Slot1.7.6 is released in the repository/tag. No running client or Bridge was restarted; companion/slot installation was not requested.
+**Wisp 2.2.14 and companion 1.14.11 are published, verified and installed.** The Antigravity cooldown fix is complete. Existing Bridge/client processes were not restarted; a restart/reload loads the installed code. No implementation or watcher remains active.
 
 ## Work contract
 
-- **Authority:** khitarashi2026-11-12 requested the expired-token fix in PR236 and continuation until release-ready. The later structured answer explicitly allowed up to2 more included reviews, raising the cap to6. This authorized the fix, package preparation and merge. User then explicitly authorized publishing source49d7eff, verifying artifacts, globally installing wisp-router@2.2.13 and wrapping up. The command text governs over the accidental older-version mailto target. No client restart or companion/plugin installation was requested.
-- **Execution:** completed inline in the primary checkout. Agent875d19af completed publication, installation and wrap-up. [PR236](https://github.com/EstarinAzx/Wisp-Router/pull/236) merged as49d7eff. Context checkpoint belongs on main; the user's flow-note edit remains excluded.
-- **Review:** [[review-policy]], checkpoint codex-wisp-context-limits, **passed5/6**, pending none. The two final-review edge cases were reproduced and corrected before review5. Hosted coverage names source7c077ac as reviewed and reports zero actionable comments. Review5 processed all4 changed code/test paths; release-note wording/count changes were skipped as similar to prior reviewed content. No paid credits. One authoritative ledger: local .claude/codex-context-handoff/work.md; manifests/result/hosted-summary under review-5/.
-- **Receipt:** local .claude/wisp-2.2.13/release-receipt.json pins reviewed/tested source, merge, package hashes, CI43193947847, publication run43198177867 and the release artifact. published/verification.json covers all GitHub asset digests, all five npm archive integrity/content checks and Windows/npm smokes; published/installation.json verifies the installed binary equals the release. Final logs/packages are under final-corrections/. Source and compiled context checks are also retained in that evidence tree and the prior receipt directories.
-- **Checks:** core2158 tests; TUI215 tests/1163 assertions; both typechecks; companion/binary builds; 34 version-only TUI captures; VSIX bundle and packed-npm binary identity; compiled/npm launcher/Responses/Desktop smokes; source/compiled native Claude and Codex checks; slot self-check. All passed. Initial test-fixture import failure is retained; corrected full run passed.
-- **Live metadata:** normal bounded refresh succeeded; Carbon1048576 and Grok4.7=500000 confirmed. Config and unrelated credentials unchanged. A subsequent metadata-only check on the final helper reconfirmed both limits without another refresh. No live inference.
-- **Behavior:** metadata uses a refresh-only auth path, avoiding project bootstrap. One four-second deadline bounds refresh/discovery. Existing guarded writes preserve account changes and credentials; capability consumption rechecks the account even after other catalogue reads finish. Codex defaults/maxima remain separate; unknown capacity stays fallback. Desktop admission/vision restrictions remain unchanged.
-- **Limits:** full-window inference, automatic compaction end-to-end, new Anthropic stamp live acceptance and fresh Desktop UI remain unqualified. Existing Local sign-in/forced Claude ANY limits remain. The reviewer suggested future validation of provider-side token rotation under simultaneous/aborted refresh; no demonstrated defect or merge blocker remains.
-- **Preservation:** .context/flows.md remains the pre-existing user edit, hash abb6e8469eb6d665c3e2657daa450218425239e9019cf92c7fd733084f60414d. Global npm2.2.13 installed and verified; no real-client restart or companion/slot installation. All owned publication/verification watchers exited.
+- **Authority:** khitarashi requested model-specific Antigravity cooldowns while preserving provider settings, then explicitly authorized: "Merge, release, and install the verified Antigravity cooldown fix, preserving my provider settings. then guve me a summary what the flaw was and what you fixed" (2026-11-13).
+- **Execution/integration:** primary agent implemented on fix/antigravity-model-cooldown, merged [PR237](https://github.com/EstarinAzx/Wisp-Router/pull/237), and published [v2.2.14](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.14). Worktree remains at C:/Users/S.D/.traycer/worktrees/estarinazx__wisp-router/fix-antigravity-model-cooldown for local evidence; main is authoritative. Context is versioned; the unrelated flow-note edit is excluded.
+- **Review:** [[review-policy]], checkpoint antigravity-model-cooldown passed **2/3** CLI launches: all3 implementation/test files and all12 release files covered, zero findings. Hosted PR review also passed. One authoritative ledger: .claude/antigravity-model-cooldown/work.md in that worktree; manifests and results are beside it. No pending review, no paid-credit escalation. Earlier codex-wisp-context-limits checkpoint remains closed at5/6; it was not reopened.
+- **Evidence:** main checkout .claude/wisp-2.2.14/receipt.json; published/verification.json; installation.json. PR workflow43241884133 and publication workflow43243848641 succeeded. Release merge tree equals the reviewed head; GitHub tag points to that merge.
+- **Checks:** core2166 tests, TUI215 tests/1163 assertions, core and terminal typechecks, companion build/VSIX, compiled Windows launcher/Responses/Desktop smokes. All34 TUI screen captures changed only the version label. Eight regression cases cover all3 Bridge doors, switching both directions, family edits, alias pinning, cooldown expiry and in-flight selection changes. No live inference.
+- **Delivery:** global npm wisp-router2.2.14 and installed VS Code esarinazx.wisp1.14.11 verified. Installed Windows binary matches the GitHub release digest. All5 GitHub assets verified; main, Windows, AppleSilicon and Linux npm archives passed integrity/content checks. IntelMac optional npm2.2.14 remained unavailable after8 probes; its verified GitHub binary remains the installer's fallback. No npm republish attempted. Slot remains1.7.6 and was not changed/installed.
+- **Preservation:** provider config SHA25672d0f6dc1d55ea907b167f9ed56c3f786dba4b702e235d33a322c845e70013f2 unchanged across installation. Existing .context/flows.md edit preserved, hash abb6e8469eb6d665c3e2657daa450218425239e9019cf92c7fd733084f60414d. Existing clients/Bridge not stopped.
+- **Pending:** none. Installation is complete; runtime activation needs the user's next Bridge restart / VS Code reload.
+
+## Behavior and limits
+
+Antigravity quota and repeated-transient cooldowns now use the resolved provider/model pair. A Carbon limit no longer cools unrelated Claude targets. Failures stay attributed to the dispatched model when selection changes in flight. Other providers, explicit alias pinning, same-model fallback and expiry keep existing behavior. Exact model IDs are used; shared upstream quota groups are not guessed, so another model sharing a real exhausted bucket can reject once before its own cooldown is learned. Genuine quota limits and signed Claude launch-profile restrictions still apply. The original fallback Anthropic502 error text was not retained; its exact upstream rejection is unknown.
 
 ## Previous completed work
 
-- PR235 Claude exact-context support/stamp is already merged on main asd209004, tested/reviewed head39b9c4c, checkpoint passed3/3 and closed. Its launcher/profile changes and slot statusline support are included in this prepared release. Local .claude/alias-context-research/receipt.json retains full evidence; do not reopen that checkpoint.
-- Prior publication2.2.12/companion1.14.9 remains complete; source/tag e251eb3, final context main3358c0f. Local .claude/wisp-2.2.12/release-receipt.json retains installation boundaries and publication verification. Nothing in this session republished or replaced that release.
-- [[release-follow-ups]] retains earlier held work and operational landmines. Old relay remains stopped/completed.
+- Release2.2.13 and its source/context acceptance limits remain recorded in .claude/wisp-2.2.13/release-receipt.json and docs/releases/v2.2.13.md. This patch does not newly qualify full-window inference, automatic compaction, the Anthropic stamp's live acceptance, Local sign-in, forced Claude ANY or Desktop UI.
+- Earlier held work remains in [[release-follow-ups]]. The old relay remains stopped/completed.
 
 ## Pick up here
 
-No active work remains. Publication and requested global npm installation are complete; do not repeat them. Existing running clients/Bridge processes keep their loaded code until the user next launches/restarts them. Companion1.14.10 and slot1.7.6 were released but not installed. Preserve the user flow edit and closed review checkpoints. Choose a new task only when requested; use the release receipt for artifact/installation identity.
+No active work. Do not repeat publication or installation. If asked to check activation, distinguish the installed binary from an already-running Bridge. Preserve provider settings, the flow edit and closed review budgets. Read the release receipt for exact package and process boundaries.
 
 ## Related
 
