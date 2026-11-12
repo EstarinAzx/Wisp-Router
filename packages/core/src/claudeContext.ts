@@ -86,7 +86,7 @@ export const readClaudeContextWindow = async (provider: Provider, model: string,
       const info = await readers.antigravity?.();
       if (info?.id === model) value = info.contextWindow;
     } else {
-      value = (await readers.catalogue?.())?.contextInput;
+      try { value = (await readers.catalogue?.())?.contextInput; } catch { value = undefined; }
       source = 'catalogue';
       if (!validWindow(value)) {
         if (provider.kind === 'anthropic-oauth' && ANTHROPIC_MODELS.includes(model)) value = anthropicModelCaps(model).contextInput;

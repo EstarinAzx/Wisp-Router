@@ -66,14 +66,14 @@ export const buildClaudeContextLaunch = (port: number, secret: string, profile: 
   const verified = readClaudeContext(token, secret);
   if (JSON.stringify(verified) !== JSON.stringify(profile)) throw new Error('Claude context profile does not match its token.');
   const settings = { ...parsed.settings };
+  if (settings.autoCompactEnabled === false) throw new Error('Exact context mode requires automatic compaction; remove autoCompactEnabled: false.');
   if (settings.env !== undefined && !object(settings.env)) throw new Error('Settings env must be an object.');
   const explicitEnv = settings.env ?? {};
-  const combinedEnv = Object.fromEntries(Object.entries({ ...inherited, ...explicitEnv }).map(([key, value]) => [key.toUpperCase(), value]));
-  for (const key of ['DISABLE_COMPACT', 'DISABLE_AUTO_COMPACT', 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT']) {
-    const value = combinedEnv[key];
-    if (value !== undefined && !['0', 'false', ''].includes(String(value).toLowerCase())) throw new Error(`Exact context mode conflicts with ${key}; leave automatic compaction enabled.`);
-  }
-  for (const [key, value] of Object.entries(combinedEnv)) {
+  // Reject active overrides in either source: different casing must not hide an inherited flag on POSIX.
+  const suppliedEnv = [...Object.entries(inherited), ...Object.entries(explicitEnv)].map(([key, value]) => [key.toUpperCase(), value] as const);
+  for (const [key, value] of suppliedEnv) {
+    if (['DISABLE_COMPACT', 'DISABLE_AUTO_COMPACT', 'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT'].includes(key)
+      && value !== undefined && !['0', 'false', ''].includes(String(value).toLowerCase())) throw new Error(`Exact context mode conflicts with ${key}; leave automatic compaction enabled.`);
     if ((key.startsWith('CLAUDE_CODE_USE_') || key === 'ANTHROPIC_UNIX_SOCKET') && value && !['0', 'false'].includes(String(value).toLowerCase())) {
       throw new Error(`Provider override ${key} conflicts with the Wisp Bridge.`);
     }
@@ -101,6 +101,7 @@ export const buildClaudeContextLaunch = (port: number, secret: string, profile: 
   // Flag settings win over saved env without changing the user's files. The launcher writes this to a private temporary file.
   settings.env = { ...Object.fromEntries(Object.entries(explicitEnv).filter(([key]) => !Object.hasOwn(protectedEnv, key.toUpperCase()))), ...protectedEnv };
   settings.model = profile.id;
+  settings.autoCompactEnabled = true;
   settings.availableModels = [profile.id];
   settings.enforceAvailableModels = true;
   settings.modelPicker = { replaceBuiltInOptions: true, options: [{ model: profile.id, label: profile.route,

@@ -221,6 +221,24 @@ describe('Claude launcher context contract', () => {
       expect(reply.status).toBe(400);
     });
   });
+
+  it('uses the launch budget for the statusline when the account maximum differs from its default', async () => {
+    const info = { id: 'future-name', name: 'Future', visible: true, reasoningEfforts: ['medium'], defaultEffort: 'medium', contextWindow: 272000, maxContextWindow: 872000 };
+    const lookup = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [info] });
+    vi.stubGlobal('fetch', async () => new Response('event: response.output_text.delta\ndata: {"delta":"OK"}\n\nevent: response.completed\ndata: {"response":{"usage":{"input_tokens":436000,"output_tokens":0},"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}}\n\n'));
+    const provider: Provider = { id: 'codex', label: 'Codex', kind: 'codex', defaultModel: info.id, baseUrl: 'https://chatgpt.com/backend-api/codex', apiKeyEnv: '' };
+    let snapshot: WispStatus | undefined;
+    try {
+      await runServer(makeDeps({ providers: [provider], activeProviderId: () => 'codex', codexSignedIn: async () => true,
+        codexCreds: async () => ({ accessToken: 'fake', accountId: 'fake' }), recordStatus: value => { snapshot = value; } }), async port => {
+        const opened = JSON.parse((await post(port, '/claude-code/context', { model: 'codex' })).body);
+        expect(opened.profile.contextWindow).toBe(872000);
+        expect((await post(port, '/v1/messages', { model: opened.profile.id, stream: true, max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] },
+          { 'x-wisp-claude-context': opened.token })).status).toBe(200);
+        expect(snapshot).toMatchObject({ contextWindow: 872000, contextPercent: 50 });
+      });
+    } finally { lookup.mockRestore(); }
+  });
 });
 
 describe('Bridge — Grok dispatch (#95)', () => {

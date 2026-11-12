@@ -1086,11 +1086,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // The Routing map (#51) picks the answering Provider: Provider id → Alias → Family fuzzy (the
     // background tier's raw claude-* ids land here when their family row is set) → Active fallback.
     let route: RouteMatch | undefined;
+    let launchContextWindow: number | undefined;
     const contextToken = req.headers[CLAUDE_CONTEXT_HEADER];
     if (contextToken !== undefined || parsed.model.startsWith(CLAUDE_CONTEXT_PREFIX)) {
       try {
         const profile = readClaudeContext(contextToken, deps.accessSecret());
         const current = validateClaudeContextTarget(profile, parsed.model, claudeContextState());
+        launchContextWindow = profile.contextWindow;
         route = { provider: deps.providers.find(p => p.id === current.target.providerId)!, pinnedModel: current.target.model, matched: 'alias' };
       } catch (error) { return sendError(res, 409, error instanceof Error ? error.message : 'Relaunch claude-wisp to select this target.', 'invalid_request_error'); }
     } else route = routeFor(parsed.model);
@@ -1216,7 +1218,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // every context field rather than writing a zero.
       // ponytail: streaming path only. The non-streaming branch above is Claude Code's /model validation
       // probe, not a turn — recording it would overwrite a real reading with a probe's.
-      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters, contextWindow: result.contextWindow, authRevision }));
+      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters, contextWindow: launchContextWindow ?? result.contextWindow, authRevision }));
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.

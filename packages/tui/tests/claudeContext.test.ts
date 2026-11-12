@@ -46,6 +46,8 @@ test('explicit transport and context conflicts are refused while ordinary settin
   expect(() => parseClaudeContextArgs(['--fallback-model', 'opus'])).toThrow(/relaunch|fallback/i);
   expect(() => buildClaudeContextLaunch(1234, 'secret', p, token, parseClaudeContextArgs([]), { ANTHROPIC_CUSTOM_HEADERS: 'Authorization: Bearer other' })).toThrow();
   expect(() => buildClaudeContextLaunch(1234, 'secret', p, 'tampered', parseClaudeContextArgs([]), {})).toThrow();
+  expect(() => buildClaudeContextLaunch(1234, 'secret', p, token, parseClaudeContextArgs(['--settings', '{"autoCompactEnabled":false}']), {})).toThrow(/compaction/i);
+  expect(buildClaudeContextLaunch(1234, 'secret', p, token, parseClaudeContextArgs([]), {}).settings.autoCompactEnabled).toBe(true);
 });
 
 test('requires the qualified native client version without assuming every version string is valid', () => {
@@ -62,6 +64,7 @@ test('normalizes protected Windows environment names and refuses competing provi
   expect(launch.env.anthropic_base_url).toBeUndefined();
   expect(launch.env.ANTHROPIC_MODEL).toBe(p.id);
   expect(() => buildClaudeContextLaunch(1234, 'secret', p, token, parseClaudeContextArgs([]), { CLAUDE_CODE_USE_BEDROCK: '1' })).toThrow(/provider/i);
+  expect(() => buildClaudeContextLaunch(1234, 'secret', p, token, parseClaudeContextArgs(['--settings', '{"env":{"claude_code_use_bedrock":"0"}}']), { CLAUDE_CODE_USE_BEDROCK: '1' })).toThrow(/provider/i);
 });
 
 test('a nested launcher resolves its inherited generated identity back to the signed route', () => {

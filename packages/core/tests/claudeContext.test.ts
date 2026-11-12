@@ -56,4 +56,9 @@ describe('Claude launch context profiles', () => {
     expect(await readClaudeContextWindow(provider, 'grok-4.5', { catalogue: async () => undefined })).toEqual({ contextWindow: 500000, source: 'curated' });
     expect(await readClaudeContextWindow({ ...provider, kind: 'antigravity-oauth' }, 'target', { antigravity: async () => ({ id: 'other', contextWindow: 1000000 }) })).toEqual({ contextWindow: 128000, source: 'fallback' });
   });
+
+  it('retains a known curated window when the optional public catalogue rejects', async () => {
+    expect(await readClaudeContextWindow(provider, 'grok-4.5', { catalogue: async () => { throw new Error('offline'); } }))
+      .toEqual({ contextWindow: 500000, source: 'curated' });
+  });
 });
