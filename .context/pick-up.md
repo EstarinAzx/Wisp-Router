@@ -7,9 +7,11 @@ tags: [context, pick-up]
 
 # Pick up
 
-**Wisp 2.2.12 / companion 1.14.9 is published and verified; no active work.** Use the primary checkout on main. [[active-work]] and local `.claude/wisp-2.2.12/release-receipt.json` hold exact source/package identities, review budgets and limits.
+**PR #235 is merged on main at d209004.** Exact Claude launcher context budgets and the2.1.322 stamp passed CodeRabbit3/3 and all four platform builds. The merged tree matches tested PR head39b9c4c. [[active-work]] owns evidence and limits.
 
-Native usage and release-prep checkpoints passed2/3 each; no pending worker, review or watcher. Prior2.2.11 relay remains stopped/completed. Preserve existing tags and completed reviews. Client installation/restart requires a separate user request; the development host remains open.
+No active work. Release preparation is the next possible task, awaiting a user request: all three delivery surfaces still need new versions, notes, final package checks and their release-prep review. No new tag, publication, installation or client restart is authorized/performed. Prior Wisp2.2.12 / companion1.14.9 publication remains complete.
+
+Primary checkout only; preserve the pre-existing `.context/flows.md` edit and completed review budgets.
 
 ## Related
 

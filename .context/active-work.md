@@ -2,47 +2,44 @@
 type: active-work
 project: wisp
 updated: 2026-11-12
-tags: [context, active-work, vscode, release]
+tags: [context, active-work, claude, launcher]
 ---
 
 # Active Work
 
-_Last updated: 2026-11-12 by Codex (GPT-6 Astra)._
-_Published v2.2.12: e251eb3ed9211ffb8dc72008204758c815b2612d. Tested PR head: 26afa39c7eb709efc38fa273f1810fb05913b43a; identical Git tree._
+_Last updated: 2026-11-12 by Codex (GPT-6 Astra), agent 4e866204-7f11-40a3-879e-1593aed80b6b._
+_Merged main: d209004fd31383682b1f4aeb5a0986fbb6959e35; tree identical to tested/reviewed PR head39b9c4c._
 
 ## Current focus
 
-**Wisp 2.2.12 / companion 1.14.9 is published and verified.** [PR234](https://github.com/EstarinAzx/Wisp-Router/pull/234) is merged; [GitHub release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.2.12) has four native binaries and the VSIX. npm latest is 2.2.12. No active implementation or release work remains. Installed clients were not replaced or restarted; the development host remains open for the user.
+Exact Claude launcher context budgets are implemented and locally verified; CodeRabbit passed 3/3 and PR #235 is merged with green platform CI. Wisp's Anthropic request stamp is updated to 2.1.322 at the user's request. No new release, installation or real-client restart is authorized/performed.
 
 ## Work contract
 
-- **Authority:** khitarashi, 2026-11-12 in root515709ef: fix native Codex/Anthropic/Grok usage reporting, add regression coverage and verify the dev host; then explicitly "ok release it now". Primary checkout only/no worktrees; preserve real auth/settings/permissions. Publication is complete, not standing approval for another release or client installation.
-- **Execution:** root515709ef, inline in primary checkout. The earlier 2.2.11 ownership relay remains stopped/completed; do not restart it.
-- **Review:** [[review-policy]] on. Native-vscode-usage and wisp-2.2.12-release-prep both passed **2/3**. Initial scopes5/5 and16/16 plus one joint follow-up5/5; zero remaining findings, all21 changed PR paths covered. Follow-up and release reviews have native exit0. The initial native review retained a null exit capture alongside an explicit completed NDJSON outcome. No paid credits or pending review. Authoritative ledger: local `.claude/wisp-2.2.12/work.md`.
-- **Integration:** release merged and tagged. Final context updates are status-only. Source/tag identities and final synchronized main are in local `.claude/wisp-2.2.12/release-receipt.json`.
-- **Evidence:** local `.claude/wisp-2.2.12/`: `followup-checks/`, `review-1/`, `review-2/`, `pr-final-evidence.json`, `published/verification.json`, `published/npm-fallback-receipt.json`, and release-receipt.json. Original implementation evidence remains `.claude/context-usage-diagnosis/`; immutable earlier receipts are historical, not current queues.
-- **Pending:** none. Review, verification and publication/registry watchers finished. No worker or disposable test host is active.
-- **Checkpoint:** complete. Tests, reviews, exact-tree integration, tag publication, downloaded package checks and registry verification are settled.
+- **Authority:** khitarashi, 2026-11-12 in this agent's chat: "Proceed with exact-size support through the Wisp launcher, including safe switching between different context limits and CodeRabbit review", then explicitly requested updating Wisp's stamp. Approved design: `docs/superpowers/specs/2026-11-12-claude-context-design.md`; plan: `docs/superpowers/plans/2026-11-12-claude-context.md`.
+- **Execution:** this agent owns the role Claude alias context support. Inline execution in the primary checkout; no worktree. Prior 2.2.11 relay remains stopped/completed.
+- **Review:** [[review-policy]] remains on. Checkpoint `claude-context-windows`, **passed 3/3 runs used**, no paid escalation. One authoritative ledger: local `.claude/alias-context-research/work.md`; immutable attempt scope/identity: `review-1/manifest.json`, `review-2/manifest.json`, and `review-3/manifest.json`.
+- **Integration:** user explicitly requested merging PR #235 on 2026-11-12. Squash merge d209004 is on main and its Git tree equals reviewed head39b9c4c exactly. Release preparation/publication are not yet authorized. Context checkpoint belongs on main; preserve the unrelated `.context/flows.md` edit.
+- **Evidence:** local `.claude/alias-context-research/`: `checks.json`, `launcher-checks.json`, full test/build logs, `native-compiled.log`, and `live-capabilities.json`. All final checks used the existing pinned Bun 1.4.2. Initial old-Bun/PATH failures are recorded in work.md and are not accepted verification.
+- **Pending:** none. CodeRabbit reviewed19/19 initial paths, six/six follow-up paths after four issues were fixed, and one/one final packaging-fix path. Both follow-ups completed exit0 with zero issues. Combined hashes match delivered product source. Final receipt: local `.claude/alias-context-research/receipt.json`.
+- **Checkpoint:** implementation, PR creation and requested merge complete. [PR #235](https://github.com/EstarinAzx/Wisp-Router/pull/235), merged as d209004 from head39b9c4c, CI43163207542: all four builds and packaging smokes passed; publication skipped for PR. Release preparation/publication and installation await a separate user request.
 
 ## Verified state
 
-- Native Codex, Anthropic and Grok send Copilot usage data parts. Prompt totals include uncached input and both cache tiers once; cached-read detail remains separate. Missing usage stays absent and true zero usage is preserved.
-- Anthropic opening input/cache counts merge with final output-only updates. The PR review exposed malformed updates overwriting valid counts; RED6 then GREEN39 provider tests confirm the correction. Non-strict updates accept only nonnegative safe integers; strict validation is preserved.
-- **2,141 core tests**, **191 TUI tests / 1,027 assertions**, core/TUI typechecks, extension/webview build and all34 version-only TUI captures passed. VSIX and Windows launcher/Responses and signed Desktop checks passed.
-- Real VS Code1.146.0 development-host API: six synthetic requests across three providers returned correct100->200 prompt counts, output10 and cache details. No real credentials/provider network used. User screenshot separately confirms live GPT-6 Astra xhigh at5% rather than0%; live Anthropic/Grok UI meters were not separately exercised.
-- Final PR CI [43123986194](https://github.com/EstarinAzx/Wisp-Router/actions/runs/43123986194) passed four builds/eight smokes. Automatic CodeRabbit re-review succeeded and marked both findings addressed; no new inline findings.
-- Publication [43124930414](https://github.com/EstarinAzx/Wisp-Router/actions/runs/43124930414) passed all five jobs. Downloaded Windows/VSIX hashes match GitHub; all three VSIX bundles match the corrected accepted build. npm shell/Windows tarballs pass registry integrity; Windows npm binary matches GitHub, platform pins are2.2.12, and compiled/npm package checks pass.
-- npm latest/shell/Windows/macOS packages were visible at final verification. Linux optional package returned404; the existing GitHub-download fallback covers it. The published npm shell actually downloaded the correct Windows release binary into an isolated home, matched its digest and passed version/both-launcher checks.
+- Core 2153 tests; TUI 202 tests/1109 assertions; core/TUI typechecks; companion build; slot statusline self-check all passed.
+- Installed Claude Code 2.1.322 driven through both source and compiled launchers reports 128000/400000/500000/1000000 windows and routes each fixture correctly. SDK model switch is refused before upstream generation, preserving the 500K budget. Synthetic loopback only, no real-provider generation.
+- Metadata-only reads of the user's configured targets returned Grok 4.7 = 500000 and Carbon (`gemini-4-carbon-high`)=1048576. No refresh/sign-in/settings change occurred. This is catalogue evidence, not full-window inference qualification.
+- Header and body regression tests both verify the 2.1.322 stamp. Beta selection and other fingerprint fields remain unchanged; new stamp live Anthropic acceptance remains untested.
 
-## Limits and preservation
+## Behavior and limits
 
-All variants, live compaction and full-window generation remain unqualified. Prior classic Local UI sign-in and direct Claude forced ANY limitations remain; automatic tools were qualified for the earlier Copilot repairs. Existing broken Antigravity chats need new chats. This accounting fix does not expand provider or context-capacity support.
+Launch with `claude-wisp --model <alias>`; without a model use Wisp's Active Provider. Each child gets a signed target-bound profile and temporary settings. Different targets require exit/relaunch with `--resume <session> --model <alias>`. Inherited-model subagents work; other-target requests are refused. Server-side advisor routing remains separate. Unknown capacity is explicitly fallback 128000, not a verified limit. Ordinary copied-env gateway sessions retain their old context behavior. See `docs/claude-wisp.md` and the investigation report.
 
-Real auth/settings, permissions, hook trust, excluded historical files and the old worktree remain preserved. Disposable test hosts exited and synthetic homes were removed; protected Git askpass profile remnants are recorded in local receipts, with no ACL changes or unrelated cleanup. Desktop protocol5 and wisp-slot1.7.5 are unchanged. Prior 2.2.11 review budgets stay closed: logging4/5, Copilot1/3, release-prep1/3; its publication receipt remains `.claude/wisp-2.2.11/publication-receipt.json`.
+The prior Wisp 2.2.12 / companion 1.14.9 publication remains complete. Final main 3358c0f and source/tag e251eb3 are preserved; prior native-usage and release-prep reviews remain passed 2/3 each. Source/package identities and installation boundaries stay in local `.claude/wisp-2.2.12/release-receipt.json`; the full prior baton remains in Git at 3358c0f. No prior release watcher/worker remains active. Existing live-compaction, full-window, Local sign-in, direct Claude forced-ANY and old Antigravity-chat limits are unchanged; [[release-follow-ups]] retains held work.
 
 ## Pick up here
 
-No active work. Preserve published tags and completed review budgets. Await a new user request before another release, client installation or restart. Read this baton and the final release receipt before acting; old plans and historical worktrees are not queues.
+No active implementation or review. PR #235 is merged. Preserve passed 3/3 review evidence; no fourth implementation review. Code is ready for release preparation, but versions remain terminal2.2.12, companion1.14.9 and slot1.7.5. A new release still needs version/notes updates, a distinct release-prep review checkpoint, rebuilt/package verification and publication authorization. No release tag or installation was performed. Preserve the pre-existing flow note.
 
 ## Related
 
