@@ -12,18 +12,18 @@ _Usage fix committed locally as9bc71ab; release metadata for2.2.12/1.14.9 is in 
 
 ## Current focus
 
-khitarashi explicitly authorized **"ok release it now"** after confirming the GPT context meter. Prepare and publish **Wisp2.2.12 / companion1.14.9** with the reviewed native Codex/Anthropic/Grok usage fix. Release metadata and local package checks are in progress; no2.2.12 tag/publication yet. Installed clients remain unchanged.
+khitarashi authorized **Wisp2.2.12 / companion1.14.9** publication. [PR234](https://github.com/EstarinAzx/Wisp-Router/pull/234) is the existing integration PR; do not create another. Its initial platform checks and reviews completed. A review-found Anthropic malformed-usage edge case is corrected with six additional regressions. Follow the existing PR and local release receipt through final checks, merge and publication. Installed clients remain unchanged.
 
 ## Work contract
 
 - **Authority:** khitarashi,2026-11-12 in root515709ef: usage fix/regressions/dev-host verification, then explicit "ok release it now", superseding the earlier publication hold. Prior primary-checkout/no-worktree and auth/settings preservation remain. No client installation/restart.
 - **Requirements/plan:** local `.claude/wisp-2.2.12/work.md` owns release progress; `.claude/context-usage-diagnosis/work.md` retains completed implementation/host evidence.
 - **Execution:** root515709ef, inline in primary checkout. Prior2.2.11 relay stays stopped/completed; this is separate unreleased work.
-- **Review:** [[review-policy]] on. Native-vscode-usage **passed1/3**, all5 files covered,0 findings, hashes match. New wisp-2.2.12-release-prep **1/3**, attempt1 reserved/pending; ledger `.claude/wisp-2.2.12/work.md`. Preserve prior closed budgets and original native review's null exit-capture limitation; complete NDJSON establishes its outcome.
-- **Integration:** implementation committed locally on primary main; release metadata will be reviewed, integrated through PR/CI, then tagged/published. Versioned baton; local evidence ignored. No worktrees.
+- **Review:** [[review-policy]] on. Initial native-vscode-usage1/3 and release-prep1/3 reviews completed with0 findings. PR234 then identified malformed Anthropic usage and stale handoff text; both are addressed in the follow-up. Current coverage/budgets and dispositions are authoritative in local `.claude/wisp-2.2.12/work.md` and follow-up review evidence; do not restart completed review scopes or reset counters.
+- **Integration:** use existing release-prep/wisp-2.2.12 and PR234 in this primary checkout. Merge only the verified final head, return main, then tag/publish. Versioned baton; local evidence ignored. No worktrees.
 - **Evidence:** local `.claude/context-usage-diagnosis/`: red.log, green.log, core.log, checks.json, host-receipt.json, review-1/manifest.json/events.ndjson/dispositions.json and final-receipt.json. Published release evidence remains `.claude/wisp-2.2.11/publication-receipt.json`.
-- **Pending:**2.2.12 release metadata review attempt1/3 reserved; local release checks passed, shell3ca1c09c exited0. No PR yet. Local `.claude/wisp-2.2.12/work.md` owns the live review budget/process evidence. Interactive development host remains open.
-- **Checkpoint:** fix complete locally:33 provider tests,2135 full core tests, types/build, six real-extension-host API requests across three providers, user visual GPT5% confirmation and CodeRabbit5/5. Live Anthropic/Grok UI meters were not separately tested.
+- **Pending:** release completion on existing PR234. Read local `.claude/wisp-2.2.12/work.md` and release-receipt.json for exact head, active process and review/CI status before acting. Interactive development host remains open.
+- **Checkpoint:** initial2135 core/191 TUI tests, types/build/packages and host checks passed. Follow-up malformed updates had RED6 then GREEN39/39 provider tests; fresh full/package/host evidence is retained separately under `.claude/wisp-2.2.12/followup-checks/`. User confirmed live GPT5%; no live Anthropic/Grok UI claim.
 
 ## Verified state
 
@@ -45,7 +45,7 @@ All disposable test hosts stopped and temporary Wisp credential copies removed. 
 
 ## Pick up here
 
-Continue the authorized2.2.12 release from its local work ledger. After local package checks, review only new release metadata, preserve matching native-usage review, push PR and verify platform CI/review before main integration/tag. Verify published GitHub/npm artifacts and finish context. Do not move older tags or restart the completed2.2.11 relay. No installed-client replacement/restart.
+Continue existing PR234 from the local release ledger; reconcile its final source hashes, follow-up reviews and exact-head CI before merging/tagging. Initial metadata review and PR creation are already done. Verify published GitHub/npm artifacts and finish context. Do not move older tags, create a duplicate PR or restart the completed2.2.11 relay. No installed-client replacement/restart.
 
 ## Related
 

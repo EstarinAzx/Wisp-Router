@@ -250,7 +250,11 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
     // don't consume the event — message_delta still needs its stop_reason read below.
     const raw = ev.event === 'message_start' ? ev.data?.message?.usage : ev.event === 'message_delta' ? ev.data?.usage : undefined;
     const hasUsage = raw && typeof raw === 'object' && !Array.isArray(raw);
-    if (hasUsage) usageFields = { ...usageFields, ...raw };
+    if (hasUsage) {
+      const update = args.strictCompletion ? raw : Object.fromEntries(Object.entries(raw)
+        .filter(([, value]) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0));
+      usageFields = { ...usageFields, ...update };
+    }
     if (args.strictCompletion) {
       // The opening snapshot is not final output usage. A missing final update must stay missing.
       if (ev.event === 'message_start') delete usageFields.output_tokens;

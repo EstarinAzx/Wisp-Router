@@ -58,7 +58,7 @@ describe('native provider usage reporting', () => {
   const cases = [
     ['codex', 'gpt-6-astra', 20], ['anthropic', 'claude-sonnet-4-6', 10], ['xai', 'grok-4.5', 20],
   ] as const;
-  const sendUsage = async (id: string, model: string, usage: 'valid' | 'missing' | 'invalid' | 'zero', toolOnly = false) => {
+  const sendUsage = async (id: string, model: string, usage: 'valid' | 'missing' | 'invalid' | 'zero', toolOnly = false, badUpdate?: Record<string, unknown>) => {
     vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [] });
     const creds = { accessToken: 'synthetic-token', accountId: 'synthetic-account' };
     const { provider } = setup('', { providers: [PROVIDERS.find(p => p.id === id)!], modelMap: () => ({ [id]: model }),
@@ -78,7 +78,9 @@ describe('native provider usage reporting', () => {
           + event('content_block_stop', { index: 0 })
           : event('content_block_delta', { index: 0, delta: { type: 'text_delta', text: 'OK' } }))
         + event('message_delta', { delta: { stop_reason: toolOnly ? 'tool_use' : 'end_turn' },
-          usage: usage === 'missing' ? undefined : { output_tokens: count } }) + event('message_stop', {})
+          usage: usage === 'missing' ? undefined : { output_tokens: count } })
+        + (badUpdate ? event('message_delta', { usage: badUpdate }) + event('message_delta', { usage: { output_tokens: 11 } }) : '')
+        + event('message_stop', {})
       : (toolOnly ? event('response.output_item.added', { item: output[0] }) : '')
         + event('response.completed', { response: { output, usage: wireUsage } });
     vi.stubGlobal('fetch', async (url: unknown) => /\/(responses|messages)(\?|$)/.test(String(url))
@@ -111,6 +113,14 @@ describe('native provider usage reporting', () => {
     const { parts, usages } = await sendUsage(id, model, 'invalid');
     expect(parts.some(p => p instanceof vscode.LanguageModelTextPart)).toBe(true);
     expect(usages.every(u => u.prompt_tokens >= 0 && u.completion_tokens >= 0 && u.total_tokens >= 0)).toBe(true);
+  });
+  it.each(['bad', null, {}, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('Anthropic preserves valid counts across malformed usage update %j', async value => {
+    const { usages } = await sendUsage('anthropic', 'claude-sonnet-4-6', 'valid', false, {
+      input_tokens: value, output_tokens: value, cache_creation_input_tokens: value, cache_read_input_tokens: value,
+    });
+    expect(usages.every(u => u.prompt_tokens === 100 && u.prompt_tokens_details.cached_tokens === 10)).toBe(true);
+    expect(usages.at(-1)).toEqual({ prompt_tokens: 100, completion_tokens: 11, total_tokens: 111,
+      prompt_tokens_details: { cached_tokens: 10 } });
   });
 });
 
