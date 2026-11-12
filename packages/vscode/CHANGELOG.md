@@ -4,6 +4,16 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Shared Bridge support for exact-context Claude launcher profiles, including refusal of a mismatched model or changed target before generation. Native Copilot context handling is unchanged.
+
+### Changed
+
+- Update Wisp's Anthropic User-Agent and billing-version stamp together to 2.1.322; this does not replace the installed Claude Code client.
+
 ## [1.14.9] - 2026-11-12
 
 ### Fixed

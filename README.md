@@ -59,7 +59,7 @@ In another terminal, start Claude Code through Wisp:
 claude-wisp
 ```
 
-Use Claude Code's **`/model`** picker to select your alias under **From gateway**. You're ready to work.
+Use `claude-wisp --model <alias>` to select an alias and apply its context budget. With no model argument, the launcher uses Wisp's Active Provider. To change targets, exit and resume with the new alias; see [context budgets and safe switching](docs/claude-wisp.md).
 
 Prefer VS Code? [Install the extension](#vs-code-extension) and use your models directly in its chat and agent views. For Desktop, see the [experimental bridge setup](#chatgpt-desktop-codex-bridge--experimental) below.
 
@@ -106,7 +106,7 @@ The setup guide covers supported routes, upgrades, model refresh, and restoring 
 
 ## Routing aliases
 
-Give your models names you can remember. An **alias** such as `sol`, `terra`, or `grok` points to a specific provider and model. Create or change aliases with **`/routing`** in Wisp, then select them in Claude Code's **From gateway** model list.
+Give your models names you can remember. An **alias** such as `sol`, `terra`, or `grok` points to a specific provider and model. Create or change aliases with **`/routing`** in Wisp, then launch `claude-wisp --model <alias>`. Ordinary gateway sessions still list aliases under **From gateway**, with Claude Code's own context-budget assumptions.
 
 <p align="center">
   <img src="docs/routing-tui.png" alt="Wisp TUI Routing showing example model aliases" width="720">

@@ -882,10 +882,10 @@ describe('anthropicMessagesHeaders', () => {
   });
 
   // #149: fingerprint parity with real claude-cli — the UA advertises the version wisp claims, tracking
-  // the shipping CLI (2.1.258). The cc_version hash is unvalidated (#148), so the bump cannot break an
+  // the shipping CLI (2.1.322). The cc_version hash is unvalidated (#148), so the bump cannot break an
   // accepted request; only UA and attribution having to agree is load-bearing.
-  it('advertises the claude-cli 2.1.258 User-Agent', () => {
-    expect(anthropicMessagesHeaders('tok')['User-Agent']).toBe('claude-cli/2.1.258 (external, cli)');
+  it('advertises the claude-cli 2.1.322 User-Agent', () => {
+    expect(anthropicMessagesHeaders('tok')['User-Agent']).toBe('claude-cli/2.1.322 (external, cli)');
   });
 
   // #149: the Stainless SDK header set real claude emits (its bundled @anthropic-ai/sdk is a Stainless
@@ -1442,7 +1442,7 @@ describe('anthropicStream (streaming IO)', () => {
 
   // #149: the version bump must reach the WIRE BODY's cc_version billing block, not only the UA — the
   // client feeds CLAUDE_CODE_VERSION into the attribution fingerprint the backend ties to the UA.
-  it('embeds cc_version=2.1.258 in the request body attribution block', async () => {
+  it('embeds cc_version=2.1.322 in the request body attribution block', async () => {
     let sentBody: any;
     vi.stubGlobal('fetch', async (_url: string, init: any) => {
       sentBody = JSON.parse(init.body);
@@ -1453,7 +1453,7 @@ describe('anthropicStream (streaming IO)', () => {
       ]);
     });
     await collect(anthropicStream(args));
-    expect(sentBody.system[0].text).toContain('cc_version=2.1.258.');
+    expect(sentBody.system[0].text).toContain('cc_version=2.1.322.');
   });
 
   // #363 (2.0.47): the Bridge threads the volatile system tail through to the body builder — the wire body

@@ -46,7 +46,7 @@ write('config.json', {
 // ANSI stripped: the assertions are about content, and colour is verified by eye.
 const plain = (text) => text.replace(/\x1b\[[0-9;]*m/g, '');
 
-const render = (model, status) => {
+const render = (model, status, env = {}) => {
   const file = path.join(home, 'status.json');
   if (status) write('status.json', { authRevision, ...status, providers: Object.fromEntries(
     Object.entries(status.providers || {}).map(([id, entry]) => [id, { authRevision, ...entry }])) });
@@ -54,7 +54,7 @@ const render = (model, status) => {
   return plain(execFileSync(process.execPath, [script], {
     input: JSON.stringify({ model }),
     // ANTHROPIC_BASE_URL is half the bridged check — without it the script prints nothing at all.
-    env: { ...process.env, WISP_HOME: home, ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787' },
+    env: { ...process.env, WISP_HOME: home, ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787', WISP_CLAUDE_CONTEXT_PROFILE: '', ...env },
     encoding: 'utf8',
   }));
 };
@@ -141,6 +141,12 @@ ok('sibling reading is stamped aged', /7d {2}[●○]{10} +3%.*just now/.test(ou
 //    before resolveRoute sees it; the reader must strip the same or the exact-alias rung can never fire.
 out = render({ id: 'claude-wisp-grok', display_name: 'grok — grok-4.5' }, codexTurn);
 ok('picked alias resolves', out.includes('grok → grok-4.5') && out.includes('xai'), out);
+
+const launchProfile = { protocol: 1, id: 'wisp/claude-ctx-0123456789abcdef01234567', route: 'grok', target: { providerId: 'xai', model: 'grok-4.7' } };
+out = render({ id: launchProfile.id }, codexTurn, { WISP_CLAUDE_CONTEXT_PROFILE: JSON.stringify(launchProfile) });
+ok('launcher identity retains its pinned route and model', out.includes('grok → grok-4.7') && out.includes('xai'), out);
+out = render({ id: 'claude-wisp-sol' }, codexTurn, { WISP_CLAUDE_CONTEXT_PROFILE: JSON.stringify(launchProfile) });
+ok('another model never adopts the launch profile', out.includes('sol → gpt-5.6-sol') && !out.includes('grok-4.7'), out);
 
 out = render({ id: 'claude-wisp-sol[1m]', display_name: 'sol — gpt-5.6-sol' }, codexTurn);
 ok('picked alias survives the tier suffix', out.includes('sol → gpt-5.6-sol') && out.includes('codex'), out);

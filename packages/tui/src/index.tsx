@@ -48,9 +48,8 @@ if (process.argv[2] === '--version') {
   const { runModelsCli } = await import('./discoveryCli');
   process.exitCode = await runModelsCli(process.argv.slice(3));
 } else if (process.argv[2] === 'claude-wisp') {
-  // Drop the dispatch token so the launcher's verbatim argv contract (argv.slice(2) → claude) holds.
-  process.argv.splice(2, 1);
-  await import('./claude-wisp');
+  const { runClaudeWisp } = await import('./claude-wisp');
+  process.exitCode = await runClaudeWisp(process.argv.slice(3));
 } else if (process.argv[2] === 'codex-wisp') {
   const { runCodexWisp } = await import('./codex-wisp');
   process.exitCode = await runCodexWisp(process.argv.slice(3));
