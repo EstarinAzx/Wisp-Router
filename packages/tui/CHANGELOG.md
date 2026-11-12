@@ -6,6 +6,17 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.12] - 2026-11-12
+
+### Fixed
+
+- Preserve Anthropic input/cache usage when the final streamed update contains only output tokens, so the shared client reports complete totals.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.12**, **companion VSIX: 1.14.9**, **wisp-slot: unchanged at 1.7.5**. The visible Copilot context-meter fix belongs to the companion; both hosts receive the shared Anthropic accounting repair. Desktop protocol remains **5**.
+- See [verification and limits](../../docs/releases/v2.2.12.md). Publication does not install or restart existing clients.
+
 ## [2.2.11] - 2026-11-12
 
 ### Added

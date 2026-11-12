@@ -4,6 +4,18 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.9] - 2026-11-12
+
+### Fixed
+
+- Forward native Codex, Anthropic and Grok token usage to Copilot instead of leaving its context meter at zero. Include uncached input, cache creation and cache reads exactly once, with cached-read detail.
+- Merge Anthropic opening input/cache counts with its output-only final update. Missing usage remains absent; invalid numeric reports are ignored, while real zero counts and tool-only replies remain supported.
+
+### Surfaces
+
+- **VSIX: 1.14.9**, **terminal/npm: 2.2.12**, **wisp-slot: unchanged at 1.7.5**. Desktop protocol remains **5**.
+- Real development-host API checks cover all three providers across two synthetic turns each; the user confirmed a live GPT-6 Astra meter at 5%. Live Anthropic/Grok UI meters were not separately exercised. See [verification and limits](../../docs/releases/v2.2.12.md).
+
 ## [1.14.8] - 2026-11-12
 
 ### Fixed

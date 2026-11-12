@@ -32,7 +32,7 @@ type CodexRequestArgs = { rejectRedirects?: boolean; responses?: BridgeChatReque
 
 // What codexStream yields: an answer-text fragment, a fully-assembled tool call (emitted once the stream
 // ends), or the turn's real token usage (#165, off the terminal frame). The native-chat consumer maps the
-// first two to LanguageModelTextPart / LanguageModelToolCallPart and ignores usage; the Bridge's
+// first two to LanguageModelTextPart / LanguageModelToolCallPart and reports usage as a data part; the Bridge's
 // mapOAuthStream forwards usage to the door, whose encoder folds it into the client's meter.
 export type CodexStreamEvent =
   | { type: 'text'; value: string }

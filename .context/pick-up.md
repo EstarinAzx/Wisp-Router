@@ -9,9 +9,9 @@ tags: [context, pick-up]
 
 Use the primary checkout on local `main`; [[active-work]] is the current baton. Historical notes and the old worktree are not queues.
 
-**Wisp2.2.11 / companion1.14.8 is published and verified; no active work.** Workflow43115208900 passed; GitHub assets, downloaded Windows/VSIX and published npm shell/Windows checks passed. npm latest is2.2.11; the Linux optional package returned404 and uses the existing GitHub-download fallback. Read [[active-work]] and local `.claude/wisp-2.2.11/publication-receipt.json` for exact evidence and limits. Client installation/restart remains outside scope.
+**Continue existing PR234 for the authorized Wisp2.2.12 / companion1.14.9 release.** Initial implementation/metadata reviews and platform CI completed; the review-found malformed Anthropic usage edge case has a focused correction. Read [[active-work]] and local `.claude/wisp-2.2.12/work.md`/release-receipt.json for final-head verification and process state. Do not repeat metadata review or PR creation. No client installation/restart.
 
-CodeRabbit checkpoints passed: logging4/5 (user extended cap), Copilot1/3, release-prep1/3. No pending review or worker. Preserve qualification limits and review budgets; do not repeat implementation or reopen the completed preparation relay.
+Initial native-usage1/3 and2.2.12-release-prep1/3 checkpoints completed. The local release ledger owns follow-up consumption and current coverage. Prior2.2.11 checkpoints stay closed: logging4/5, Copilot1/3, release-prep1/3. Preserve historical tags and completed relay state.
 
 ## Related
 
