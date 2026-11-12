@@ -61,7 +61,8 @@ const requestContext = (port: number, secret: string, model?: string): Promise<{
     });
     const timeout = setTimeout(() => req.destroy(new Error('Bridge context lookup timed out.')), 6500);
     req.on('close', () => clearTimeout(timeout));
-    req.on('error', reject);
+    req.on('error', error => reject((error as NodeJS.ErrnoException).code === 'ECONNREFUSED'
+      ? new Error(`Bridge not reachable at http://127.0.0.1:${port} — start it first with wisp serve or /bridge.`) : error));
     req.end(data);
   });
 
@@ -88,8 +89,8 @@ export const runClaudeWisp = async (args: string[] = process.argv.slice(2)): Pro
     if (!secret) throw new Error('No Bridge secret found in Wisp home ? start the Bridge first with wisp serve or /bridge.');
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid Wisp Bridge port.');
     const claude = resolveClaude();
-    await checkVersion(claude);
     const { profile, token } = await requestContext(port, secret, resolveClaudeContextSelection(parsed.model, process.env, secret));
+    await checkVersion(claude);
     const launch = buildClaudeContextLaunch(port, secret, profile, token, parsed, process.env);
     temporary = mkdtempSync(join(tmpdir(), 'wisp-claude-context-'));
     const settings = join(temporary, 'settings.json');
