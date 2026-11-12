@@ -289,6 +289,32 @@ describe('AntigravityAuth — token lifecycle', () => {
     expect(stored).toEqual(creds);
   });
 
+  it('does not refresh or bootstrap after its caller deadline', async () => {
+    const original = { accessToken: 'old', refreshToken: 'refresh', expiresAt: near() };
+    const store = memStore(original);
+    const fetch = vi.fn(async () => Response.json({ access_token: 'late', expires_in: 3600 }));
+    vi.stubGlobal('fetch', fetch);
+    const auth = new AntigravityAuth(store, async () => true, () => {});
+    await expect(auth.current(AbortSignal.abort(new Error('deadline')))).rejects.toThrow('deadline');
+    expect(store.read()).toEqual(original);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each(['refresh', 'project'])('cancels %s without persisting a late response', async phase => {
+    const original = { accessToken: 'old', refreshToken: 'refresh', expiresAt: phase === 'refresh' ? near() : Date.now() + 3600000 };
+    const store = memStore(original);
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(Response.json(phase === 'refresh'
+        ? { access_token: 'late', expires_in: 3600 } : { cloudaicompanionProject: 'late-project' })), 50);
+      init.signal!.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal!.reason); }, { once: true });
+      queueMicrotask(() => controller.abort(new Error('deadline')));
+    }));
+    const auth = new AntigravityAuth(store, async () => true, () => {});
+    await expect(auth.current(controller.signal)).rejects.toThrow('deadline');
+    expect(store.read()).toEqual(original);
+  });
+
   it('refreshes a near-expiry token, persists it, and keeps the project id', async () => {
     const store = memStore({ accessToken: 'old', refreshToken: '1//rt', expiresAt: near(), projectId: 'p-1' });
     let sentBody = '';

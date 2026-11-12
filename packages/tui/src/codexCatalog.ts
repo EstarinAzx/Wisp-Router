@@ -7,8 +7,8 @@ import { join } from 'path';
 import {
   PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
   anthropicThinkingEffort, xaiReasoning, antigravityAcceptsThinkingLevel, isAntigravityArgonModel, desktopTargetIssue,
-  fetchAntigravityModelInfos,
-  type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
+  fetchAntigravityModelInfos, AntigravityAuth,
+  type WispConfig, type WispHome, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
 
 export type NativeCatalog = { models: Record<string, unknown>[]; [key: string]: unknown };
@@ -159,14 +159,31 @@ export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, c
   return { catalog: { ...catalog, models }, excludedTargets };
 };
 
-export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth): Promise<(target: Target) => TargetCapabilities | undefined> => {
+const readAntigravityCapabilities = async (home: WispHome) => {
+  const signal = AbortSignal.timeout(4000);
+  let snapshot: string | undefined;
+  const auth = new AntigravityAuth({
+    read: () => { const creds = home.readAuth().antigravity; snapshot = JSON.stringify(creds); return creds; },
+    write: (creds, expected) => {
+      home.writeAuth({ antigravity: creds }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected ?? undefined) });
+      snapshot = JSON.stringify(creds);
+    },
+  }, async () => false, () => {});
+  const creds = await auth.current(signal);
+  if (!creds?.accessToken) return [];
+  const models = await fetchAntigravityModelInfos(creds, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl, signal);
+  // A sign-out/account switch during discovery invalidates that account's metadata too.
+  return JSON.stringify(home.readAuth().antigravity) === snapshot ? models : [];
+};
+
+export const readAliasCapabilities = async (config: WispConfig, home: WispHome): Promise<(target: Target) => TargetCapabilities | undefined> => {
+  const auth = home.readAuth();
   const targets = [...(config.routing?.aliases.map(a => a.target) ?? []), ...Object.values(config.routing?.codexModels ?? {})];
   const keyed = targets.some(t => PROVIDERS.find(p => p.id === t.providerId)?.catalogKey || ['anthropic', 'xai'].includes(t.providerId));
   const [publicCatalog, codex, antigravity] = await Promise.all([
     keyed ? getModelsDevCatalog(AbortSignal.timeout(4000)) : undefined,
     targets.some(t => t.providerId === 'codex') ? codexCatalog.get({ creds: auth.codex, baseUrl: PROVIDERS.find(p => p.id === 'codex')!.baseUrl }) : undefined,
-    targets.some(t => t.providerId === 'antigravity') && auth.antigravity?.accessToken
-      ? fetchAntigravityModelInfos(auth.antigravity, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl, AbortSignal.timeout(4000)).catch(() => []) : [],
+    targets.some(t => t.providerId === 'antigravity') ? readAntigravityCapabilities(home).catch(() => []) : [],
   ]);
   return target => {
     const p = PROVIDERS.find(p => p.id === target.providerId);

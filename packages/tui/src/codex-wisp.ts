@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Native Codex owns model selection, tools, policy and session storage. This launcher only
-// overlays the local Responses transport; it never writes either application's stores.
+// overlays the local Responses transport and refreshes Wisp credentials needed for metadata.
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import { existsSync } from 'fs';
@@ -196,7 +196,7 @@ export const runCodexWisp = async (args: string[] = process.argv.slice(2)): Prom
     await verifyCodexTransport(codex, launch);
     const config = home.readConfig();
     const native = await readNativeCatalog(codex, launch.args, launch.env);
-    catalog = writeChildCatalog(mergeAliasCatalog(native, config, await readAliasCapabilities(config, home.readAuth())));
+    catalog = writeChildCatalog(mergeAliasCatalog(native, config, await readAliasCapabilities(config, home)));
     launch.args = ['-c', `model_catalog_json=${JSON.stringify(catalog.path)}`, ...catalogArguments(launch.args).child];
     console.error('codex-wisp: Hosted web search is unavailable; client tool search remains available.');
     return await new Promise<number>(resolve => {

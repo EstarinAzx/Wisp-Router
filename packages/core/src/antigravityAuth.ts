@@ -176,8 +176,10 @@ const runAntigravityOAuth = async (openExternal: (url: string) => PromiseLike<bo
 // ponytail: no onboardUser fallback. The reference polls a second endpoint to PROVISION a project when
 // loadCodeAssist returns none; #186 got one straight back, and #185 scopes this to reading what exists. Add
 // it only if a real account is ever seen with no project.
-export const fetchAntigravityProject = async (accessToken: string): Promise<string | undefined> => {
+export const fetchAntigravityProject = async (accessToken: string, signal?: AbortSignal): Promise<string | undefined> => {
   try {
+    signal?.throwIfAborted();
+    const timeout = AbortSignal.timeout(10_000);
     const res = await fetch(ANTIGRAVITY_LOAD_URL, {
       method: 'POST',
       headers: {
@@ -187,7 +189,7 @@ export const fetchAntigravityProject = async (accessToken: string): Promise<stri
         'User-Agent': ANTIGRAVITY_HTTP_USER_AGENT,
       },
       body: JSON.stringify({ metadata: { ideType: 'ANTIGRAVITY' } }),
-      signal: AbortSignal.timeout(10_000),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!res.ok) return undefined;
     return parseAntigravityProject(await res.json());
@@ -217,7 +219,8 @@ export class AntigravityAuth {
   // processes share auth.json (extension + TUI), so RE-READ before refreshing (#59): if the other process
   // already rotated the token, use its bundle instead of firing our spent refresh token. A failed refresh is
   // non-fatal — keep the existing creds (they may still work; the live call surfaces a 401).
-  private refreshIfNeeded = async (creds: AntigravityCreds): Promise<{ creds: AntigravityCreds; snapshot: AntigravityCreds }> => {
+  private refreshIfNeeded = async (creds: AntigravityCreds, signal?: AbortSignal): Promise<{ creds: AntigravityCreds; snapshot: AntigravityCreds }> => {
+    signal?.throwIfAborted();
     if (!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) return { creds, snapshot: creds };
     const fresh = this.store.read();
     if (!fresh) throw new AuthStateChangedError();
@@ -225,6 +228,7 @@ export class AntigravityAuth {
     if (!shouldRefreshAntigravityToken(fresh, Date.now()) || !fresh.refreshToken) return retained;
     let next: AntigravityCreds;
     try {
+      const timeout = AbortSignal.timeout(15_000);
       const res = await fetch(ANTIGRAVITY_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -234,10 +238,11 @@ export class AntigravityAuth {
           client_id: ANTIGRAVITY_CLIENT_ID,
           client_secret: ANTIGRAVITY_CLIENT_SECRET,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
       if (!res.ok) { this.log(`[antigravity] token refresh failed (${res.status})`); return retained; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+      signal?.throwIfAborted();
       // Carry the project id over the rebuild — it belongs to the ACCOUNT, not the token, so a refresh must
       // not silently strip it and put every later turn back on the request-build 400.
       next = { ...(fresh.projectId ? { projectId: fresh.projectId } : {}), ...tokensToAntigravityCreds(payload, Date.now()) };
@@ -251,6 +256,7 @@ export class AntigravityAuth {
       // Google's refresh response omits refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
+      signal?.throwIfAborted();
       this.log(`[antigravity] token refresh error: ${String(err)}`);
       return retained;
     } finally {
@@ -270,10 +276,12 @@ export class AntigravityAuth {
 
   // Bootstrap the project id when the bundle has none (#188: "re-fetch if absent"). Signed-out bundles are
   // skipped — there is no bearer to ask with. A failure leaves the bundle as-is; the next call retries.
-  private withProject = async (creds: AntigravityCreds, snapshot: AntigravityCreds): Promise<AntigravityCreds> => {
+  private withProject = async (creds: AntigravityCreds, snapshot: AntigravityCreds, signal?: AbortSignal): Promise<AntigravityCreds> => {
+    signal?.throwIfAborted();
     if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
     if (creds.projectId || !creds.accessToken) return creds;
-    const projectId = await fetchAntigravityProject(creds.accessToken);
+    const projectId = await fetchAntigravityProject(creds.accessToken, signal);
+    signal?.throwIfAborted();
     if (JSON.stringify(this.store.read()) !== JSON.stringify(snapshot)) throw new AuthStateChangedError();
     if (!projectId) return creds;
     const next = { ...creds, projectId };
@@ -319,10 +327,13 @@ export class AntigravityAuth {
 
   // The credentials to use right now: the stored bundle, refreshed if near expiry, with the project id
   // bootstrapped if it is missing. undefined = not signed in.
-  current = async (): Promise<AntigravityCreds | undefined> => {
+  current = async (signal?: AbortSignal): Promise<AntigravityCreds | undefined> => {
+    signal?.throwIfAborted();
     const creds = this.store.read();
     if (!creds) return undefined;
     if ((!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) && (creds.projectId || !creds.accessToken)) return creds;
+    // A bounded caller owns its cancellation; it must not abort another caller's shared refresh.
+    if (signal) return this.refreshIfNeeded(creds, signal).then(current => this.withProject(current.creds, current.snapshot, signal));
     // Share project hydration too: two continuations must not write against the same old snapshot.
     this.currentInFlight ??= this.refreshIfNeeded(creds)
       .then(current => this.withProject(current.creds, current.snapshot))

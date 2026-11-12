@@ -4,7 +4,7 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.14.10] - 2026-11-12
 
 ### Added
 
@@ -13,6 +13,10 @@ All notable changes to **Wisp** are documented here. Format follows
 ### Changed
 
 - Update Wisp's Anthropic User-Agent and billing-version stamp together to 2.1.322; this does not replace the installed Claude Code client.
+
+### Surfaces
+
+- **VSIX: 1.14.10**, **terminal/npm: 2.2.13**, **wisp-slot: 1.7.6**. The companion receives the shared Claude profile enforcement and stamp; Codex catalogue/credential-refresh integration belongs to the terminal. Desktop protocol remains **5**. See [verification and limits](../../docs/releases/v2.2.13.md).
 
 ## [1.14.9] - 2026-11-12
 

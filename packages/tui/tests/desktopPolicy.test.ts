@@ -183,8 +183,9 @@ test('disable leaves profile model and invalid original model choices explicit/a
   });
 });
 test('known Grok wire effort stays advertised when optional public context metadata is unavailable', async () => fixture(async opts => {
-  const script = `globalThis.fetch=async()=>new Response('{}',{headers:{'content-type':'application/json'}}); const {readAliasCapabilities}=await import(${JSON.stringify(resolve(import.meta.dir, '../src/codexCatalog.ts'))}); const get=await readAliasCapabilities({routing:{families:{},aliases:[{name:'grok',target:{providerId:'xai',model:'grok-4.6'}}]}},{}); console.log(JSON.stringify(get({providerId:'xai',model:'grok-4.6'})??null));`;
+  const script = `globalThis.fetch=async()=>new Response('{}',{headers:{'content-type':'application/json'}}); const {WispHome}=await import(${JSON.stringify(resolve(import.meta.dir, '../../core/src/index.ts'))}); const {readAliasCapabilities}=await import(${JSON.stringify(resolve(import.meta.dir, '../src/codexCatalog.ts'))}); const get=await readAliasCapabilities({routing:{families:{},aliases:[{name:'grok',target:{providerId:'xai',model:'grok-4.6'}}]}},new WispHome()); console.log(JSON.stringify(get({providerId:'xai',model:'grok-4.6'})??null));`;
   const result = Bun.spawnSync([process.execPath, '-e', script], { env: { ...process.env, WISP_HOME: opts.wispHome! } });
+  expect(result.stderr.toString()).toBe('');
   expect(result.exitCode).toBe(0); expect(JSON.parse(result.stdout.toString())).toMatchObject({ efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' });
 }));
 test('absent original model restores absence and native-name alias collisions remain untouched', async () => {

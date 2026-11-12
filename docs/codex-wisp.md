@@ -2,7 +2,7 @@
 
 For persistent signed-in desktop configuration, see [Codex desktop integration](codex-desktop.md). The launcher below remains available with its child-only configuration.
 
-Current source versions are terminal **2.2.9** and companion **1.14.6**. Picker Aliases and
+Prepared source versions are terminal **2.2.13** and companion **1.14.10**. Picker Aliases and
 exact Codex model routes were introduced in terminal 2.1.5 / companion 1.13.8; `codex-wisp`
 itself was introduced in 2.1.4. The historical release-preparation evidence below does not
 establish the installed version. Older installed packages do not gain new behavior automatically.
@@ -40,7 +40,9 @@ only the launcher cannot repair a listener inherited from an older test/Bridge h
 Codex must already be installed. The launcher reads Wisp's existing port and Bridge secret,
 checks the numeric loopback listener without sending the secret, and starts Codex with a
 child-only Responses provider. It does not start a Bridge or edit either application's
-configuration or authentication. Codex still owns tools, approvals, sandbox policy and sessions.
+configuration or native Codex authentication. When Antigravity metadata is needed, Wisp's existing
+auth manager may refresh and persist that Provider's credentials. It never opens sign-in UI.
+Codex still owns tools, approvals, sandbox policy and sessions.
 
 Before starting the conversational child, the launcher checks the effective native configuration
 through `app-server config/read`, with a four-second deadline. Codex merges provider tables, so
@@ -130,8 +132,11 @@ fail at the Bridge. These limits do not assert that an arbitrary backend support
 Each Alias and exact Codex route carries its Target's own context limit. For Codex Targets,
 the account's default `context_window` and supported `max_context_window` stay separate;
 the larger maximum does not automatically become the default. Antigravity uses the exact
-account model's `maxTokens`. No account metadata is reused across Antigravity launches.
-Signed-out, absent and invalid metadata leave the window unspecified.
+account model's `maxTokens`. Refresh of expiring Antigravity credentials and metadata discovery
+share one four-second deadline. Existing account-change guards protect stored credentials, and
+a sign-out/account switch during discovery discards the old account's result. No account metadata
+is reused across Antigravity launches. Signed-out, failed and invalid metadata leave the window
+unspecified; a failed refresh never erases the saved credentials.
 
 Wisp retains Codex's 95% effective-context allowance for these rows. With no native override,
 a 1,048,576-token Target therefore reports **996,147** usable tokens, and a 500,000-token Target
@@ -244,7 +249,7 @@ The optional npm directory must come from `npm pack`, with the matching unpacked
 package under `node_modules/@tsd47216/wisp-router-<platform>-<arch>`. Stage copies of the npm
 templates, stamp both package versions and every optional dependency to the terminal version,
 and put the compiled binary in the platform package's `bin/` before packing. The checked-in npm
-source templates currently contain `2.2.9`, including every platform optional dependency in the
+source templates currently contain `2.2.13`, including every platform optional dependency in the
 thin shell. The release workflow stamps the tag version into those manifests and dependency pins
 before packing. The check copies artifacts outside the repository, empties the child PATH,
 and verifies launcher failures, existing commands, the compiled Responses route, config/auth

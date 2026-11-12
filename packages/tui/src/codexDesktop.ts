@@ -4,8 +4,8 @@ import { homedir, tmpdir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { randomUUID } from 'crypto';
 import { request } from 'http';
-import { DEFAULT_BRIDGE_PORT, DESKTOP_PROTOCOL, WispHome, wispHomeDir, desktopStatePath, isUnusableStore, type WispConfig, type WispAuth } from '@wisp/core';
-import { mergeDesktopCatalog, parseNativeCatalog, readAliasCapabilities, type NativeCatalog, type TargetCapabilities } from './codexCatalog';
+import { DEFAULT_BRIDGE_PORT, DESKTOP_PROTOCOL, WispHome, wispHomeDir, desktopStatePath, isUnusableStore } from '@wisp/core';
+import { mergeDesktopCatalog, parseNativeCatalog, readAliasCapabilities, type NativeCatalog } from './codexCatalog';
 import { resolveCodex } from './codex-wisp';
 const { TOML } = require('bun') as { TOML: { parse: (text: string) => Record<string, any> } };
 
@@ -23,7 +23,7 @@ export type DesktopOptions = {
   env?: NodeJS.ProcessEnv;
   probe?: (port: number, secret: string) => Promise<void>;
   catalogs?: (source?: string) => Promise<{ native: NativeCatalog; input: NativeCatalog }>;
-  capabilities?: (config: WispConfig, auth: WispAuth) => Promise<(target: { providerId: string; model: string }) => TargetCapabilities | undefined>;
+  capabilities?: typeof readAliasCapabilities;
   write?: (path: string, text: string) => void;
 };
 export const atomicDesktopWrite = (path: string, text: string): void => {
@@ -197,7 +197,7 @@ export const desktopAction = async (action: 'enable' | 'status' | 'refresh' | 'd
   const activating = !state;
   const native = state ? nativeSnapshot(state) : options.catalogs ? parseNativeCatalog((await options.catalogs()).native) : await loadCatalogs(codexHome, options.env ?? process.env);
   const antigravityInstructions = options.antigravityInstructions ?? (state?.antigravityInstructions === 'hoist-developer' ? 'hoist-developer' : 'strict');
-  const { catalog, excludedTargets } = mergeDesktopCatalog(native, config, await (options.capabilities ?? readAliasCapabilities)(config, auth), antigravityInstructions === 'hoist-developer');
+  const { catalog, excludedTargets } = mergeDesktopCatalog(native, config, await (options.capabilities ?? readAliasCapabilities)(config, home), antigravityInstructions === 'hoist-developer');
   let next = raw;
   if (!state) {
     const lines = ownedLines(raw); const fields: Record<string, Owned> = {};
