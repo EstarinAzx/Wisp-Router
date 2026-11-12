@@ -32,6 +32,10 @@ import { desktopUpstreamFailure } from './desktopUpstream';
 import { forwardDesktopNative, desktopTargetIssue, DESKTOP_PROTOCOL, type NativeFetch } from './codexDesktop';
 import { DESKTOP_VOICE_CALL_PATH, forwardDesktopVoiceCall, forwardDesktopVoiceUpgrade, rejectVoiceUpgrade, type NativeVoiceRequest } from './codexDesktopVoice';
 import { codexCatalog } from './codexModels';
+import { getModelsDevCatalog } from './modelsDev';
+import { lookupModelsDevCaps } from './catalog';
+import { CLAUDE_CONTEXT_HEADER, CLAUDE_CONTEXT_PREFIX, resolveClaudeContextRoute, createClaudeContextProfile,
+  readClaudeContextWindow, signClaudeContext, readClaudeContext, validateClaudeContextTarget, type ClaudeContextState } from './claudeContext';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
@@ -52,7 +56,7 @@ import { GeminiInteractionError } from './geminiInteractions';
 import type { GeminiReplayContext } from './home';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
-import { antigravityStream, antigravityNativeResponse } from './antigravityClient';
+import { antigravityStream, antigravityNativeResponse, fetchAntigravityModelInfos } from './antigravityClient';
 import { createAntigravityReplayContext, hoistAntigravityDesktopInstructions, isAntigravityArgonModel, type AntigravityReplayContext, type AntigravityTurn } from './antigravity';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE, chatCompletionsUsage,
@@ -306,6 +310,36 @@ const buildCompletion = (meta: ChunkMeta, text: string, calls: { id: string; nam
 // command (and slice #38's panel toggle) drive the exact same server; OFF until start() is called.
 export const createBridgeServer = (deps: BridgeDeps) => {
   let server: http.Server | undefined;
+  const claudeContextState = (): ClaudeContextState => ({ providers: deps.providers, map: deps.routingMap(),
+    activeProviderId: deps.activeProviderId(), modelMap: deps.modelMap(), customBaseUrl: deps.customBaseUrl() });
+  const handleClaudeContext = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let requested: unknown;
+    try {
+      const body = JSON.parse(await readBody(req, 8192));
+      if (!body || typeof body !== 'object' || Array.isArray(body) || (body.model !== undefined && typeof body.model !== 'string')) throw new Error();
+      requested = body.model;
+    } catch { return sendError(res, 400, 'Expected a JSON object with an optional Wisp model name.'); }
+    try {
+      const resolved = resolveClaudeContextRoute(requested as string | undefined, claudeContextState());
+      const provider = deps.providers.find(p => p.id === resolved.target.providerId)!;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const window = await Promise.race([
+        readClaudeContextWindow(provider, resolved.target.model, {
+          codex: async () => (await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolved.baseUrl })).models.find(m => m.id === resolved.target.model),
+          antigravity: async () => {
+            const creds = await deps.antigravityCreds?.();
+            return creds ? (await fetchAntigravityModelInfos(creds, resolved.baseUrl)).find(m => m.id === resolved.target.model) : undefined;
+          },
+          catalogue: async () => lookupModelsDevCaps(await getModelsDevCatalog(AbortSignal.timeout(4000)),
+            provider.catalogKey ?? (isAnthropicProvider(provider) ? 'anthropic' : isXaiProvider(provider) ? 'xai' : ''), resolved.target.model),
+        }),
+        new Promise<{ contextWindow: number; source: 'fallback' }>(resolve => { timer = setTimeout(() => resolve({ contextWindow: 128000, source: 'fallback' }), 4500); }),
+      ]).finally(() => clearTimeout(timer));
+      const profile = createClaudeContextProfile(resolved.route, resolved, window);
+      validateClaudeContextTarget(profile, profile.id, claudeContextState());
+      return sendJson(res, 200, { profile, token: signClaudeContext(profile, deps.accessSecret()) });
+    } catch (error) { return sendError(res, 400, error instanceof Error ? error.message : 'Could not resolve Claude context target.'); }
+  };
   const requestContext = new AsyncLocalStorage<{ res: http.ServerResponse; log?: SessionRequestLog; failed?: boolean; baseRouteLogged?: boolean }>();
   const beginLog = (protocol: SessionLogProtocol, identity?: unknown): void => {
     const context = requestContext.getStore();
@@ -1051,7 +1085,15 @@ export const createBridgeServer = (deps: BridgeDeps) => {
 
     // The Routing map (#51) picks the answering Provider: Provider id → Alias → Family fuzzy (the
     // background tier's raw claude-* ids land here when their family row is set) → Active fallback.
-    const route = routeFor(parsed.model);
+    let route: RouteMatch | undefined;
+    const contextToken = req.headers[CLAUDE_CONTEXT_HEADER];
+    if (contextToken !== undefined || parsed.model.startsWith(CLAUDE_CONTEXT_PREFIX)) {
+      try {
+        const profile = readClaudeContext(contextToken, deps.accessSecret());
+        const current = validateClaudeContextTarget(profile, parsed.model, claudeContextState());
+        route = { provider: deps.providers.find(p => p.id === current.target.providerId)!, pinnedModel: current.target.model, matched: 'alias' };
+      } catch (error) { return sendError(res, 409, error instanceof Error ? error.message : 'Relaunch claude-wisp to select this target.', 'invalid_request_error'); }
+    } else route = routeFor(parsed.model);
     if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
     const provider = route.provider;
     if (isGeminiApiProvider(provider)) return sendError(res, 400, 'Gemini API is available only on the qualified custom Responses route.');
@@ -1241,6 +1283,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     if (req.url?.startsWith('/codex-desktop/') && !req.headers['x-api-key']) return sendError(res, 401, 'Desktop access secret required');
     if (!authOk(req, deps.accessSecret())) return sendError(res, 401, 'invalid or missing access secret');
     const url = req.url ?? '';
+    if (req.method === 'POST' && url === '/claude-code/context') return handleClaudeContext(req, res);
     if (req.method === 'GET' && url === '/codex-desktop/status') return sendJson(res, 200, { protocol: DESKTOP_PROTOCOL });
     if (req.method === 'POST' && url.split('?')[0] === DESKTOP_VOICE_CALL_PATH) {
       const controller = new AbortController(); res.on('close', () => { if (!res.writableEnded) controller.abort(); });

@@ -155,11 +155,11 @@ describe('Codex conversation cache continuity', () => {
 });
 
 // POST over node http (NOT fetch — fetch is stubbed for the upstream xai call) → { status, body }.
-const post = (port: number, path: string, payload: unknown): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> =>
+const post = (port: number, path: string, payload: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> =>
   new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
     const req = http.request(
-      { host: '127.0.0.1', port, path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: 'Bearer secret' } },
+      { host: '127.0.0.1', port, path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: 'Bearer secret', ...headers } },
       (res) => { let body = ''; res.setEncoding('utf8'); res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers })); },
     );
     req.on('error', reject);
@@ -185,6 +185,43 @@ const runServer = async (deps: BridgeDeps, fn: (port: number) => Promise<void>):
   await server.start();
   try { await fn(port); } finally { server.stop(); }
 };
+
+describe('Claude launcher context contract', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('issues a 500K profile for the pinned Grok alias and refuses alternate or changed targets before upstream', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes('models.dev')) return new Response(JSON.stringify({ xai: { models: { 'grok-4.7': { limit: { context: 500000 } } } } }));
+      sent.push(JSON.parse(init!.body as string).model); return grokSse();
+    });
+    const map: RoutingMap = { families: {}, aliases: [{ name: 'grok', target: { providerId: 'xai', model: 'grok-4.7' } }] };
+    await runServer(makeDeps({ routingMap: () => map }), async port => {
+      const opened = await post(port, '/claude-code/context', { model: 'grok' });
+      expect(opened.status, opened.body).toBe(200);
+      const { profile, token } = JSON.parse(opened.body);
+      expect(profile.contextWindow).toBe(500000);
+      const headers = { 'x-wisp-claude-context': token };
+      const request = (model: string, extra = headers) => post(port, '/v1/messages', { model, stream: true, max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] }, extra);
+      expect((await request(profile.id)).status).toBe(200);
+      expect(sent).toEqual(['grok-4.7']);
+      expect((await request('claude-opus-5')).status).toBe(409);
+      expect((await request(profile.id, {})).status).toBe(409);
+      expect((await request(profile.id, { 'x-wisp-claude-context': 'invalid' })).status).toBe(409);
+      map.aliases[0].target.model = 'grok-build';
+      expect((await request(profile.id)).status).toBe(409);
+      expect(sent).toEqual(['grok-4.7']);
+    });
+  });
+
+  it('requires authentication and rejects unknown routes without credentialed inference', async () => {
+    await runServer(makeDeps({}), async port => {
+      expect((await post(port, '/claude-code/context', {}, { Authorization: '' })).status).toBe(401);
+      const reply = await post(port, '/claude-code/context', { model: 'missing' });
+      expect(reply.status).toBe(400);
+    });
+  });
+});
 
 describe('Bridge — Grok dispatch (#95)', () => {
   afterEach(() => vi.unstubAllGlobals());

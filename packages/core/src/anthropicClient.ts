@@ -108,8 +108,8 @@ export const selectAnthropicBetas = (model: string): string => {
   ].join(',');
 };
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
-// match (the backend ties the cc_version to the claude-cli UA). Tracks the shipping claude-cli (2.1.258,
-// 2026-09-02); the cc_version hash is UNVALIDATED (#148), so the bump can't break an accepted request.
+// match (the backend ties the cc_version to the claude-cli UA). Updated to the installed 2.1.322 on
+// 2026-11-12; wire regression checks cover both fields. Live backend acceptance is separate evidence.
 // The beta token list above is still the 2.1.216 capture — only the advertised version moved.
 // This pin is a FLOOR the backend enforces per-model, not decoration: a model newer than the advertised
 // version answers 400 `claude_code_version_too_old` naming the minimum it wants (claude-fable-5-1,
@@ -117,7 +117,7 @@ export const selectAnthropicBetas = (model: string): string => {
 // the live picker is therefore the trigger to re-check this constant against the shipping CLI. Live probe
 // 2026-09-02 drove fable-5-1 at both versions with an unchanged beta list — 400 at 2.1.219, 200 at
 // 2.1.258 — so the floor is the version alone; no beta token was implicated.
-const CLAUDE_CODE_VERSION = '2.1.258';
+const CLAUDE_CODE_VERSION = '2.1.322';
 const ANTHROPIC_USER_AGENT = `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`;
 
 // The Stainless SDK headers real claude emits — its bundled @anthropic-ai/sdk is a Stainless build that

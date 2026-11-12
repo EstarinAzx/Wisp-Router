@@ -1,48 +1,12 @@
 #!/usr/bin/env bun
-// ---------------- claude-wisp.ts — launch Claude Code pre-wired to the Bridge ---------------- //
-
-/*
- * Depends on:
- *   - node child_process / fs / path: spawn `claude`, resolve its Windows shim.
- *   - @wisp/core: buildClaudeLaunch (the pure env contract — Bridge trio + CLAUDE_BINARY — plus argv), DEFAULT_BRIDGE_PORT.
- *   - ./store: the shared ~/.wisp handle.
- *
- * Data shapes: none of its own — ClaudeLaunch comes from core.
- *
- * A launcher, not a manager (#64): env lands on the CHILD only, argv passes through verbatim, the
- * exit code mirrors the child's. The Bridge must already be up — this never auto-starts one.
- */
-
-import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+// Launch the installed Claude Code with a child-only, target-bound context budget.
+import { spawn, execFile } from 'child_process';
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, delimiter } from 'path';
-import { DEFAULT_BRIDGE_PORT, buildClaudeLaunch } from '@wisp/core';
-import { home } from './store';
-
-// ----------------------------- Store reads ----------------------------- //
-
-// Same port rule as the hosts (bridge.ts / extension.ts) — duplicated as one expression rather than
-// importing tui/bridge.ts, which would drag openai + the whole engine into every claude launch.
-const port = home.readConfig().bridge?.port ?? DEFAULT_BRIDGE_PORT;
-const address = `http://127.0.0.1:${port}`;
-
-// Read-only: a host ensures the secret exists when it starts, so "no secret on disk" means no Bridge
-// has ever run from this ~/.wisp — writing one here would mask that signal.
-const secret = home.readAuth().bridgeSecret?.trim() ?? '';
-
-// ----------------------------- Bridge probe ----------------------------- //
-
-// Any HTTP response proves a live listener — even a 401 means the Bridge is up, so the probe sends
-// no secret (a squatter on the port must never see it). Only a refused / timed-out connection is
-// "down". Never auto-start: two hosts on the shared port is the #63 loud-fail.
-const bridgeUp = async (): Promise<boolean> => {
-  try {
-    await fetch(`${address}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    return true;
-  } catch {
-    return false;
-  }
-};
+import { tmpdir } from 'os';
+import { request } from 'http';
+import { DEFAULT_BRIDGE_PORT, WispHome, readClaudeContext, type ClaudeContextProfile } from '@wisp/core';
+import { parseClaudeContextArgs, buildClaudeContextLaunch, supportsClaudeContext, resolveClaudeContextSelection } from './claudeContextLaunch';
 
 // ----------------------------- Windows shim resolution ----------------------------- //
 
@@ -74,37 +38,83 @@ const quoteForCmd = (a: string): string =>
     ? `"${a.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`
     : a;
 
-// ----------------------------- Launch ----------------------------- //
-
-const run = async (): Promise<void> => {
-  if (!secret) {
-    console.error('No Bridge secret found in Wisp home — start the Bridge first: run "wisp serve" (or /bridge in the TUI).');
-    process.exit(1);
-  }
-  if (!(await bridgeUp())) {
-    console.error(`Bridge not reachable at ${address} — start it first: run "wisp serve" (or /bridge in the TUI).`);
-    process.exit(1);
-  }
-
-  const launch = buildClaudeLaunch(port, secret, process.argv.slice(2));
-  const env = { ...process.env, ...launch.env };
-  const claude = resolveClaude();
-
-  // .cmd shims can only run through cmd.exe: one hand-quoted line, verbatim so node doesn't re-quote.
-  const child = claude.viaCmd
-    ? spawn('cmd.exe', ['/d', '/s', '/c', `"${[quoteForCmd(claude.file), ...launch.args.map(quoteForCmd)].join(' ')}"`],
-        { stdio: 'inherit', env, windowsVerbatimArguments: true })
-    : spawn(claude.file, launch.args, { stdio: 'inherit', env });
-
-  child.on('error', (err) => {
-    console.error(`Could not start claude: ${err.message} — is Claude Code installed and on PATH?`);
-    process.exit(1);
+// The profile request stays on numeric loopback: no proxy, redirect or provider credential.
+const requestContext = (port: number, secret: string, model?: string): Promise<{ profile: ClaudeContextProfile; token: string }> =>
+  new Promise((resolve, reject) => {
+    const data = JSON.stringify(model === undefined ? {} : { model });
+    const req = request({ host: '127.0.0.1', port, path: '/claude-code/context', method: 'POST',
+      headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; if (body.length > 65536) req.destroy(new Error('Oversized Bridge context response.')); });
+      res.on('error', reject);
+      res.on('end', () => {
+        try {
+          if (res.statusCode !== 200) throw new Error(res.statusCode === 404
+            ? 'The running Wisp Bridge does not support context profiles. Update and restart the Bridge first.'
+            : `Bridge could not resolve this context profile (HTTP ${res.statusCode}). Check the selected Wisp route.`);
+          const value = JSON.parse(body);
+          const profile = readClaudeContext(value.token, secret);
+          resolve({ profile, token: value.token });
+        } catch (error) { reject(error); }
+      });
+    });
+    const timeout = setTimeout(() => req.destroy(new Error('Bridge context lookup timed out.')), 6500);
+    req.on('close', () => clearTimeout(timeout));
+    req.on('error', reject);
+    req.end(data);
   });
 
-  // Ctrl+C belongs to the child (Claude Code handles its own); the parent just waits and mirrors.
-  process.on('SIGINT', () => {});
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-  child.on('exit', (code) => process.exit(code ?? 1));
+const invocation = (claude: ReturnType<typeof resolveClaude>, args: string[]) => claude.viaCmd
+  ? { file: 'cmd.exe', args: ['/d', '/s', '/c', `"${[quoteForCmd(claude.file), ...args.map(quoteForCmd)].join(' ')}"`], windowsVerbatimArguments: true }
+  : { file: claude.file, args, windowsVerbatimArguments: false };
+
+const checkVersion = (claude: ReturnType<typeof resolveClaude>): Promise<void> => new Promise((resolve, reject) => {
+  const command = invocation(claude, ['--version']);
+  execFile(command.file, command.args, { timeout: 4000, maxBuffer: 4096, windowsHide: true,
+    windowsVerbatimArguments: command.windowsVerbatimArguments }, (error, stdout) => {
+    if (error || !supportsClaudeContext(stdout)) reject(new Error('Exact context budgets require Claude Code 2.1.322 or newer on PATH. Update Claude Code separately, then retry.'));
+    else resolve();
+  });
+});
+
+export const runClaudeWisp = async (args: string[] = process.argv.slice(2)): Promise<number> => {
+  let temporary: string | undefined;
+  try {
+    const parsed = parseClaudeContextArgs(args);
+    const home = new WispHome();
+    const port = home.readConfig().bridge?.port ?? DEFAULT_BRIDGE_PORT;
+    const secret = home.readAuth().bridgeSecret?.trim() ?? '';
+    if (!secret) throw new Error('No Bridge secret found in Wisp home ? start the Bridge first with wisp serve or /bridge.');
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid Wisp Bridge port.');
+    const claude = resolveClaude();
+    await checkVersion(claude);
+    const { profile, token } = await requestContext(port, secret, resolveClaudeContextSelection(parsed.model, process.env, secret));
+    const launch = buildClaudeContextLaunch(port, secret, profile, token, parsed, process.env);
+    temporary = mkdtempSync(join(tmpdir(), 'wisp-claude-context-'));
+    const settings = join(temporary, 'settings.json');
+    // User temp ACLs protect Windows; owner-only permissions protect POSIX, matching Wisp's store policy.
+    writeFileSync(settings, JSON.stringify(launch.settings), { encoding: 'utf8', mode: 0o600 });
+    const command = invocation(claude, ['--settings', settings, ...launch.args]);
+    console.error(`claude-wisp: ${profile.route} ? ${profile.target.model}; ${profile.contextWindow} context tokens (${profile.source}).`);
+    if (profile.source === 'fallback') console.error('Target capacity unavailable: using a conservative 128000-token budget.');
+    console.error('To change targets, exit and relaunch with --resume <session> --model <alias>. Other-target subagents/fallbacks are refused.');
+    return await new Promise<number>(resolve => {
+      const child = spawn(command.file, command.args, { stdio: 'inherit', env: launch.env, windowsVerbatimArguments: command.windowsVerbatimArguments });
+      const interrupt = () => {};
+      const terminate = () => child.kill('SIGTERM');
+      process.on('SIGINT', interrupt);
+      process.on('SIGTERM', terminate);
+      const finish = (code: number) => { process.off('SIGINT', interrupt); process.off('SIGTERM', terminate); resolve(code); };
+      child.once('error', () => { console.error('Could not start the installed Claude Code.'); finish(1); });
+      child.once('exit', code => finish(code ?? 1));
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : 'Could not prepare Claude Code context.');
+    return 1;
+  } finally {
+    if (temporary) rmSync(temporary, { recursive: true, force: true });
+  }
 };
 
-await run();
+if (import.meta.main) process.exitCode = await runClaudeWisp();

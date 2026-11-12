@@ -6,6 +6,20 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [Unreleased]
+
+### Added
+
+- Launch installed Claude Code with the selected Wisp target's exact context budget, including 500K models. Unknown limits are reported as a conservative fallback. Different targets require an explicit relaunch/resume; signed profiles prevent unsafe switches and changed routes from reaching generation.
+
+### Changed
+
+- Update Wisp's Anthropic User-Agent and billing-version stamp together to 2.1.322. This does not install or update Claude Code.
+
+### Surfaces
+
+- Terminal/npm owns the launcher; both Bridge hosts provide profiles and enforcement. The slot statusline understands generated launch identities. All three surfaces need their respective updates; publication and installation remain separate.
+
 ## [2.2.12] - 2026-11-12
 
 ### Fixed

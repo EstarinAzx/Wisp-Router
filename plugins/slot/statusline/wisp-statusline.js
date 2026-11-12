@@ -165,8 +165,16 @@ const clean = (n) => String(n).toLowerCase().replace(/^claude-wisp-/, '').replac
 const names = [stdin.model?.id, stdin.model?.display_name].filter(Boolean).map(clean);
 const alias = (cfg.routing?.aliases || []).find((a) => names.includes(String(a.name).toLowerCase()));
 const family = alias ? undefined : ['haiku', 'sonnet', 'opus', 'fable'].find((f) => names.join(' ').includes(f));
-const route = alias?.name || family;
-const target = alias?.target || (family && cfg.routing?.families?.[family]) || undefined;
+// The launch profile is child-local display data, never routing authority or a credential source.
+let launchProfile;
+try {
+  const p = JSON.parse(process.env.WISP_CLAUDE_CONTEXT_PROFILE || 'null');
+  const text = value => typeof value === 'string' && value.length > 0 && !/[\x00-\x1f\x7f]/.test(value);
+  if (p?.protocol === 1 && p.id === stdin.model?.id && /^wisp\/claude-ctx-[a-f0-9]{24}$/.test(p.id)
+    && text(p.route) && text(p.target?.model) && text(p.target?.providerId)) launchProfile = p;
+} catch { /* Ordinary Bridge sessions have no launcher profile. */ }
+const route = launchProfile?.route || alias?.name || family;
+const target = launchProfile?.target || alias?.target || (family && cfg.routing?.families?.[family]) || undefined;
 const heldCount = Object.keys(cfg.snapshots || {}).length;
 
 // The snapshot is only THIS session's turn when it is both recent and about the model we are routed to —

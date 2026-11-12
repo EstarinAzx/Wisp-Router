@@ -42,3 +42,4 @@ export * from './quota';
 export * from './quotaClient';
 export * from './slash';
 export * from './sessionLog';
+export * from './claudeContext';
