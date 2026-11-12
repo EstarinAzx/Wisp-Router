@@ -6,6 +6,18 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.2.14] - 2026-11-13
+
+### Fixed
+
+- Scope Antigravity quota and transient-failure cooldowns to the resolved target model. An exhausted Gemini/Carbon model no longer diverts unrelated Claude requests to direct Anthropic when switching models or family routes.
+- Attribute in-flight failures to the model actually dispatched, even if the selected model changes before the request finishes. Same-model fallback, explicit aliases and cooldown expiry retain their existing behavior.
+
+### Surfaces
+
+- **Terminal/npm: 2.2.14**, **companion VSIX: 1.14.11**, **wisp-slot: unchanged at 1.7.6**. Both Bridge hosts receive the shared routing fix. Desktop protocol remains **5**; provider settings are unchanged.
+- See [verification and limits](../../docs/releases/v2.2.14.md). Restart an existing Bridge to load newly installed code.
+
 ## [2.2.13] - 2026-11-12
 
 ### Added
