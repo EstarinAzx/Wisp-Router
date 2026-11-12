@@ -116,13 +116,41 @@ Catalog metadata is a startup snapshot: relaunch after adding an Alias or changi
 capabilities. Routing still resolves the live Wisp map on each request.
 
 Alias client tools use a conservative native profile, separate from backend capability metadata.
-Known Codex Target metadata comes from Wisp's account-scoped model catalog; other known context
-and image facts come from models.dev. Missing metadata means text only, no advertised effort
-choices and no claimed context limit. Native model discovery does not require signing into Wisp's
+Known Codex Target metadata comes from Wisp's account-scoped model catalog. Antigravity context
+limits come from its signed-in account's exact model row; other known context and image facts
+come from models.dev. Missing or failed context lookup leaves the limit unknown; it does not
+invent a larger window. Independently established effort choices remain available. Native model discovery does not require signing into Wisp's
 Codex Provider. Aliases advertise no service tiers, hosted search, original image detail or
 verbosity controls. Anthropic and Antigravity aliases remain text-only because the native client's
 image detail/order cannot be preserved by those Bridge paths. Unsupported explicit requests still
 fail at the Bridge. These limits do not assert that an arbitrary backend supports native tools.
+
+### Context windows
+
+Each Alias and exact Codex route carries its Target's own context limit. For Codex Targets,
+the account's default `context_window` and supported `max_context_window` stay separate;
+the larger maximum does not automatically become the default. Antigravity uses the exact
+account model's `maxTokens`. No account metadata is reused across Antigravity launches.
+Signed-out, absent and invalid metadata leave the window unspecified.
+
+Wisp retains Codex's 95% effective-context allowance for these rows. With no native override,
+a 1,048,576-token Target therefore reports **996,147** usable tokens, and a 500,000-token Target
+reports **475,000**. Installed Codex **0.167.1** also retains a 272,000 default with an 872,000
+maximum: **258,400** usable by default, or **828,400** when a larger native override is supplied.
+Wisp preserves `model_context_window` and `model_auto_compact_token_limit`; Codex interprets
+them and caps the requested window at the row's advertised maximum. A configured 1,000,000
+window on a 1,048,576 Target reports 950,000 usable tokens, not 996,147.
+
+Unknown rows retain native fallback behavior. In the same client check they reported 258,400
+usable tokens by default, or 950,000 with the 1,000,000 override. Those numbers are **client
+fallbacks, not verified backend capacities**. Relaunch to refresh metadata; ordinary model
+switching within the native conversation remains available and changes the effective window.
+
+Reproduce the source/compiled client check with
+`bun packages/tui/tests/nativeCodexContext.check.ts <fresh-evidence-directory>`.
+It uses synthetic account metadata, isolated homes and a loopback Responses fixture; it checks
+model switching, effective windows and unchanged settings/authentication. It does not establish
+full-window inference, automatic compaction end-to-end, or live-provider acceptance.
 
 The launcher groups configuration overrides before the native subcommand. This preserves Wisp's
 transport with Codex 0.153.x when callers write options such as `exec -c model_reasoning_effort=high`.
