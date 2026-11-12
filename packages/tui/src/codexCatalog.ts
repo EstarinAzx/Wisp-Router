@@ -169,11 +169,10 @@ const readAntigravityCapabilities = async (home: WispHome) => {
       snapshot = JSON.stringify(creds);
     },
   }, async () => false, () => {});
-  const creds = await auth.current(signal);
-  if (!creds?.accessToken) return [];
+  const creds = await auth.currentForDiscovery(signal);
+  if (!creds?.accessToken) return undefined;
   const models = await fetchAntigravityModelInfos(creds, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl, signal);
-  // A sign-out/account switch during discovery invalidates that account's metadata too.
-  return JSON.stringify(home.readAuth().antigravity) === snapshot ? models : [];
+  return { models, snapshot };
 };
 
 export const readAliasCapabilities = async (config: WispConfig, home: WispHome): Promise<(target: Target) => TargetCapabilities | undefined> => {
@@ -183,7 +182,7 @@ export const readAliasCapabilities = async (config: WispConfig, home: WispHome):
   const [publicCatalog, codex, antigravity] = await Promise.all([
     keyed ? getModelsDevCatalog(AbortSignal.timeout(4000)) : undefined,
     targets.some(t => t.providerId === 'codex') ? codexCatalog.get({ creds: auth.codex, baseUrl: PROVIDERS.find(p => p.id === 'codex')!.baseUrl }) : undefined,
-    targets.some(t => t.providerId === 'antigravity') ? readAntigravityCapabilities(home).catch(() => []) : [],
+    targets.some(t => t.providerId === 'antigravity') ? readAntigravityCapabilities(home).catch(() => undefined) : undefined,
   ]);
   return target => {
     const p = PROVIDERS.find(p => p.id === target.providerId);
@@ -195,7 +194,9 @@ export const readAliasCapabilities = async (config: WispConfig, home: WispHome):
       return info ? { contextInput: info.contextWindow, maxContextWindow: info.maxContextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
     }
     if (p.kind === 'antigravity-oauth') {
-      const contextInput = antigravity.find(model => model.id === target.model)?.contextWindow;
+      // Recheck at consumption, including account changes while other catalog reads were pending.
+      const contextInput = antigravity && JSON.stringify(home.readAuth().antigravity) === antigravity.snapshot
+        ? antigravity.models.find(model => model.id === target.model)?.contextWindow : undefined;
       // Argon exposes separate subscription SKUs; a caller cannot change one SKU's tier in place.
       if (isAntigravityArgonModel(target.model)) {
         const tier = target.model.slice(target.model.lastIndexOf('-') + 1);

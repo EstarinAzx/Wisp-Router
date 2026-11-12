@@ -59,6 +59,40 @@ test('metadata from a replaced Antigravity account is discarded', async () => {
   expect(home.readAuth().antigravity).toEqual({ signOutId: 'signed-out' });
 });
 
+test('account-scoped metadata does not wait for an unrelated project lookup', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wisp-no-project-')); homes.push(dir);
+  const home = new WispHome(dir);
+  home.writeAuth({ antigravity: { accessToken: 'valid', expiresAt: Date.now() + 3600000 } });
+  const calls: string[] = [];
+  fetchSpy.mockImplementation(async url => {
+    calls.push(String(url));
+    return Response.json({ models: { 'gemini-4-carbon-high': { maxTokens: 1048576 } } });
+  });
+  const config = configFor(['gemini-4-carbon-high']);
+  const caps = await readAliasCapabilities(config, home);
+  expect(mergeAliasCatalog({ models: [] }, config, caps).models[0].context_window).toBe(1048576);
+  expect(calls).toEqual([`${PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl}/v1internal:fetchAvailableModels`]);
+});
+
+test('account changes while another catalog is pending invalidate finished Antigravity discovery', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wisp-slow-catalog-')); homes.push(dir); process.env.WISP_HOME = dir;
+  const home = new WispHome(dir);
+  home.writeAuth({ antigravity: { accessToken: 'first', projectId: 'example-project-1' }, codex: { accessToken: 'synthetic', accountId: 'synthetic-slow' } });
+  fetchSpy.mockImplementation(async url => {
+    if (String(url).includes('registry.npmjs.org')) return Response.json({ version: '0.167.1' });
+    if (String(url).includes('chatgpt.com')) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      home.writeAuth({ antigravity: { signOutId: 'signed-out' } });
+      return Response.json({ models: [{ slug: 'codex-fixture', visibility: 'list', context_window: 272000 }] });
+    }
+    return Response.json({ models: { 'gemini-4-carbon-high': { maxTokens: 1048576 } } });
+  });
+  const config = configFor(['gemini-4-carbon-high']);
+  config.routing!.aliases.push({ name: 'codex-alias', target: { providerId: 'codex', model: 'codex-fixture' } });
+  const caps = await readAliasCapabilities(config, home);
+  expect(mergeAliasCatalog({ models: [] }, config, caps).models.map(model => model.context_window)).toEqual([null, 272000]);
+});
+
 test.each(['rejected', 'malformed', 'offline'])('a %s Antigravity refresh preserves stored credentials and unknown context', async mode => {
   const dir = mkdtempSync(join(tmpdir(), 'wisp-failed-refresh-')); homes.push(dir);
   const home = new WispHome(dir);
