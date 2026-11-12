@@ -101,3 +101,25 @@ test('unknown or invalid limits stay null in native descriptors', () => {
     expect(aliasDescriptor('unknown', 'fixture', { contextInput })).toMatchObject({ context_window: null, max_context_window: null });
   }
 });
+
+test('optional Antigravity discovery releases startup within four seconds and retains fixed effort', async () => {
+  const cleanup = new AbortController();
+  const calls: string[] = [];
+  fetchSpy.mockImplementation((url, init) => new Promise<Response>((_resolve, reject) => {
+    calls.push(String(url));
+    const signal = AbortSignal.any([init!.signal!, cleanup.signal]);
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending = rowsFor(configFor(['gemini-4-argon-high']), 'synthetic');
+  try {
+    const rows = await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Optional discovery exceeded its startup budget')), 4500);
+    })]);
+    expect(rows[0]).toMatchObject({ context_window: null, default_reasoning_level: 'high' });
+    expect(calls).toHaveLength(1);
+  } finally {
+    clearTimeout(timer); cleanup.abort(); await pending;
+  }
+}, 6000);

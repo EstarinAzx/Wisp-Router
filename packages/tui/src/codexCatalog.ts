@@ -166,7 +166,7 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
     keyed ? getModelsDevCatalog(AbortSignal.timeout(4000)) : undefined,
     targets.some(t => t.providerId === 'codex') ? codexCatalog.get({ creds: auth.codex, baseUrl: PROVIDERS.find(p => p.id === 'codex')!.baseUrl }) : undefined,
     targets.some(t => t.providerId === 'antigravity') && auth.antigravity?.accessToken
-      ? fetchAntigravityModelInfos(auth.antigravity, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl).catch(() => []) : [],
+      ? fetchAntigravityModelInfos(auth.antigravity, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl, AbortSignal.timeout(4000)).catch(() => []) : [],
   ]);
   return target => {
     const p = PROVIDERS.find(p => p.id === target.providerId);

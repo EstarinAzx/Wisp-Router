@@ -164,7 +164,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean, s
  * moves to the next host (a discovery read has no request id to keep stable and no 429 verdict to
  * classify), and the last host's failure surfaces in the API-error contract shape.
  */
-export const fetchAntigravityModelInfos = async (creds: AntigravityCreds, baseUrl?: string): Promise<AntigravityModelInfo[]> => {
+export const fetchAntigravityModelInfos = async (creds: AntigravityCreds, baseUrl?: string, signal?: AbortSignal): Promise<AntigravityModelInfo[]> => {
   const token = creds.accessToken;
   if (!token) throw new Error('Not signed in to Antigravity.');
   // Match the account-scoped Hub catalog request; generation still carries the project.
@@ -174,9 +174,11 @@ export const fetchAntigravityModelInfos = async (creds: AntigravityCreds, baseUr
 
   let lastError: Error = new Error('Antigravity API error 503: no Antigravity host available');
   for (const host of hosts) {
+    signal?.throwIfAborted();
     let res: Response;
     try {
-      res = await fetch(antigravityModelsUrl(host), { method: 'POST', headers, body, signal: AbortSignal.timeout(10_000) });
+      const timeout = AbortSignal.timeout(10_000);
+      res = await fetch(antigravityModelsUrl(host), { method: 'POST', headers, body, signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       continue;

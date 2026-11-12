@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchAntigravityModels } from '../src/antigravityClient';
+import { fetchAntigravityModels, fetchAntigravityModelInfos } from '../src/antigravityClient';
 import {
   parseAntigravityModels, parseAntigravityModelInfos, ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST, ANTIGRAVITY_HTTP_USER_AGENT,
   type AntigravityCreds,
@@ -119,6 +119,26 @@ describe('fetchAntigravityModels — the outbound request', () => {
 // ----------------------------- The host chain ----------------------------- //
 
 describe('fetchAntigravityModels — the host chain', () => {
+  it('does no discovery after the caller deadline has already expired', async () => {
+    const calls = stubFetch([jsonResponse(MODELS_PAYLOAD)]);
+    await expect(fetchAntigravityModelInfos(creds(), undefined, AbortSignal.abort(new Error('deadline')))).rejects.toThrow('deadline');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('aborts an in-flight discovery and stops the host chain at the caller deadline', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      calls.push(String(url));
+      const timer = setTimeout(() => resolve(jsonResponse(MODELS_PAYLOAD)), 50);
+      init.signal!.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal!.reason); }, { once: true });
+    }));
+    const pending = fetchAntigravityModelInfos(creds(), undefined, controller.signal);
+    controller.abort(new Error('deadline'));
+    await expect(pending).rejects.toThrow('deadline');
+    expect(calls).toHaveLength(1);
+  });
+
   it('falls to production when daily fails, and answers from it', async () => {
     const calls = stubFetch([jsonResponse({ error: 'nope' }, 500), jsonResponse(MODELS_PAYLOAD)]);
     const ids = await fetchAntigravityModels(creds());
