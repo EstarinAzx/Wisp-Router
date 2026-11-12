@@ -6,7 +6,7 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
-## [Unreleased]
+## [2.2.13] - 2026-11-12
 
 ### Added
 
@@ -16,9 +16,15 @@ Changes up to 2.0.10 are folded into the product changelog at
 
 - Update Wisp's Anthropic User-Agent and billing-version stamp together to 2.1.322. This does not install or update Claude Code.
 
+### Fixed
+
+- Advertise exact Antigravity account context limits in Codex Alias/model-route catalogues, and preserve Codex Targets' separate default and maximum windows. Native model switching and the 95% effective-context allowance remain intact.
+- Refresh expiring Antigravity credentials through the existing auth manager before catalogue discovery. Refresh and lookup share a four-second deadline; failures preserve credentials and unknown-limit fallbacks, and account changes invalidate stale metadata.
+
 ### Surfaces
 
-- Terminal/npm owns the launcher; both Bridge hosts provide profiles and enforcement. The slot statusline understands generated launch identities. All three surfaces need their respective updates; publication and installation remain separate.
+- **Terminal/npm: 2.2.13**, **companion VSIX: 1.14.10**, **wisp-slot: 1.7.6**. Terminal owns both launchers and Desktop catalogue setup; both Bridge hosts provide Claude profiles/enforcement and the Anthropic stamp. The slot statusline understands generated Claude launch identities. Desktop protocol remains **5**.
+- See [verification and limits](../../docs/releases/v2.2.13.md). Publication and installation remain separate.
 
 ## [2.2.12] - 2026-11-12
 

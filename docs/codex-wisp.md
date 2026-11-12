@@ -2,7 +2,7 @@
 
 For persistent signed-in desktop configuration, see [Codex desktop integration](codex-desktop.md). The launcher below remains available with its child-only configuration.
 
-Current source versions are terminal **2.2.9** and companion **1.14.6**. Picker Aliases and
+Prepared source versions are terminal **2.2.13** and companion **1.14.10**. Picker Aliases and
 exact Codex model routes were introduced in terminal 2.1.5 / companion 1.13.8; `codex-wisp`
 itself was introduced in 2.1.4. The historical release-preparation evidence below does not
 establish the installed version. Older installed packages do not gain new behavior automatically.
@@ -40,7 +40,9 @@ only the launcher cannot repair a listener inherited from an older test/Bridge h
 Codex must already be installed. The launcher reads Wisp's existing port and Bridge secret,
 checks the numeric loopback listener without sending the secret, and starts Codex with a
 child-only Responses provider. It does not start a Bridge or edit either application's
-configuration or authentication. Codex still owns tools, approvals, sandbox policy and sessions.
+configuration or native Codex authentication. When Antigravity metadata is needed, Wisp's existing
+auth manager may refresh and persist that Provider's credentials. It never opens sign-in UI.
+Codex still owns tools, approvals, sandbox policy and sessions.
 
 Before starting the conversational child, the launcher checks the effective native configuration
 through `app-server config/read`, with a four-second deadline. Codex merges provider tables, so
@@ -116,13 +118,44 @@ Catalog metadata is a startup snapshot: relaunch after adding an Alias or changi
 capabilities. Routing still resolves the live Wisp map on each request.
 
 Alias client tools use a conservative native profile, separate from backend capability metadata.
-Known Codex Target metadata comes from Wisp's account-scoped model catalog; other known context
-and image facts come from models.dev. Missing metadata means text only, no advertised effort
-choices and no claimed context limit. Native model discovery does not require signing into Wisp's
+Known Codex Target metadata comes from Wisp's account-scoped model catalog. Antigravity context
+limits come from its signed-in account's exact model row; other known context and image facts
+come from models.dev. Missing or failed context lookup leaves the limit unknown; it does not
+invent a larger window. Independently established effort choices remain available. Native model discovery does not require signing into Wisp's
 Codex Provider. Aliases advertise no service tiers, hosted search, original image detail or
 verbosity controls. Anthropic and Antigravity aliases remain text-only because the native client's
 image detail/order cannot be preserved by those Bridge paths. Unsupported explicit requests still
 fail at the Bridge. These limits do not assert that an arbitrary backend supports native tools.
+
+### Context windows
+
+Each Alias and exact Codex route carries its Target's own context limit. For Codex Targets,
+the account's default `context_window` and supported `max_context_window` stay separate;
+the larger maximum does not automatically become the default. Antigravity uses the exact
+account model's `maxTokens`. Refresh of expiring Antigravity credentials and metadata discovery
+share one four-second deadline. Existing account-change guards protect stored credentials, and
+a sign-out/account switch during discovery discards the old account's result. No account metadata
+is reused across Antigravity launches. Signed-out, failed and invalid metadata leave the window
+unspecified; a failed refresh never erases the saved credentials.
+
+Wisp retains Codex's 95% effective-context allowance for these rows. With no native override,
+a 1,048,576-token Target therefore reports **996,147** usable tokens, and a 500,000-token Target
+reports **475,000**. Installed Codex **0.167.1** also retains a 272,000 default with an 872,000
+maximum: **258,400** usable by default, or **828,400** when a larger native override is supplied.
+Wisp preserves `model_context_window` and `model_auto_compact_token_limit`; Codex interprets
+them and caps the requested window at the row's advertised maximum. A configured 1,000,000
+window on a 1,048,576 Target reports 950,000 usable tokens, not 996,147.
+
+Unknown rows retain native fallback behavior. In the same client check they reported 258,400
+usable tokens by default, or 950,000 with the 1,000,000 override. Those numbers are **client
+fallbacks, not verified backend capacities**. Relaunch to refresh metadata; ordinary model
+switching within the native conversation remains available and changes the effective window.
+
+Reproduce the source/compiled client check with
+`bun packages/tui/tests/nativeCodexContext.check.ts <fresh-evidence-directory>`.
+It uses synthetic account metadata, isolated homes and a loopback Responses fixture; it checks
+model switching, effective windows and unchanged settings/authentication. It does not establish
+full-window inference, automatic compaction end-to-end, or live-provider acceptance.
 
 The launcher groups configuration overrides before the native subcommand. This preserves Wisp's
 transport with Codex 0.153.x when callers write options such as `exec -c model_reasoning_effort=high`.
@@ -216,7 +249,7 @@ The optional npm directory must come from `npm pack`, with the matching unpacked
 package under `node_modules/@tsd47216/wisp-router-<platform>-<arch>`. Stage copies of the npm
 templates, stamp both package versions and every optional dependency to the terminal version,
 and put the compiled binary in the platform package's `bin/` before packing. The checked-in npm
-source templates currently contain `2.2.9`, including every platform optional dependency in the
+source templates currently contain `2.2.13`, including every platform optional dependency in the
 thin shell. The release workflow stamps the tag version into those manifests and dependency pins
 before packing. The check copies artifacts outside the repository, empties the child PATH,
 and verifies launcher failures, existing commands, the compiled Responses route, config/auth

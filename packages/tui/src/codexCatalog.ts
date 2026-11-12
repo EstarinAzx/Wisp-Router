@@ -7,11 +7,12 @@ import { join } from 'path';
 import {
   PROVIDERS, codexCatalog, codexEffortOptions, parseCodexModels, getModelsDevCatalog, lookupModelsDevCaps, validateCodexRoutes,
   anthropicThinkingEffort, xaiReasoning, antigravityAcceptsThinkingLevel, isAntigravityArgonModel, desktopTargetIssue,
-  type WispConfig, type WispAuth, type Provider, type Target, type ModelCaps,
+  fetchAntigravityModelInfos, AntigravityAuth,
+  type WispConfig, type WispHome, type Provider, type Target, type ModelCaps,
 } from '@wisp/core';
 
 export type NativeCatalog = { models: Record<string, unknown>[]; [key: string]: unknown };
-export type TargetCapabilities = ModelCaps & { efforts?: string[]; defaultEffort?: string };
+export type TargetCapabilities = ModelCaps & { maxContextWindow?: number; efforts?: string[]; defaultEffort?: string };
 
 export const parseNativeCatalog = (value: unknown): NativeCatalog => {
   // Reuse identity/envelope validation without reducing the complete native descriptors.
@@ -85,7 +86,8 @@ export const aliasDescriptor = (name: string, description: string, caps: TargetC
   web_search_tool_type: 'text', truncation_policy: { mode: 'bytes', limit: 10000 },
   supports_image_detail_original: false,
   context_window: Number.isSafeInteger(caps.contextInput) && caps.contextInput! > 0 ? caps.contextInput : null,
-  max_context_window: Number.isSafeInteger(caps.contextInput) && caps.contextInput! > 0 ? caps.contextInput : null, auto_compact_token_limit: null,
+  max_context_window: Number.isSafeInteger(caps.maxContextWindow) && caps.maxContextWindow! > 0 ? caps.maxContextWindow
+    : Number.isSafeInteger(caps.contextInput) && caps.contextInput! > 0 ? caps.contextInput : null, auto_compact_token_limit: null,
   effective_context_window_percent: 95, experimental_supported_tools: [], input_modalities: caps.vision ? ['text', 'image'] : ['text'],
   supports_search_tool: false, use_responses_lite: false, tool_mode: 'standard', multi_agent_version: 'v1',
 });
@@ -157,12 +159,30 @@ export const mergeDesktopCatalog = (native: NativeCatalog, config: WispConfig, c
   return { catalog: { ...catalog, models }, excludedTargets };
 };
 
-export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth): Promise<(target: Target) => TargetCapabilities | undefined> => {
+const readAntigravityCapabilities = async (home: WispHome) => {
+  const signal = AbortSignal.timeout(4000);
+  let snapshot: string | undefined;
+  const auth = new AntigravityAuth({
+    read: () => { const creds = home.readAuth().antigravity; snapshot = JSON.stringify(creds); return creds; },
+    write: (creds, expected) => {
+      home.writeAuth({ antigravity: creds }, expected === undefined ? undefined : { provider: 'antigravity', snapshot: JSON.stringify(expected ?? undefined) });
+      snapshot = JSON.stringify(creds);
+    },
+  }, async () => false, () => {});
+  const creds = await auth.currentForDiscovery(signal);
+  if (!creds?.accessToken) return undefined;
+  const models = await fetchAntigravityModelInfos(creds, PROVIDERS.find(p => p.id === 'antigravity')!.baseUrl, signal);
+  return { models, snapshot };
+};
+
+export const readAliasCapabilities = async (config: WispConfig, home: WispHome): Promise<(target: Target) => TargetCapabilities | undefined> => {
+  const auth = home.readAuth();
   const targets = [...(config.routing?.aliases.map(a => a.target) ?? []), ...Object.values(config.routing?.codexModels ?? {})];
   const keyed = targets.some(t => PROVIDERS.find(p => p.id === t.providerId)?.catalogKey || ['anthropic', 'xai'].includes(t.providerId));
-  const [publicCatalog, codex] = await Promise.all([
+  const [publicCatalog, codex, antigravity] = await Promise.all([
     keyed ? getModelsDevCatalog(AbortSignal.timeout(4000)) : undefined,
     targets.some(t => t.providerId === 'codex') ? codexCatalog.get({ creds: auth.codex, baseUrl: PROVIDERS.find(p => p.id === 'codex')!.baseUrl }) : undefined,
+    targets.some(t => t.providerId === 'antigravity') ? readAntigravityCapabilities(home).catch(() => undefined) : undefined,
   ]);
   return target => {
     const p = PROVIDERS.find(p => p.id === target.providerId);
@@ -171,16 +191,22 @@ export const readAliasCapabilities = async (config: WispConfig, auth: WispAuth):
       ? { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', vision: false } : undefined;
     if (p.kind === 'codex') {
       const info = codex?.models.find(m => m.id === target.model);
-      return info ? { contextInput: info.contextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
+      return info ? { contextInput: info.contextWindow, maxContextWindow: info.maxContextWindow, vision: info.inputModalities?.includes('image'), efforts: codexEffortOptions(info), defaultEffort: info.defaultEffort } : undefined;
     }
-    // Argon exposes separate subscription SKUs; a caller cannot change one SKU's tier in place.
-    if (p.kind === 'antigravity-oauth' && isAntigravityArgonModel(target.model)) {
-      const tier = target.model.slice(target.model.lastIndexOf('-') + 1);
-      return { efforts: [tier], defaultEffort: tier, vision: false };
+    if (p.kind === 'antigravity-oauth') {
+      // Recheck at consumption, including account changes while other catalog reads were pending.
+      const contextInput = antigravity && JSON.stringify(home.readAuth().antigravity) === antigravity.snapshot
+        ? antigravity.models.find(model => model.id === target.model)?.contextWindow : undefined;
+      // Argon exposes separate subscription SKUs; a caller cannot change one SKU's tier in place.
+      if (isAntigravityArgonModel(target.model)) {
+        const tier = target.model.slice(target.model.lastIndexOf('-') + 1);
+        return { contextInput, efforts: [tier], defaultEffort: tier, vision: false };
+      }
+      // Metadata does not widen the Bridge's text-only input or request-level effort support.
+      return antigravityAcceptsThinkingLevel(target.model)
+        ? { contextInput, efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' }
+        : contextInput ? { contextInput } : undefined;
     }
-    // Tiered rows accept these distinct request levels without public catalog metadata.
-    if (p.kind === 'antigravity-oauth') return antigravityAcceptsThinkingLevel(target.model)
-      ? { efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' } : undefined;
     const caps = lookupModelsDevCaps(publicCatalog, p.catalogKey ?? (p.kind === 'anthropic-oauth' ? 'anthropic' : p.kind === 'xai-oauth' ? 'xai' : ''), target.model);
     const efforts = ['low', 'medium', 'high', 'xhigh', 'max'].filter(effort => p.kind === 'anthropic-oauth'
       ? anthropicThinkingEffort(target.model, effort).output_config?.effort === effort

@@ -3,13 +3,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { createServer, type Server } from 'http';
 import { tmpdir } from 'os';
 import { delimiter, join, resolve } from 'path';
+import { WispHome } from '@wisp/core';
 
 import * as launcher from '../src/codex-wisp';
 import { catalogArguments, mergeAliasCatalog, parseNativeCatalog, readAliasCapabilities, readNativeCatalog, writeChildCatalog } from '../src/codexCatalog';
 test('Argon subscription rows advertise only their exact fixed tier without discovery I/O', async () => {
   const aliases = ['low', 'medium', 'high', 'unknown'].map(tier => ({ name: `argon-${tier}`, target: { providerId: 'antigravity', model: `gemini-4-argon-${tier}` } }));
   const config = { routing: { families: {}, aliases } };
-  const capabilities = await readAliasCapabilities(config, {});
+  const capabilities = await readAliasCapabilities(config, new WispHome(home));
   const rows = mergeAliasCatalog({ models: [] }, config, capabilities).models;
   for (const [index, tier] of ['low', 'medium', 'high'].entries()) {
     expect(rows[index]).toMatchObject({ default_reasoning_level: tier, supported_reasoning_levels: [{ effort: tier, description: `${tier} reasoning` }], input_modalities: ['text'] });
@@ -475,7 +476,7 @@ test('Antigravity catalog advertises distinct request-level choices only on elig
     { name: 'future', target: { providerId: 'antigravity', model: 'gemini-9.9-nova-tiered' } },
     { name: 'pinned', target: { providerId: 'antigravity', model: 'gemini-3.1-pro-high' } },
   ] } };
-  const capabilities = await readAliasCapabilities(config, {});
+  const capabilities = await readAliasCapabilities(config, new WispHome(home));
   const catalog = mergeAliasCatalog({ models: [] }, config, capabilities);
   for (const row of catalog.models.slice(0, 2)) {
     expect(row.supported_reasoning_levels).toEqual([

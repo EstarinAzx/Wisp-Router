@@ -217,7 +217,8 @@ export class AntigravityAuth {
   // processes share auth.json (extension + TUI), so RE-READ before refreshing (#59): if the other process
   // already rotated the token, use its bundle instead of firing our spent refresh token. A failed refresh is
   // non-fatal — keep the existing creds (they may still work; the live call surfaces a 401).
-  private refreshIfNeeded = async (creds: AntigravityCreds): Promise<{ creds: AntigravityCreds; snapshot: AntigravityCreds }> => {
+  private refreshIfNeeded = async (creds: AntigravityCreds, signal?: AbortSignal): Promise<{ creds: AntigravityCreds; snapshot: AntigravityCreds }> => {
+    signal?.throwIfAborted();
     if (!creds.refreshToken || !shouldRefreshAntigravityToken(creds, Date.now())) return { creds, snapshot: creds };
     const fresh = this.store.read();
     if (!fresh) throw new AuthStateChangedError();
@@ -225,6 +226,7 @@ export class AntigravityAuth {
     if (!shouldRefreshAntigravityToken(fresh, Date.now()) || !fresh.refreshToken) return retained;
     let next: AntigravityCreds;
     try {
+      const timeout = AbortSignal.timeout(15_000);
       const res = await fetch(ANTIGRAVITY_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -234,10 +236,11 @@ export class AntigravityAuth {
           client_id: ANTIGRAVITY_CLIENT_ID,
           client_secret: ANTIGRAVITY_CLIENT_SECRET,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
       if (!res.ok) { this.log(`[antigravity] token refresh failed (${res.status})`); return retained; }
       const payload = await res.json() as { access_token?: string; refresh_token?: string; expires_in?: number };
+      signal?.throwIfAborted();
       // Carry the project id over the rebuild — it belongs to the ACCOUNT, not the token, so a refresh must
       // not silently strip it and put every later turn back on the request-build 400.
       next = { ...(fresh.projectId ? { projectId: fresh.projectId } : {}), ...tokensToAntigravityCreds(payload, Date.now()) };
@@ -251,6 +254,7 @@ export class AntigravityAuth {
       // Google's refresh response omits refresh_token — keep the old one so the next refresh works.
       if (!next.refreshToken) next.refreshToken = fresh.refreshToken;
     } catch (err) {
+      signal?.throwIfAborted();
       this.log(`[antigravity] token refresh error: ${String(err)}`);
       return retained;
     } finally {
@@ -328,6 +332,13 @@ export class AntigravityAuth {
       .then(current => this.withProject(current.creds, current.snapshot))
       .finally(() => { this.currentInFlight = undefined; });
     return this.currentInFlight;
+  };
+
+  // Account metadata needs token refresh, not project bootstrap or another caller's shared work.
+  currentForDiscovery = async (signal: AbortSignal): Promise<AntigravityCreds | undefined> => {
+    signal.throwIfAborted();
+    const creds = this.store.read();
+    return creds ? (await this.refreshIfNeeded(creds, signal)).creds : undefined;
   };
 
   // Cheap signed-in check for UI/usability — read-only (no refresh or bootstrap round-trip).
